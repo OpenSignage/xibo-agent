@@ -33,6 +33,18 @@ if (!defined('XIBO_AGENT')) {
     define('XIBO_AGENT', true);
 }
 
+// データベース設定
+$db_config = [
+    'host' => 'localhost',
+    'database' => 'xibo_agent',
+    'username' => 'xibo_user',
+    'password' => 'xibo_password',
+    'charset' => 'utf8mb4',
+];
+
+// セッションの有効期限（秒）
+$session_lifetime = 3600 * 24; // 24時間
+
 // Xibo API設定
 $config = [
     'xibo_api_url' => '', // Xibo API URLを設定
@@ -46,4 +58,25 @@ $config = [
 $localConfigFile = __DIR__ . '/config-local.php';
 if (file_exists($localConfigFile)) {
     require_once $localConfigFile;
+}
+
+// デバッグログ関数
+function debugLog($message, $data = null, $level = 'debug') {
+    $levels = ['debug', 'info', 'warning', 'error'];
+    if (!in_array($level, $levels)) {
+        $level = 'debug';
+    }
+    
+    $logEntry = [
+        'timestamp' => date('Y-m-d H:i:s'),
+        'level' => $level,
+        'message' => $message,
+        'data' => $data
+    ];
+    
+    // 本番環境では適切なログ記録の実装に置き換える
+    // 開発環境用：
+    if ($level === 'error' || $level === 'warning') {
+        error_log(json_encode($logEntry, JSON_UNESCAPED_UNICODE));
+    }
 } 
