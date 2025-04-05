@@ -67,15 +67,20 @@ function callApi($data) {
         
     } catch (Exception $e) {
         // エラー時のレスポンス
-        return [
-            'status' => 'error',
-            'error' => $e->getMessage(),
-            'debug' => $debug ? [
+        $errorMessage = $e->getMessage();
+        $debug = null;
+        
+        if (defined('DEBUG_MODE') && DEBUG_MODE) {
+            $debug = [
+                'exception' => get_class($e),
                 'trace' => $e->getTraceAsString(),
                 'file' => $e->getFile(),
-                'line' => $e->getLine()
-            ] : null
-        ];
+                'line' => $e->getLine(),
+                'server' => $_SERVER
+            ];
+        }
+        
+        displayError($errorMessage, $debug);
     }
 }
 
@@ -139,7 +144,28 @@ function isAuthenticated() {
  * @return array|null ユーザー情報（未認証の場合はnull）
  */
 function getCurrentUser() {
-    return isAuthenticated() ? $_SESSION[SESSION_COOKIE_NAME] : null;
+    if (!isset($_SESSION['user'])) {
+        return null;
+    }
+    
+    try {
+        // データベースから最新のユーザー情報を取得
+        $db = Database::getInstance();
+        $stmt = $db->prepare("SELECT * FROM users WHERE id = ?");
+        $stmt->execute([$_SESSION['user']['id']]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($user) {
+            // セッションのユーザー情報を更新
+            $_SESSION['user'] = $user;
+            return $user;
+        }
+    } catch (Exception $e) {
+        // データベースエラーの場合はセッションの情報を返す
+        return $_SESSION['user'];
+    }
+    
+    return null;
 }
 
 /**
@@ -218,5 +244,68 @@ function validateCsrfToken($token) {
  */
 function isActiveTab($tabName, $currentTab) {
     return ($tabName === $currentTab) ? 'active' : '';
+}
+
+/**
+ * エラーメッセージを表示する
+ * @param string $message エラーメッセージ
+ * @param array $debug デバッグ情報（省略可）
+ * @return void
+ */
+function displayError($message, $debug = null) {
+    $response = [
+        'status' => 'error',
+        'error' => $message
+    ];
+    
+    if (defined('DEBUG_MODE') && DEBUG_MODE && $debug) {
+        $response['debug'] = $debug;
+    }
+    
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($response, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/**
+ * 認証が必要なルートかどうかをチェックする
+ * @param string $controller コントローラー名
+ * @param string $action アクション名
+ * @return bool 認証が必要な場合はtrue
+ */
+function requiresAuth($controller, $action) {
+    // 認証が不要なルート
+    $publicRoutes = [
+        'auth' => ['login', 'register', 'logout'],
+        'error' => ['404', '500']
+    ];
+    
+    return !isset($publicRoutes[$controller]) || !in_array($action, $publicRoutes[$controller]);
+}
+
+/**
+ * ログインページにリダイレクトする
+ * @return void
+ */
+function redirectToLogin() {
+    // シンボリックリンク環境でのリダイレクト
+    $loginUrl = '/agent/auth/login.php';
+    
+    // デバッグ情報の出力
+    error_log('=== Redirect Debug Info ===');
+    error_log('Login URL: ' . $loginUrl);
+    error_log('SCRIPT_NAME: ' . $_SERVER['SCRIPT_NAME']);
+    error_log('REQUEST_URI: ' . $_SERVER['REQUEST_URI']);
+    error_log('PHP_SELF: ' . $_SERVER['PHP_SELF']);
+    error_log('HTTP_HOST: ' . $_SERVER['HTTP_HOST']);
+    error_log('REQUEST_SCHEME: ' . $_SERVER['REQUEST_SCHEME']);
+    error_log('HTTP_X_FORWARDED_PROTO: ' . ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? 'not set'));
+    error_log('HTTP_X_FORWARDED_HOST: ' . ($_SERVER['HTTP_X_FORWARDED_HOST'] ?? 'not set'));
+    error_log('HTTP_REFERER: ' . ($_SERVER['HTTP_REFERER'] ?? 'not set'));
+    error_log('========================');
+    
+    // リダイレクト
+    header('Location: ' . $loginUrl);
+    exit;
 }
 ?> 

@@ -1,8 +1,0 @@
-# Xibo API エージェント - .htaccess
-# コントローラーへのパスリダイレクト
-
-# controller/handler.php へのリクエストを web/handler.php にリダイレクト
-RewriteEngine On
-RewriteRule ^controller/handler\.php$ handler.php [L]
-RewriteRule ^controller/xibo-api\.json$ xibo-api.json [L]
-RewriteRule ^controller/systemPrompt\.txt$ systemPrompt.txt [L] 

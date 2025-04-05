@@ -27,16 +27,32 @@
 // ベースパスの定義
 define('BASE_PATH', '.');
 
+// デバッグ設定
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 // 設定ファイルの読み込み
-require_once 'config.php';
-require_once 'includes/functions.php';
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/includes/functions.php';
 
 // セッション開始
 session_start();
 
 // リクエストURIからパスを取得
 $requestUri = $_SERVER['REQUEST_URI'];
-$baseDir = dirname($_SERVER['SCRIPT_NAME']);
+$baseDir = '/agent';
+
+// デバッグ情報の出力
+error_log('=== Application Start ===');
+error_log('Request URI: ' . $requestUri);
+error_log('Base Dir: ' . $baseDir);
+error_log('SCRIPT_NAME: ' . $_SERVER['SCRIPT_NAME']);
+error_log('PHP_SELF: ' . $_SERVER['PHP_SELF']);
+error_log('HTTP_HOST: ' . $_SERVER['HTTP_HOST']);
+error_log('========================');
+
+// ベースディレクトリ以降のパスを取得
 $path = substr($requestUri, strlen($baseDir));
 $path = trim($path, '/');
 
@@ -44,6 +60,19 @@ $path = trim($path, '/');
 $segments = explode('/', $path);
 $controller = $segments[0] ?? '';
 $action = $segments[1] ?? '';
+
+// コントローラーの存在確認
+$controllerFile = __DIR__ . '/controllers/' . ucfirst($controller) . 'Controller.php';
+
+if (defined('DEBUG_MODE') && DEBUG_MODE) {
+    error_log('=== Controller Debug Info ===');
+    error_log('Path: ' . $path);
+    error_log('Controller: ' . $controller);
+    error_log('Action: ' . $action);
+    error_log('Controller File: ' . $controllerFile);
+    error_log('File Exists: ' . (file_exists($controllerFile) ? 'Yes' : 'No'));
+    error_log('========================');
+}
 
 // ルーティングテーブル
 $routes = [
@@ -86,6 +115,16 @@ if (!$route) {
 // コントローラーとアクションの取得
 $controllerName = $route['controller'];
 $actionName = $route['action'];
+
+// 認証チェック
+if (requiresAuth($controllerName, $actionName)) {
+    // セッションからユーザー情報を取得
+    $currentUser = getCurrentUser();
+    if (!$currentUser) {
+        // 未認証の場合はログインページにリダイレクト
+        redirectToLogin();
+    }
+}
 
 // コントローラーファイルのパス
 $controllerFile = "controllers/{$controllerName}_controller.php";

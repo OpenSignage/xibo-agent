@@ -33,11 +33,14 @@ if (!defined('BASE_PATH')) {
         </div><!-- .container -->
     </main><!-- .main-content -->
     
-    <footer class="main-footer">
-        <div class="container">
-            <p>&copy; <?php echo date('Y'); ?> Xibo API エージェント</p>
+    <footer class="footer mt-auto py-3 bg-light">
+        <div class="container text-center">
+            <span class="text-muted">&copy; <?php echo date('Y'); ?> Xibo API エージェント</span>
         </div>
     </footer>
+    
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
     <!-- 基本JavaScript -->
     <script src="<?php echo BASE_PATH; ?>/assets/js/common.js"></script>
