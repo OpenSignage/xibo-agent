@@ -1,0 +1,56 @@
+OpenSignage/xibo-agent/
+├── .git/
+├── web/
+│   ├── メインファイル
+│   │   ├── index.php          # メインエントリーポイント
+│   │   ├── config.php         # Web設定
+│   │   ├── agent.php          # エージェント処理
+│   │   └── handler.php        # リクエスト処理
+│   │
+│   ├── API関連
+│   │   ├── api-handler.php    # API処理
+│   │   ├── api-trainer.php    # APIトレーニング
+│   │   └── xibo-api.json      # API仕様書
+│   │
+│   ├── インターフェース
+│   │   ├── dashboard_content.php  # ダッシュボード
+│   │   └── style.css             # スタイルシート
+│   │
+│   ├── サブディレクトリ
+│   │   ├── views/              # ビューテンプレート
+│   │   ├── includes/           # 共通ファイル
+│   │   ├── controllers/        # コントローラー
+│   │   ├── assets/            # 静的ファイル
+│   │   ├── auth/              # 認証関連
+│   │   ├── img/               # 画像ファイル
+│   │   ├── settings/          # 設定関連
+│   │   ├── vendor/            # 外部ライブラリ
+│   │   └── chat/              # チャット機能
+│   │
+│   └── その他
+│       ├── composer.json      # 依存関係
+│       ├── composer.lock      # 依存関係ロック
+│       └── .htaccess         # Apache設定
+│
+├── controller/
+│   ├── database.php          # データベース操作
+│   ├── chat_manager.php      # チャット管理
+│   ├── agent.php             # エージェントロジック
+│   ├── handler.php           # リクエストハンドラー
+│   ├── xibo-api.json         # API仕様書
+│   └── systemPrompt.txt      # システムプロンプト
+│
+├── config/
+│   ├── config.php            # メイン設定
+│   └── config-local.php      # ローカル設定
+│
+├── includes/
+│   └── utils.php             # ユーティリティ関数
+│
+├── logs/                     # ログファイル
+│
+└── ドキュメント
+    ├── README.md             # プロジェクト説明
+    ├── CONTRIBUTING.md       # コントリビューション
+    ├── copyright.txt         # 著作権情報
+    └── LICENSE               # ライセンス

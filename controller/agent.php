@@ -35,61 +35,8 @@ set_time_limit(120);
 
 // 設定ファイルは既にhandler.phpで読み込み済み ($config変数が利用可能)
 
-// デバッグログ出力関数
-function debugLog($message, $data = null, $level = 'debug') {
-    global $config;
-    
-    // デバッグモードがオフの場合は何もしない
-    if (isset($config['debug_mode']) && $config['debug_mode'] === false) {
-        return;
-    }
-    
-    // ログレベルの優先順位を定義
-    $logLevels = [
-        'debug' => 0,
-        'info' => 1,
-        'warning' => 2,
-        'error' => 3,
-        'critical' => 4
-    ];
-    
-    // 設定されたログレベル（デフォルトは'debug'）
-    $configLogLevel = isset($config['log_level']) ? strtolower($config['log_level']) : 'debug';
-    
-    // 現在のメッセージのログレベル
-    $currentLevel = strtolower($level);
-    
-    // 設定されたログレベルより低い優先度のメッセージは記録しない
-    if (!isset($logLevels[$currentLevel]) || !isset($logLevels[$configLogLevel])) {
-        // 不明なログレベルの場合はデフォルトの動作（すべてログに記録）
-    } else if ($logLevels[$currentLevel] < $logLevels[$configLogLevel]) {
-        // 設定されたログレベルより低い優先度のメッセージは記録しない
-        return;
-    }
-    
-    $logFile = __DIR__ . '/../logs/debug.log';
-    
-    // ログディレクトリが存在しない場合は作成
-    $logDir = dirname($logFile);
-    if (!file_exists($logDir)) {
-        mkdir($logDir, 0755, true);
-    }
-    
-    // タイムスタンプとログレベル付きメッセージを作成
-    $timestamp = date('Y-m-d H:i:s');
-    $logMessage = "[$timestamp][$currentLevel] $message";
-    
-    // データがある場合はJSON形式で追加
-    if ($data !== null) {
-        $jsonData = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-        $logMessage .= "\nData: $jsonData";
-    }
-    
-    $logMessage .= "\n" . str_repeat('-', 80) . "\n";
-    
-    // ファイルに書き込み
-    file_put_contents($logFile, $logMessage, FILE_APPEND);
-}
+// 共通ユーティリティ関数の読み込み
+require_once __DIR__ . '/../includes/utils.php';
 
 // APIトークンの取得（または保存済みの使用）
 function getXiboAccessToken() {
