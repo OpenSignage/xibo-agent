@@ -78,7 +78,17 @@ try {
         $db = Database::getInstance();
         $db->initializeTables();
     } catch (Exception $e) {
-        throw new Exception('データベース接続エラー: ' . $e->getMessage());
+        $errorMessage = 'データベース接続エラー: ';
+        if (strpos($e->getMessage(), 'Access denied') !== false) {
+            $errorMessage .= 'データベースのユーザー名またはパスワードが正しくありません。';
+        } elseif (strpos($e->getMessage(), 'Unknown database') !== false) {
+            $errorMessage .= 'データベースが存在しません。データベースを作成してください。';
+        } elseif (strpos($e->getMessage(), 'Connection refused') !== false) {
+            $errorMessage .= 'データベースサーバーに接続できません。サーバーが起動しているか確認してください。';
+        } else {
+            $errorMessage .= $e->getMessage();
+        }
+        throw new Exception($errorMessage);
     }
 
     // ユーザーとセッションマネージャーのインスタンス化

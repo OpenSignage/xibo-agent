@@ -28,6 +28,10 @@
 // デバッグモードを有効化（実稼働環境では無効化する）
 define('DEBUG_MODE', true);
 
+// エラーログの設定
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/../logs/debug.log');
+
 // 共通ユーティリティ関数の読み込み
 require_once __DIR__ . '/../includes/utils.php';
 
@@ -40,13 +44,16 @@ define('SESSION_COOKIE_NAME', 'xibo_session');
 
 // パス設定
 define('BASE_PATH', '.');
-define('INCLUDES_PATH', './includes');
-define('AUTH_PATH', './auth');
-define('SETTINGS_PATH', './settings');
-define('CHAT_PATH', './chat');
+define('INCLUDES_PATH', BASE_PATH . '/includes');
+define('AUTH_PATH', BASE_PATH . '/auth');
+define('SETTINGS_PATH', BASE_PATH . '/settings');
+define('CHAT_PATH', BASE_PATH . '/chat');
 
 // コンテンツタイプ
 define('CONTENT_TYPE_JSON', 'application/json');
+
+// ログインURL設定
+define('LOGIN_URL', AUTH_PATH . '/login.php');
 
 /**
  * APIエラーメッセージを整形して返す

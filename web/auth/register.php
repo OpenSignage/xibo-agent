@@ -111,51 +111,58 @@ require_once '../includes/header.php';
 ?>
 
 <div class="container">
-    <div class="register-container">
-        <?php if ($registerSuccess): ?>
-            <div class="success-message">
-                <h2>登録が完了しました</h2>
-                <p>アカウントが正常に作成されました。メインページにリダイレクトします...</p>
+    <div class="row justify-content-center mt-5">
+        <div class="col-md-6 col-lg-5">
+            <div class="card shadow-sm">
+                <div class="card-body p-4">
+                    <?php if ($registerSuccess): ?>
+                        <div class="alert alert-success">
+                            <h4 class="alert-heading">登録が完了しました</h4>
+                            <p class="mb-0">アカウントが正常に作成されました。メインページにリダイレクトします...</p>
+                        </div>
+                    <?php else: ?>
+                        <?php if (!empty($registerError)): ?>
+                            <div class="alert alert-danger"><?php echo htmlspecialchars($registerError); ?></div>
+                        <?php endif; ?>
+                        
+                        <h2 class="text-center mb-4">ユーザー登録</h2>
+                        <form method="post" action="register.php">
+                            <input type="hidden" name="action" value="register">
+                            
+                            <div class="mb-3">
+                                <label for="username" class="form-label">ユーザー名</label>
+                                <input type="text" class="form-control" id="username" name="username" required>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="email" class="form-label">メールアドレス</label>
+                                <input type="email" class="form-control" id="email" name="email" required>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="password" class="form-label">パスワード</label>
+                                <input type="password" class="form-control" id="password" name="password" required>
+                                <div class="form-text">8文字以上で入力してください</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="role" class="form-label">ロール</label>
+                                <select class="form-select" id="role" name="role" required>
+                                    <option value="user">一般ユーザー</option>
+                                    <option value="editor">編集者</option>
+                                    <option value="admin">管理者</option>
+                                </select>
+                            </div>
+                            
+                            <div class="d-grid gap-2">
+                                <button type="submit" class="btn btn-primary">登録</button>
+                                <a href="login.php" class="btn btn-link">ログインに戻る</a>
+                            </div>
+                        </form>
+                    <?php endif; ?>
+                </div>
             </div>
-        <?php else: ?>
-            <?php if (!empty($registerError)): ?>
-                <div class="error-message"><?php echo htmlspecialchars($registerError); ?></div>
-            <?php endif; ?>
-            
-            <h2>ユーザー登録</h2>
-            <form method="post" action="register.php" class="register-form">
-                <input type="hidden" name="action" value="register">
-                
-                <div class="form-group">
-                    <label for="username">ユーザー名</label>
-                    <input type="text" id="username" name="username" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="email">メールアドレス</label>
-                    <input type="email" id="email" name="email" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="password">パスワード</label>
-                    <input type="password" id="password" name="password" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="role">ロール</label>
-                    <select id="role" name="role" required>
-                        <option value="user">一般ユーザー</option>
-                        <option value="editor">編集者</option>
-                        <option value="admin">管理者</option>
-                    </select>
-                </div>
-                
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">登録</button>
-                    <a href="login.php" class="btn btn-link">ログインに戻る</a>
-                </div>
-            </form>
-        <?php endif; ?>
+        </div>
     </div>
 </div>
 

@@ -44,61 +44,50 @@ $extraScripts = $extraScripts ?? [];
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo escape($pageTitle); ?></title>
     
-    <!-- 基本CSS -->
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.2/css/all.min.css">
+    
+    <!-- カスタムCSS -->
     <link rel="stylesheet" href="../style.css">
-
+    
     <!-- favicon -->
     <link href="../img/favicon.ico" rel="shortcut icon"/>
-
-    <!-- Font Awsome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.2/css/all.min.css">
-
+    
     <!-- 追加CSS -->
     <?php foreach ($extraStyles as $style): ?>
     <link rel="stylesheet" href="<?php echo $style; ?>">
     <?php endforeach; ?>
-
-    <!-- Bootstrap style sheet -->
-    <link href="../vendor/twbs/bootstrap/dist/css/bootstrap.min.css" rel="stylesheet" media="screen">
-    
-    <!-- Bootstrap javascript -->
-    <script src="../vendor/twbs/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
 </head>
 <body>
     <header class="main-header">
-        <nav id="top-nav" class="navbar navbar-inverse navbar-fixed-top" role="navigation">
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
             <div class="container">
-                <div class="navbar-header">
-                    <img class="img-responsive logo leftflush header-logo" src="../img/logo.png" alt="<?php echo $productName; ?>" style="margin-right:20px"/>
-                    <button type="button" class="navbar-toggle" data-toggle="collapse" data-target="#ss-navbar">
-                        <span class="sr-only">Toggle navigation</span>
-                        <span class="icon-bar"></span>
-                        <span class="icon-bar"></span>
-                        <span class="icon-bar"></span>
-                    </button>
-                </div>
-                <div class="collapse navbar-collapse" id="ss-navbar">
-                    <ul class="nav navbar-nav">
-                        <li class="active"><a href="#"> AI Engine </a></li>
-<!--
-                        <li><a href=""></a></li>
-                        <li><a href=""></a></li>
-                        <li><a href=""></a></li>
-			<li><div class="fill-space">&nbsp;></div></li>
--->
-                        <li class="navbar-right"><div class="gcse-search"></div></li>
+                <a class="navbar-brand" href="#">
+                    <img src="../img/logo.png" alt="<?php echo $productName; ?>" height="30" class="d-inline-block align-text-top">
+                    <?php echo $productName; ?>
+                </a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav me-auto">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="#">AI Engine</a>
+                        </li>
                     </ul>
+                    <?php if (isAuthenticated()): ?>
+                    <div class="d-flex align-items-center">
+                        <span class="text-light me-3"><?php echo escape(getCurrentUser()['username'] ?? ''); ?></span>
+                        <a href="<?php echo BASE_PATH; ?>/auth/logout.php" class="btn btn-outline-light btn-sm">ログアウト</a>
+                    </div>
+                    <?php endif; ?>
                 </div>
-
-            <?php if (isAuthenticated()): ?>
-            <div class="user-info">
-                <span class="username"><?php echo escape(getCurrentUser()['username'] ?? ''); ?></span>
-                <a href="<?php echo BASE_PATH; ?>/auth/logout.php" class="logout-btn">ログアウト</a>
             </div>
-            <?php endif; ?>
-            </div>
-        </div>
+        </nav>
     </header>
     
     <main class="main-content">
-        <div class="container"><?php // メインコンテンツ開始 ?> 
+        <div class="container mt-5 pt-4"><?php // メインコンテンツ開始 ?> 

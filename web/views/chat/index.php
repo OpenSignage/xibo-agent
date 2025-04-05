@@ -25,19 +25,22 @@
  */
 ?>
 
-<div class="container">
-    <div class="row">
-        <div class="col-md-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h2>チャット</h2>
-                    <button id="clear-history" class="btn btn-danger btn-sm">履歴をクリア</button>
+<div class="container py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">チャット</h5>
+                    <button id="clear-history" class="btn btn-outline-danger btn-sm">
+                        <i class="fas fa-trash-alt me-1"></i>履歴をクリア
+                    </button>
                 </div>
-                <div class="card-body">
+                <div class="card-body p-0">
                     <div class="chat-container">
-                        <div id="chat-messages" class="chat-messages">
+                        <div id="chat-messages" class="chat-messages p-3">
                             <?php if (empty($chatHistory)): ?>
                                 <div class="text-center text-muted my-5">
+                                    <i class="fas fa-comments fa-3x mb-3"></i>
                                     <p>会話履歴がありません。メッセージを送信して会話を始めましょう。</p>
                                 </div>
                             <?php else: ?>
@@ -54,11 +57,13 @@
                             <?php endif; ?>
                         </div>
                         
-                        <div class="chat-input-container">
+                        <div class="chat-input-container border-top p-3">
                             <form id="chat-form" class="chat-form">
                                 <div class="input-group">
                                     <textarea id="message-input" class="form-control" placeholder="メッセージを入力..." rows="2"></textarea>
-                                    <button type="submit" class="btn btn-primary">送信</button>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-paper-plane"></i>
+                                    </button>
                                 </div>
                             </form>
                         </div>
@@ -79,44 +84,35 @@
 .chat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 15px;
     display: flex;
     flex-direction: column;
 }
 
 .chat-message {
     max-width: 80%;
-    margin-bottom: 15px;
-    padding: 10px 15px;
-    border-radius: 10px;
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 1rem;
     position: relative;
 }
 
 .user-message {
     align-self: flex-end;
-    background-color: #007bff;
+    background-color: var(--bs-primary);
     color: white;
 }
 
 .ai-message {
     align-self: flex-start;
-    background-color: #f1f1f1;
-    color: #333;
+    background-color: var(--bs-light);
+    color: var(--bs-dark);
 }
 
 .message-time {
-    font-size: 0.7rem;
-    margin-top: 5px;
+    font-size: 0.75rem;
+    margin-top: 0.25rem;
     text-align: right;
-}
-
-.chat-input-container {
-    padding: 15px;
-    border-top: 1px solid #ddd;
-}
-
-.chat-form {
-    display: flex;
+    opacity: 0.8;
 }
 
 .chat-form .input-group {
@@ -125,6 +121,17 @@
 
 #message-input {
     resize: none;
+    border-right: none;
+}
+
+#message-input:focus {
+    box-shadow: none;
+    border-color: var(--bs-primary);
+}
+
+.chat-form .btn-primary {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
 }
 </style>
 
@@ -181,7 +188,7 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             if (data.status === 'success') {
                 // チャット履歴をクリア
-                chatMessages.innerHTML = '<div class="text-center text-muted my-5"><p>会話履歴がありません。メッセージを送信して会話を始めましょう。</p></div>';
+                chatMessages.innerHTML = '<div class="text-center text-muted my-5"><i class="fas fa-comments fa-3x mb-3"></i><p>会話履歴がありません。メッセージを送信して会話を始めましょう。</p></div>';
             } else {
                 alert(data.message || 'エラーが発生しました');
             }
@@ -195,42 +202,26 @@ document.addEventListener('DOMContentLoaded', function() {
     // チャット履歴の更新
     function updateChatHistory(history) {
         if (history.length === 0) {
-            chatMessages.innerHTML = '<div class="text-center text-muted my-5"><p>会話履歴がありません。メッセージを送信して会話を始めましょう。</p></div>';
+            chatMessages.innerHTML = '<div class="text-center text-muted my-5"><i class="fas fa-comments fa-3x mb-3"></i><p>会話履歴がありません。メッセージを送信して会話を始めましょう。</p></div>';
             return;
         }
         
         let html = '';
         history.forEach(message => {
-            const isUser = message.is_user === '1';
-            const messageClass = isUser ? 'user-message' : 'ai-message';
-            const messageContent = message.message.replace(/\n/g, '<br>');
-            const messageTime = new Date(message.created_at).toLocaleString('ja-JP', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-            
             html += `
-                <div class="chat-message ${messageClass}">
+                <div class="chat-message ${message.is_user ? 'user-message' : 'ai-message'}">
                     <div class="message-content">
-                        ${messageContent}
+                        ${message.message.replace(/\n/g, '<br>')}
                     </div>
                     <div class="message-time">
-                        ${messageTime}
+                        ${new Date(message.created_at).toLocaleString('ja-JP')}
                     </div>
                 </div>
             `;
         });
         
         chatMessages.innerHTML = html;
-        
-        // 最新のメッセージまでスクロール
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
-    
-    // 初期表示時に最新のメッセージまでスクロール
-    chatMessages.scrollTop = chatMessages.scrollHeight;
 });
 </script> 

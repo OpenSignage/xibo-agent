@@ -1,0 +1,312 @@
+[05-Apr-2025 23:27:40 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[05-Apr-2025 23:27:40 Asia/Tokyo] === Application Start ===
+[05-Apr-2025 23:27:40 Asia/Tokyo] Request URI: /agent/
+[05-Apr-2025 23:27:40 Asia/Tokyo] Base Dir: /agent
+[05-Apr-2025 23:27:40 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:27:40 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:27:40 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:27:40 Asia/Tokyo] ========================
+[05-Apr-2025 23:27:40 Asia/Tokyo] === Controller Debug Info ===
+[05-Apr-2025 23:27:40 Asia/Tokyo] Path: 
+[05-Apr-2025 23:27:40 Asia/Tokyo] Controller: 
+[05-Apr-2025 23:27:40 Asia/Tokyo] Action: 
+[05-Apr-2025 23:27:40 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[05-Apr-2025 23:27:40 Asia/Tokyo] File Exists: No
+[05-Apr-2025 23:27:40 Asia/Tokyo] ========================
+[05-Apr-2025 23:27:40 Asia/Tokyo] === Redirect Debug Info ===
+[05-Apr-2025 23:27:40 Asia/Tokyo] Login URL: https://www.sigme.net/agent/auth/login
+[05-Apr-2025 23:27:40 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:27:40 Asia/Tokyo] REQUEST_URI: /agent/
+[05-Apr-2025 23:27:40 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:27:40 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:27:40 Asia/Tokyo] REQUEST_SCHEME: https
+[05-Apr-2025 23:27:40 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[05-Apr-2025 23:27:40 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[05-Apr-2025 23:27:40 Asia/Tokyo] HTTP_REFERER: not set
+[05-Apr-2025 23:27:40 Asia/Tokyo] ========================
+[05-Apr-2025 23:30:40 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[05-Apr-2025 23:30:40 Asia/Tokyo] === Application Start ===
+[05-Apr-2025 23:30:40 Asia/Tokyo] Request URI: /agent/
+[05-Apr-2025 23:30:40 Asia/Tokyo] Base Dir: /agent
+[05-Apr-2025 23:30:40 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:30:40 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:30:40 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:30:40 Asia/Tokyo] ========================
+[05-Apr-2025 23:30:40 Asia/Tokyo] === Controller Debug Info ===
+[05-Apr-2025 23:30:40 Asia/Tokyo] Path: 
+[05-Apr-2025 23:30:40 Asia/Tokyo] Controller: 
+[05-Apr-2025 23:30:40 Asia/Tokyo] Action: 
+[05-Apr-2025 23:30:40 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[05-Apr-2025 23:30:40 Asia/Tokyo] File Exists: No
+[05-Apr-2025 23:30:40 Asia/Tokyo] ========================
+[05-Apr-2025 23:30:40 Asia/Tokyo] === Redirect Debug Info ===
+[05-Apr-2025 23:30:40 Asia/Tokyo] Login URL: /agent/auth/login
+[05-Apr-2025 23:30:40 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:30:40 Asia/Tokyo] REQUEST_URI: /agent/
+[05-Apr-2025 23:30:40 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:30:40 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:30:40 Asia/Tokyo] REQUEST_SCHEME: https
+[05-Apr-2025 23:30:40 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[05-Apr-2025 23:30:40 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[05-Apr-2025 23:30:40 Asia/Tokyo] HTTP_REFERER: not set
+[05-Apr-2025 23:30:40 Asia/Tokyo] ========================
+[05-Apr-2025 23:39:22 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[05-Apr-2025 23:39:22 Asia/Tokyo] === Application Start ===
+[05-Apr-2025 23:39:22 Asia/Tokyo] Request URI: /agent/
+[05-Apr-2025 23:39:22 Asia/Tokyo] Base Dir: /agent
+[05-Apr-2025 23:39:22 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:39:22 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:39:22 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:39:22 Asia/Tokyo] ========================
+[05-Apr-2025 23:39:22 Asia/Tokyo] === Controller Debug Info ===
+[05-Apr-2025 23:39:22 Asia/Tokyo] Path: 
+[05-Apr-2025 23:39:22 Asia/Tokyo] Controller: 
+[05-Apr-2025 23:39:22 Asia/Tokyo] Action: 
+[05-Apr-2025 23:39:22 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[05-Apr-2025 23:39:22 Asia/Tokyo] File Exists: No
+[05-Apr-2025 23:39:22 Asia/Tokyo] ========================
+[05-Apr-2025 23:39:22 Asia/Tokyo] === Redirect Debug Info ===
+[05-Apr-2025 23:39:22 Asia/Tokyo] Login URL: /agent/auth/login
+[05-Apr-2025 23:39:22 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:39:22 Asia/Tokyo] REQUEST_URI: /agent/
+[05-Apr-2025 23:39:22 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:39:22 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:39:22 Asia/Tokyo] REQUEST_SCHEME: https
+[05-Apr-2025 23:39:22 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[05-Apr-2025 23:39:22 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[05-Apr-2025 23:39:22 Asia/Tokyo] HTTP_REFERER: not set
+[05-Apr-2025 23:39:22 Asia/Tokyo] ========================
+[05-Apr-2025 23:41:52 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[05-Apr-2025 23:41:52 Asia/Tokyo] === Application Start ===
+[05-Apr-2025 23:41:52 Asia/Tokyo] Request URI: /agent/
+[05-Apr-2025 23:41:52 Asia/Tokyo] Base Dir: /agent
+[05-Apr-2025 23:41:52 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:41:52 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:41:52 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:41:52 Asia/Tokyo] ========================
+[05-Apr-2025 23:41:52 Asia/Tokyo] === Controller Debug Info ===
+[05-Apr-2025 23:41:52 Asia/Tokyo] Path: 
+[05-Apr-2025 23:41:52 Asia/Tokyo] Controller: 
+[05-Apr-2025 23:41:52 Asia/Tokyo] Action: 
+[05-Apr-2025 23:41:52 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[05-Apr-2025 23:41:52 Asia/Tokyo] File Exists: No
+[05-Apr-2025 23:41:52 Asia/Tokyo] ========================
+[05-Apr-2025 23:41:52 Asia/Tokyo] === Redirect Debug Info ===
+[05-Apr-2025 23:41:52 Asia/Tokyo] Login URL: /agent/auth/login
+[05-Apr-2025 23:41:52 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:41:52 Asia/Tokyo] REQUEST_URI: /agent/
+[05-Apr-2025 23:41:52 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:41:52 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:41:52 Asia/Tokyo] REQUEST_SCHEME: https
+[05-Apr-2025 23:41:52 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[05-Apr-2025 23:41:52 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[05-Apr-2025 23:41:52 Asia/Tokyo] HTTP_REFERER: not set
+[05-Apr-2025 23:41:52 Asia/Tokyo] ========================
+[05-Apr-2025 23:46:38 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[05-Apr-2025 23:46:38 Asia/Tokyo] === Application Start ===
+[05-Apr-2025 23:46:38 Asia/Tokyo] Request URI: /agent/
+[05-Apr-2025 23:46:38 Asia/Tokyo] Base Dir: /agent
+[05-Apr-2025 23:46:38 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:46:38 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:46:38 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:46:38 Asia/Tokyo] ========================
+[05-Apr-2025 23:46:38 Asia/Tokyo] === Controller Debug Info ===
+[05-Apr-2025 23:46:38 Asia/Tokyo] Path: 
+[05-Apr-2025 23:46:38 Asia/Tokyo] Controller: 
+[05-Apr-2025 23:46:38 Asia/Tokyo] Action: 
+[05-Apr-2025 23:46:38 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[05-Apr-2025 23:46:38 Asia/Tokyo] File Exists: No
+[05-Apr-2025 23:46:38 Asia/Tokyo] ========================
+[05-Apr-2025 23:46:38 Asia/Tokyo] === Redirect Debug Info ===
+[05-Apr-2025 23:46:38 Asia/Tokyo] Login URL: /agent/auth/login
+[05-Apr-2025 23:46:38 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:46:38 Asia/Tokyo] REQUEST_URI: /agent/
+[05-Apr-2025 23:46:38 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:46:38 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:46:38 Asia/Tokyo] REQUEST_SCHEME: https
+[05-Apr-2025 23:46:38 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[05-Apr-2025 23:46:38 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[05-Apr-2025 23:46:38 Asia/Tokyo] HTTP_REFERER: not set
+[05-Apr-2025 23:46:38 Asia/Tokyo] ========================
+[05-Apr-2025 23:56:26 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[05-Apr-2025 23:56:26 Asia/Tokyo] === Application Start ===
+[05-Apr-2025 23:56:26 Asia/Tokyo] Request URI: /agent/
+[05-Apr-2025 23:56:26 Asia/Tokyo] Base Dir: /agent
+[05-Apr-2025 23:56:26 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:56:26 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:56:26 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:56:26 Asia/Tokyo] ========================
+[05-Apr-2025 23:56:26 Asia/Tokyo] === Controller Debug Info ===
+[05-Apr-2025 23:56:26 Asia/Tokyo] Path: 
+[05-Apr-2025 23:56:26 Asia/Tokyo] Controller: 
+[05-Apr-2025 23:56:26 Asia/Tokyo] Action: 
+[05-Apr-2025 23:56:26 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[05-Apr-2025 23:56:26 Asia/Tokyo] File Exists: No
+[05-Apr-2025 23:56:26 Asia/Tokyo] ========================
+[05-Apr-2025 23:56:26 Asia/Tokyo] === Redirect Debug Info ===
+[05-Apr-2025 23:56:26 Asia/Tokyo] Login URL: /agent/auth/login
+[05-Apr-2025 23:56:26 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:56:26 Asia/Tokyo] REQUEST_URI: /agent/
+[05-Apr-2025 23:56:26 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:56:26 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:56:26 Asia/Tokyo] REQUEST_SCHEME: https
+[05-Apr-2025 23:56:26 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[05-Apr-2025 23:56:26 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[05-Apr-2025 23:56:26 Asia/Tokyo] HTTP_REFERER: not set
+[05-Apr-2025 23:56:26 Asia/Tokyo] ========================
+[05-Apr-2025 23:58:45 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[05-Apr-2025 23:58:45 Asia/Tokyo] === Application Start ===
+[05-Apr-2025 23:58:45 Asia/Tokyo] Request URI: /agent/
+[05-Apr-2025 23:58:45 Asia/Tokyo] Base Dir: /agent
+[05-Apr-2025 23:58:45 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:58:45 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:58:45 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:58:45 Asia/Tokyo] ========================
+[05-Apr-2025 23:58:45 Asia/Tokyo] === Controller Debug Info ===
+[05-Apr-2025 23:58:45 Asia/Tokyo] Path: 
+[05-Apr-2025 23:58:45 Asia/Tokyo] Controller: 
+[05-Apr-2025 23:58:45 Asia/Tokyo] Action: 
+[05-Apr-2025 23:58:45 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[05-Apr-2025 23:58:45 Asia/Tokyo] File Exists: No
+[05-Apr-2025 23:58:45 Asia/Tokyo] ========================
+[05-Apr-2025 23:58:45 Asia/Tokyo] === Redirect Debug Info ===
+[05-Apr-2025 23:58:45 Asia/Tokyo] Login URL: /agent/auth/login
+[05-Apr-2025 23:58:45 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:58:45 Asia/Tokyo] REQUEST_URI: /agent/
+[05-Apr-2025 23:58:45 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:58:45 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:58:45 Asia/Tokyo] REQUEST_SCHEME: https
+[05-Apr-2025 23:58:45 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[05-Apr-2025 23:58:45 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[05-Apr-2025 23:58:45 Asia/Tokyo] HTTP_REFERER: not set
+[05-Apr-2025 23:58:45 Asia/Tokyo] ========================
+[05-Apr-2025 23:58:49 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[05-Apr-2025 23:58:49 Asia/Tokyo] === Application Start ===
+[05-Apr-2025 23:58:49 Asia/Tokyo] Request URI: /agent/
+[05-Apr-2025 23:58:49 Asia/Tokyo] Base Dir: /agent
+[05-Apr-2025 23:58:49 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:58:49 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:58:49 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:58:49 Asia/Tokyo] ========================
+[05-Apr-2025 23:58:49 Asia/Tokyo] === Controller Debug Info ===
+[05-Apr-2025 23:58:49 Asia/Tokyo] Path: 
+[05-Apr-2025 23:58:49 Asia/Tokyo] Controller: 
+[05-Apr-2025 23:58:49 Asia/Tokyo] Action: 
+[05-Apr-2025 23:58:49 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[05-Apr-2025 23:58:49 Asia/Tokyo] File Exists: No
+[05-Apr-2025 23:58:49 Asia/Tokyo] ========================
+[05-Apr-2025 23:58:49 Asia/Tokyo] === Redirect Debug Info ===
+[05-Apr-2025 23:58:49 Asia/Tokyo] Login URL: /agent/auth/login
+[05-Apr-2025 23:58:49 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:58:49 Asia/Tokyo] REQUEST_URI: /agent/
+[05-Apr-2025 23:58:49 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:58:49 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:58:49 Asia/Tokyo] REQUEST_SCHEME: https
+[05-Apr-2025 23:58:49 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[05-Apr-2025 23:58:49 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[05-Apr-2025 23:58:49 Asia/Tokyo] HTTP_REFERER: not set
+[05-Apr-2025 23:58:49 Asia/Tokyo] ========================
+[05-Apr-2025 23:58:58 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[05-Apr-2025 23:58:58 Asia/Tokyo] === Application Start ===
+[05-Apr-2025 23:58:58 Asia/Tokyo] Request URI: /agent/
+[05-Apr-2025 23:58:58 Asia/Tokyo] Base Dir: /agent
+[05-Apr-2025 23:58:58 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:58:58 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:58:58 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:58:58 Asia/Tokyo] ========================
+[05-Apr-2025 23:58:58 Asia/Tokyo] === Controller Debug Info ===
+[05-Apr-2025 23:58:58 Asia/Tokyo] Path: 
+[05-Apr-2025 23:58:58 Asia/Tokyo] Controller: 
+[05-Apr-2025 23:58:58 Asia/Tokyo] Action: 
+[05-Apr-2025 23:58:58 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[05-Apr-2025 23:58:58 Asia/Tokyo] File Exists: No
+[05-Apr-2025 23:58:58 Asia/Tokyo] ========================
+[05-Apr-2025 23:58:58 Asia/Tokyo] === Redirect Debug Info ===
+[05-Apr-2025 23:58:58 Asia/Tokyo] Login URL: /agent/auth/login
+[05-Apr-2025 23:58:58 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[05-Apr-2025 23:58:58 Asia/Tokyo] REQUEST_URI: /agent/
+[05-Apr-2025 23:58:58 Asia/Tokyo] PHP_SELF: /agent/index.php
+[05-Apr-2025 23:58:58 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[05-Apr-2025 23:58:58 Asia/Tokyo] REQUEST_SCHEME: https
+[05-Apr-2025 23:58:58 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[05-Apr-2025 23:58:58 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[05-Apr-2025 23:58:58 Asia/Tokyo] HTTP_REFERER: not set
+[05-Apr-2025 23:58:58 Asia/Tokyo] ========================
+[06-Apr-2025 00:00:41 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[06-Apr-2025 00:00:41 Asia/Tokyo] === Application Start ===
+[06-Apr-2025 00:00:41 Asia/Tokyo] Request URI: /agent/
+[06-Apr-2025 00:00:41 Asia/Tokyo] Base Dir: /agent
+[06-Apr-2025 00:00:41 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[06-Apr-2025 00:00:41 Asia/Tokyo] PHP_SELF: /agent/index.php
+[06-Apr-2025 00:00:41 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[06-Apr-2025 00:00:41 Asia/Tokyo] ========================
+[06-Apr-2025 00:00:41 Asia/Tokyo] === Controller Debug Info ===
+[06-Apr-2025 00:00:41 Asia/Tokyo] Path: 
+[06-Apr-2025 00:00:41 Asia/Tokyo] Controller: 
+[06-Apr-2025 00:00:41 Asia/Tokyo] Action: 
+[06-Apr-2025 00:00:41 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[06-Apr-2025 00:00:41 Asia/Tokyo] File Exists: No
+[06-Apr-2025 00:00:41 Asia/Tokyo] ========================
+[06-Apr-2025 00:00:41 Asia/Tokyo] === Redirect Debug Info ===
+[06-Apr-2025 00:00:41 Asia/Tokyo] Login URL: /agent/auth/login
+[06-Apr-2025 00:00:41 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[06-Apr-2025 00:00:41 Asia/Tokyo] REQUEST_URI: /agent/
+[06-Apr-2025 00:00:41 Asia/Tokyo] PHP_SELF: /agent/index.php
+[06-Apr-2025 00:00:41 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[06-Apr-2025 00:00:41 Asia/Tokyo] REQUEST_SCHEME: https
+[06-Apr-2025 00:00:41 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[06-Apr-2025 00:00:41 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[06-Apr-2025 00:00:41 Asia/Tokyo] HTTP_REFERER: not set
+[06-Apr-2025 00:00:41 Asia/Tokyo] ========================
+[06-Apr-2025 00:07:20 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[06-Apr-2025 00:07:20 Asia/Tokyo] === Application Start ===
+[06-Apr-2025 00:07:20 Asia/Tokyo] Request URI: /agent/
+[06-Apr-2025 00:07:20 Asia/Tokyo] Base Dir: /agent
+[06-Apr-2025 00:07:20 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[06-Apr-2025 00:07:20 Asia/Tokyo] PHP_SELF: /agent/index.php
+[06-Apr-2025 00:07:20 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[06-Apr-2025 00:07:20 Asia/Tokyo] ========================
+[06-Apr-2025 00:07:20 Asia/Tokyo] === Controller Debug Info ===
+[06-Apr-2025 00:07:20 Asia/Tokyo] Path: 
+[06-Apr-2025 00:07:20 Asia/Tokyo] Controller: 
+[06-Apr-2025 00:07:20 Asia/Tokyo] Action: 
+[06-Apr-2025 00:07:20 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[06-Apr-2025 00:07:20 Asia/Tokyo] File Exists: No
+[06-Apr-2025 00:07:20 Asia/Tokyo] ========================
+[06-Apr-2025 00:07:20 Asia/Tokyo] === Redirect Debug Info ===
+[06-Apr-2025 00:07:20 Asia/Tokyo] Login URL: /agent/auth/login
+[06-Apr-2025 00:07:20 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[06-Apr-2025 00:07:20 Asia/Tokyo] REQUEST_URI: /agent/
+[06-Apr-2025 00:07:20 Asia/Tokyo] PHP_SELF: /agent/index.php
+[06-Apr-2025 00:07:20 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[06-Apr-2025 00:07:20 Asia/Tokyo] REQUEST_SCHEME: https
+[06-Apr-2025 00:07:20 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[06-Apr-2025 00:07:20 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[06-Apr-2025 00:07:20 Asia/Tokyo] HTTP_REFERER: not set
+[06-Apr-2025 00:07:20 Asia/Tokyo] ========================
+[06-Apr-2025 00:09:18 Asia/Tokyo] PHP Notice:  Constant BASE_PATH already defined in /home/xs118061/OpenSignage/xibo-agent/web/config.php on line 46
+[06-Apr-2025 00:09:18 Asia/Tokyo] === Application Start ===
+[06-Apr-2025 00:09:18 Asia/Tokyo] Request URI: /agent/
+[06-Apr-2025 00:09:18 Asia/Tokyo] Base Dir: /agent
+[06-Apr-2025 00:09:18 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[06-Apr-2025 00:09:18 Asia/Tokyo] PHP_SELF: /agent/index.php
+[06-Apr-2025 00:09:18 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[06-Apr-2025 00:09:18 Asia/Tokyo] ========================
+[06-Apr-2025 00:09:18 Asia/Tokyo] === Controller Debug Info ===
+[06-Apr-2025 00:09:18 Asia/Tokyo] Path: 
+[06-Apr-2025 00:09:18 Asia/Tokyo] Controller: 
+[06-Apr-2025 00:09:18 Asia/Tokyo] Action: 
+[06-Apr-2025 00:09:18 Asia/Tokyo] Controller File: /home/xs118061/OpenSignage/xibo-agent/web/controllers/Controller.php
+[06-Apr-2025 00:09:18 Asia/Tokyo] File Exists: No
+[06-Apr-2025 00:09:18 Asia/Tokyo] ========================
+[06-Apr-2025 00:09:18 Asia/Tokyo] === Redirect Debug Info ===
+[06-Apr-2025 00:09:18 Asia/Tokyo] Login URL: /agent/auth/login.php
+[06-Apr-2025 00:09:18 Asia/Tokyo] SCRIPT_NAME: /agent/index.php
+[06-Apr-2025 00:09:18 Asia/Tokyo] REQUEST_URI: /agent/
+[06-Apr-2025 00:09:18 Asia/Tokyo] PHP_SELF: /agent/index.php
+[06-Apr-2025 00:09:18 Asia/Tokyo] HTTP_HOST: www.sigme.net
+[06-Apr-2025 00:09:18 Asia/Tokyo] REQUEST_SCHEME: https
+[06-Apr-2025 00:09:18 Asia/Tokyo] HTTP_X_FORWARDED_PROTO: https
+[06-Apr-2025 00:09:18 Asia/Tokyo] HTTP_X_FORWARDED_HOST: www.sigme.net
+[06-Apr-2025 00:09:18 Asia/Tokyo] HTTP_REFERER: not set
+[06-Apr-2025 00:09:18 Asia/Tokyo] ========================
