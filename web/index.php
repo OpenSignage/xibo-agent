@@ -1,102 +1,112 @@
 <?php
-/**
- * Xibo API エージェント - メインアプリケーション
+/*
+ * Xibo-agent - Open Source Digital Signage - https://www.open-signage.org
+ * Copyright (C) 2025 Open Source Digital Signage Initiative
+ *
+ * This file is part of Xibo-agent.
+ * This software access xibo-cms through their APIs to control xibo-cms
+ *
+ * Xibo-agent is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * any later version.
+ *
+ * Xibo-agent is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with Xibo.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-// デバッグモードの設定
-define('DEBUG_MODE', true);
+/*
+ * Xibo API エージェント - メインルーティング
+ */
 
 // ベースパスの定義
-define('BASE_PATH', __DIR__);
+define('BASE_PATH', '.');
 
 // 設定ファイルの読み込み
-require_once BASE_PATH . '/config.php';
-require_once BASE_PATH . '/includes/functions.php';
+require_once 'config.php';
+require_once 'includes/functions.php';
 
 // セッション開始
 session_start();
 
-// 未ログインの場合はログインページへリダイレクト
-if (!isset($_SESSION[SESSION_COOKIE_NAME])) {
-    redirect('auth/login.php');
+// リクエストURIからパスを取得
+$requestUri = $_SERVER['REQUEST_URI'];
+$baseDir = dirname($_SERVER['SCRIPT_NAME']);
+$path = substr($requestUri, strlen($baseDir));
+$path = trim($path, '/');
+
+// パスの解析
+$segments = explode('/', $path);
+$controller = $segments[0] ?? '';
+$action = $segments[1] ?? '';
+
+// ルーティングテーブル
+$routes = [
+    '' => ['controller' => 'dashboard', 'action' => 'index'],
+    'auth' => [
+        'login' => ['controller' => 'auth', 'action' => 'login'],
+        'register' => ['controller' => 'auth', 'action' => 'register'],
+        'logout' => ['controller' => 'auth', 'action' => 'logout']
+    ],
+    'settings' => [
+        'save' => ['controller' => 'settings', 'action' => 'save'],
+        'index' => ['controller' => 'settings', 'action' => 'index']
+    ],
+    'chat' => [
+        'index' => ['controller' => 'chat', 'action' => 'index'],
+        'sendMessage' => ['controller' => 'chat', 'action' => 'sendMessage'],
+        'clearHistory' => ['controller' => 'chat', 'action' => 'clearHistory']
+    ]
+];
+
+// ルーティングの処理
+$route = null;
+if (empty($controller)) {
+    $route = $routes[''];
+} elseif (isset($routes[$controller])) {
+    if (is_array($routes[$controller]) && isset($routes[$controller][$action])) {
+        $route = $routes[$controller][$action];
+    } elseif (is_array($routes[$controller]) && isset($routes[$controller]['index'])) {
+        $route = $routes[$controller]['index'];
+    }
+}
+
+// ルートが見つからない場合は404エラー
+if (!$route) {
+    header("HTTP/1.0 404 Not Found");
+    include 'includes/404.php';
     exit;
 }
 
-// ログアウト処理（GETリクエストの場合）
-if (isset($_GET['logout'])) {
-    redirect('auth/logout.php');
-    exit;
-}
+// コントローラーとアクションの取得
+$controllerName = $route['controller'];
+$actionName = $route['action'];
 
-// 現在のタブを決定
-$currentTab = $_GET['tab'] ?? 'dashboard';
-$validTabs = ['dashboard', 'chat', 'settings'];
-if (!in_array($currentTab, $validTabs)) {
-    $currentTab = 'dashboard';
-}
+// コントローラーファイルのパス
+$controllerFile = "controllers/{$controllerName}_controller.php";
 
-// ページタイトルの設定
-$pageTitle = 'Xibo API エージェント'; // デフォルト値
-switch ($currentTab) {
-    case 'dashboard':
-        $pageTitle = 'ダッシュボード';
-        break;
-    case 'chat':
-        $pageTitle = 'チャット';
-        break;
-    case 'settings':
-        $pageTitle = '設定';
-        break;
-}
-
-// 追加のスタイルシートとスクリプト
-$extraStyles = ['assets/css/style.css'];
-$extraScripts = ['assets/js/common.js'];
-
-// ヘッダーの読み込み
-require_once BASE_PATH . '/includes/header.php';
-?>
-
-<div class="main-tabs">
-    <div class="tab-buttons">
-        <a href="?tab=dashboard" class="tab-btn <?php echo isActiveTab('dashboard', $currentTab); ?>" data-tab="dashboard">ダッシュボード</a>
-        <a href="?tab=chat" class="tab-btn <?php echo isActiveTab('chat', $currentTab); ?>" data-tab="chat">チャット</a>
-        <a href="?tab=settings" class="tab-btn <?php echo isActiveTab('settings', $currentTab); ?>" data-tab="settings">設定</a>
-    </div>
-    
-    <div class="tab-contents">
-        <?php
-        // 対応するタブのコンテンツを読み込む
-        $contentFile = ''; // 初期化
-        switch ($currentTab) {
-            case 'dashboard':
-                $contentFile = 'dashboard/dashboard_content.php';
-                break;
-            case 'chat':
-                $contentFile = 'chat/chat_content.php';
-                break;
-            case 'settings':
-                $contentFile = 'settings/settings_content.php';
-                break;
-            default:
-                $contentFile = 'dashboard/dashboard_content.php';
-                break;
-        }
-        // ファイルが存在するか確認してから読み込む
-        if (file_exists(BASE_PATH . '/' . $contentFile)) {
-            require_once BASE_PATH . '/' . $contentFile;
+// コントローラーの読み込みと実行
+if (file_exists($controllerFile)) {
+    require_once $controllerFile;
+    $controllerClass = ucfirst($controllerName) . 'Controller';
+    if (class_exists($controllerClass)) {
+        $controller = new $controllerClass();
+        if (method_exists($controller, $actionName)) {
+            $controller->$actionName();
         } else {
-            echo '<div class="error-message">コンテンツが見つかりません: ' . escape($contentFile) . '</div>';
-            // デフォルトのダッシュボードを表示
-            if ($contentFile !== 'dashboard/dashboard_content.php' && file_exists(BASE_PATH . '/dashboard/dashboard_content.php')) {
-                require_once BASE_PATH . '/dashboard/dashboard_content.php';
-            }
+            header("HTTP/1.0 404 Not Found");
+            include 'includes/404.php';
         }
-        ?>
-    </div>
-</div>
-
-<?php
-// フッターの読み込み
-require_once BASE_PATH . '/includes/footer.php';
-?> 
+    } else {
+        header("HTTP/1.0 404 Not Found");
+        include 'includes/404.php';
+    }
+} else {
+    header("HTTP/1.0 404 Not Found");
+    include 'includes/404.php';
+} 

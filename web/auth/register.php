@@ -1,14 +1,35 @@
 <?php
 /*
+ * Xibo-agent - Open Source Digital Signage - https://www.open-signage.org
+ * Copyright (C) 2025 Open Source Digital Signage Initiative
+ *
+ * This file is part of Xibo-agent.
+ * This software access xibo-cms through their APIs to control xibo-cms
+ *
+ * Xibo-agent is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * any later version.
+ *
+ * Xibo-agent is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with Xibo.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/*
  * Xibo API エージェント - ユーザー登録処理
  */
 
 // ベースパスの定義
-define('BASE_PATH', dirname(__DIR__));
+define('BASE_PATH', '..');
 
 // 設定ファイルの読み込み
-require_once BASE_PATH . '/config.php';
-require_once BASE_PATH . '/includes/functions.php';
+require_once '../config.php';
+require_once '../includes/functions.php';
 
 // セッション開始
 session_start();
@@ -28,6 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $username = $_POST['username'] ?? '';
     $email = $_POST['email'] ?? '';
     $password = $_POST['password'] ?? '';
+    $role = $_POST['role'] ?? 'user';
     
     // 入力検証
     if (empty($username) || empty($email) || empty($password)) {
@@ -36,13 +58,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $registerError = 'パスワードは8文字以上である必要があります';
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $registerError = '有効なメールアドレスを入力してください';
+    } elseif (!in_array($role, ['admin', 'editor', 'user'])) {
+        $registerError = '無効なロールが指定されました';
     } else {
         // API登録リクエスト
         $response = callApi([
             'action' => 'register',
             'username' => $username,
             'email' => $email,
-            'password' => $password
+            'password' => $password,
+            'role' => $role
         ]);
         
         if ($response['status'] === 'success') {
@@ -76,13 +101,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 $pageTitle = 'ユーザー登録 - Xibo API エージェント';
 
 // 追加のCSS
-$extraStyles = ['../assets/css/style.css'];
+$extraStyles = ['../assets/css/customStyle.css'];
 
 // 追加のJavaScript
 $extraScripts = ['../assets/js/common.js', 'auth.js'];
 
 // ヘッダーの読み込み
-require_once BASE_PATH . '/includes/header.php';
+require_once '../includes/header.php';
 ?>
 
 <div class="container">
@@ -97,17 +122,44 @@ require_once BASE_PATH . '/includes/header.php';
                 <div class="error-message"><?php echo htmlspecialchars($registerError); ?></div>
             <?php endif; ?>
             
-            <h2>登録に失敗しました</h2>
-            <p>申し訳ありませんが、登録処理中にエラーが発生しました。</p>
-            <div class="form-actions">
-                <a href="login.php?register=true" class="btn btn-primary">登録画面に戻る</a>
-                <a href="login.php" class="btn btn-link">ログインに戻る</a>
-            </div>
+            <h2>ユーザー登録</h2>
+            <form method="post" action="register.php" class="register-form">
+                <input type="hidden" name="action" value="register">
+                
+                <div class="form-group">
+                    <label for="username">ユーザー名</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="email">メールアドレス</label>
+                    <input type="email" id="email" name="email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">パスワード</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="role">ロール</label>
+                    <select id="role" name="role" required>
+                        <option value="user">一般ユーザー</option>
+                        <option value="editor">編集者</option>
+                        <option value="admin">管理者</option>
+                    </select>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">登録</button>
+                    <a href="login.php" class="btn btn-link">ログインに戻る</a>
+                </div>
+            </form>
         <?php endif; ?>
     </div>
 </div>
 
 <?php
 // フッターの読み込み
-require_once BASE_PATH . '/includes/footer.php';
+require_once '../includes/footer.php';
 ?> 

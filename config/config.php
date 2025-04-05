@@ -33,6 +33,9 @@ if (!defined('XIBO_AGENT')) {
     define('XIBO_AGENT', true);
 }
 
+// 共通ユーティリティ関数の読み込み
+require_once __DIR__ . '/../includes/utils.php';
+
 // データベース設定
 $db_config = [
     'host' => 'localhost',
@@ -58,25 +61,4 @@ $config = [
 $localConfigFile = __DIR__ . '/config-local.php';
 if (file_exists($localConfigFile)) {
     require_once $localConfigFile;
-}
-
-// デバッグログ関数
-function debugLog($message, $data = null, $level = 'debug') {
-    $levels = ['debug', 'info', 'warning', 'error'];
-    if (!in_array($level, $levels)) {
-        $level = 'debug';
-    }
-    
-    $logEntry = [
-        'timestamp' => date('Y-m-d H:i:s'),
-        'level' => $level,
-        'message' => $message,
-        'data' => $data
-    ];
-    
-    // 本番環境では適切なログ記録の実装に置き換える
-    // 開発環境用：
-    if ($level === 'error' || $level === 'warning') {
-        error_log(json_encode($logEntry, JSON_UNESCAPED_UNICODE));
-    }
 } 

@@ -66,45 +66,45 @@ class Database {
      */
     public function initializeTables() {
         try {
-            // ユーザーテーブル
-            $this->pdo->exec("CREATE TABLE IF NOT EXISTS users (
+            // ユーザーテーブルの作成
+            $sql = "CREATE TABLE IF NOT EXISTS users (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 username VARCHAR(50) NOT NULL UNIQUE,
                 email VARCHAR(100) NOT NULL UNIQUE,
                 password VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            )");
-            
-            // ユーザー設定テーブル
-            $this->pdo->exec("CREATE TABLE IF NOT EXISTS user_settings (
+                role ENUM('admin', 'editor', 'user') NOT NULL DEFAULT 'user',
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )";
+            $this->pdo->exec($sql);
+
+            // ユーザー設定テーブルの作成
+            $sql = "CREATE TABLE IF NOT EXISTS user_settings (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 user_id INT NOT NULL,
-                xibo_api_url VARCHAR(255),
-                xibo_client_id VARCHAR(255),
-                xibo_client_secret VARCHAR(255),
-                gemini_api_key VARCHAR(255),
-                gemini_model VARCHAR(50) DEFAULT 'gemini-1.5-pro',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                settings JSON,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            )");
-            
-            // セッションテーブル
-            $this->pdo->exec("CREATE TABLE IF NOT EXISTS sessions (
-                id VARCHAR(255) PRIMARY KEY,
+            )";
+            $this->pdo->exec($sql);
+
+            // 会話履歴テーブルの作成
+            $sql = "CREATE TABLE IF NOT EXISTS chat_history (
+                id INT AUTO_INCREMENT PRIMARY KEY,
                 user_id INT NOT NULL,
-                ip_address VARCHAR(45),
-                user_agent TEXT,
-                expires_at TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                message TEXT NOT NULL,
+                is_user BOOLEAN NOT NULL,
+                created_at DATETIME NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            )");
-            
+            )";
+            $this->pdo->exec($sql);
+
+            debugLog('データベーステーブルを初期化しました');
             return true;
         } catch (PDOException $e) {
-            debugLog('テーブル初期化エラー', ['error' => $e->getMessage()], 'error');
-            return false;
+            debugLog('データベーステーブルの初期化に失敗しました', ['error' => $e->getMessage()], 'error');
+            throw new Exception('データベーステーブルの初期化に失敗しました');
         }
     }
 }
@@ -124,50 +124,38 @@ class UserManager {
     
     /**
      * ユーザー登録
-     * @param string $username ユーザー名
-     * @param string $email メールアドレス
-     * @param string $password パスワード
-     * @return array 成功時はユーザーID、失敗時はエラーメッセージ
      */
-    public function registerUser($username, $email, $password) {
+    public function registerUser($username, $email, $password, $role = 'user') {
         try {
-            // 入力検証
-            if (empty($username) || empty($email) || empty($password)) {
-                return ['error' => 'すべての項目を入力してください'];
-            }
-            
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                return ['error' => '有効なメールアドレスを入力してください'];
-            }
-            
-            if (strlen($password) < 8) {
-                return ['error' => 'パスワードは8文字以上である必要があります'];
-            }
-            
             // ユーザー名とメールアドレスの重複チェック
-            $stmt = $this->db->prepare("SELECT id FROM users WHERE username = ? OR email = ?");
+            $stmt = $this->db->prepare("SELECT COUNT(*) FROM users WHERE username = ? OR email = ?");
             $stmt->execute([$username, $email]);
-            if ($stmt->rowCount() > 0) {
-                return ['error' => 'このユーザー名またはメールアドレスは既に使用されています'];
+            if ($stmt->fetchColumn() > 0) {
+                return ['status' => 'error', 'error' => 'ユーザー名またはメールアドレスが既に使用されています'];
             }
-            
+
             // パスワードのハッシュ化
             $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-            
+
             // ユーザーの登録
-            $stmt = $this->db->prepare("INSERT INTO users (username, email, password) VALUES (?, ?, ?)");
-            $stmt->execute([$username, $email, $hashedPassword]);
-            
+            $stmt = $this->db->prepare("INSERT INTO users (username, email, password, role, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())");
+            $stmt->execute([$username, $email, $hashedPassword, $role]);
+
             $userId = $this->db->lastInsertId();
-            
-            // 空の設定を作成
-            $stmt = $this->db->prepare("INSERT INTO user_settings (user_id) VALUES (?)");
-            $stmt->execute([$userId]);
-            
-            return ['user_id' => $userId];
+
+            return [
+                'status' => 'success',
+                'user_id' => $userId,
+                'user' => [
+                    'id' => $userId,
+                    'username' => $username,
+                    'email' => $email,
+                    'role' => $role
+                ]
+            ];
         } catch (PDOException $e) {
-            debugLog('ユーザー登録エラー', ['error' => $e->getMessage()], 'error');
-            return ['error' => 'ユーザー登録中にエラーが発生しました'];
+            debugLog('ユーザー登録に失敗しました', ['error' => $e->getMessage()], 'error');
+            return ['status' => 'error', 'error' => 'ユーザー登録に失敗しました'];
         }
     }
     
@@ -175,12 +163,12 @@ class UserManager {
      * ユーザーログイン
      * @param string $username ユーザー名またはメールアドレス
      * @param string $password パスワード
-     * @return array 成功時はユーザーID、失敗時はエラーメッセージ
+     * @return array|false 成功時はユーザー情報、失敗時はfalse
      */
     public function loginUser($username, $password) {
         try {
             // ユーザーの検索（ユーザー名またはメールアドレスで）
-            $stmt = $this->db->prepare("SELECT id, password FROM users WHERE username = ? OR email = ?");
+            $stmt = $this->db->prepare("SELECT id, username, email, password, role FROM users WHERE username = ? OR email = ?");
             $stmt->execute([$username, $username]);
             $user = $stmt->fetch();
             
@@ -193,7 +181,7 @@ class UserManager {
                 return ['error' => 'ユーザー名またはパスワードが正しくありません'];
             }
             
-            return ['user_id' => $user['id']];
+            return ['user_id' => $user['id'], 'role' => $user['role']];
         } catch (PDOException $e) {
             debugLog('ログインエラー', ['error' => $e->getMessage()], 'error');
             return ['error' => 'ログイン中にエラーが発生しました'];
@@ -203,11 +191,11 @@ class UserManager {
     /**
      * ユーザー情報の取得
      * @param int $userId ユーザーID
-     * @return array ユーザー情報
+     * @return array|false 成功時はユーザー情報、失敗時はfalse
      */
     public function getUserById($userId) {
         try {
-            $stmt = $this->db->prepare("SELECT id, username, email, created_at FROM users WHERE id = ?");
+            $stmt = $this->db->prepare("SELECT id, username, email, role, created_at, updated_at FROM users WHERE id = ?");
             $stmt->execute([$userId]);
             return $stmt->fetch();
         } catch (PDOException $e) {
@@ -219,7 +207,7 @@ class UserManager {
     /**
      * ユーザー設定の取得
      * @param int $userId ユーザーID
-     * @return array ユーザー設定
+     * @return array|false 成功時はユーザー設定、失敗時はfalse
      */
     public function getUserSettings($userId) {
         try {
@@ -267,6 +255,49 @@ class UserManager {
             return false;
         }
     }
+    
+    /**
+     * ユーザーの役割を更新
+     * @param int $userId ユーザーID
+     * @param string $role 新しい役割（admin, editor, user）
+     * @return bool 成功時はtrue、失敗時はfalse
+     */
+    public function updateUserRole($userId, $role) {
+        try {
+            // 役割の値が有効かチェック
+            $validRoles = ['admin', 'editor', 'user'];
+            if (!in_array($role, $validRoles)) {
+                debugLog("ユーザー役割更新失敗: 無効な役割", [
+                    'user_id' => $userId,
+                    'role' => $role
+                ], 'warning');
+                return false;
+            }
+            
+            $stmt = $this->db->prepare("UPDATE users SET role = ? WHERE id = ?");
+            $stmt->execute([$role, $userId]);
+            
+            if ($stmt->rowCount() === 0) {
+                debugLog("ユーザー役割更新失敗: ユーザーが見つかりません", [
+                    'user_id' => $userId
+                ], 'warning');
+                return false;
+            }
+            
+            debugLog("ユーザー役割更新成功", [
+                'user_id' => $userId,
+                'role' => $role
+            ], 'info');
+            
+            return true;
+        } catch (PDOException $e) {
+            debugLog("ユーザー役割更新エラー", [
+                'error' => $e->getMessage(),
+                'user_id' => $userId
+            ], 'error');
+            return false;
+        }
+    }
 }
 
 /**
@@ -285,7 +316,7 @@ class SessionManager {
     /**
      * セッションの作成
      * @param int $userId ユーザーID
-     * @return string セッションID
+     * @return string|false 成功時はセッションID、失敗時はfalse
      */
     public function createSession($userId) {
         global $session_lifetime;
@@ -314,7 +345,7 @@ class SessionManager {
     /**
      * セッションの検証
      * @param string $sessionId セッションID
-     * @return int|null ユーザーID
+     * @return array|false 成功時はユーザー情報、失敗時はfalse
      */
     public function validateSession($sessionId) {
         try {
