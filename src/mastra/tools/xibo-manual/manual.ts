@@ -1,87 +1,103 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { readFileSync, readdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { config } from './config';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = join(__dirname, '../../../../');
+// 元のソースコードのパスを取得
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// config.jsonの内容を直接定義
-const MANUAL_BASE_URL = 'https://sigme.net/manual-r4/ja/index.html';
+// config.tsの設定を使用
+const BASE_DIR = config.paths.root;
+const SOURCE_DIR = path.join(BASE_DIR, config.paths.contents);
+
+const MANUAL_BASE_URL = config.baseUrl;
+
+const CONTENTS_DIR = SOURCE_DIR;
+
+// デバッグ用：パスを確認
+console.log('BASE_DIR:', BASE_DIR);
+console.log('SOURCE_DIR:', SOURCE_DIR);
+console.log('CONTENTS_DIR:', CONTENTS_DIR);
+
+const loadManualContents = () => {
+  const contents: Record<string, string> = {};
+  
+  const files = fs.readdirSync(CONTENTS_DIR);
+  for (const file of files) {
+    if (file.endsWith('.md')) {
+      const key = file.replace('.md', '');
+      const content = fs.readFileSync(path.join(CONTENTS_DIR, file), 'utf-8');
+      contents[key] = content;
+    }
+  }
+
+  return contents;
+};
+
+const manualContents = loadManualContents();
+
+// フロントマターを解析する関数
+const parseFrontMatter = (content: string) => {
+  const frontMatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!frontMatterMatch) return null;
+
+  const frontMatter = frontMatterMatch[1];
+  const excerptMatch = frontMatter.match(/excerpt:\s*(.*)/);
+  const keywordsMatch = frontMatter.match(/keywords:\s*(.*)/);
+
+  return {
+    excerpt: excerptMatch ? excerptMatch[1].trim() : '',
+    keywords: keywordsMatch ? keywordsMatch[1].split(',').map(k => k.trim()) : []
+  };
+};
+
+// マニュアルのセクション情報を生成
+const generateManualSections = () => {
+  const sections: Record<string, { title: string; url: string; description: string; keywords: string[] }> = {};
+
+  for (const [key, content] of Object.entries(manualContents)) {
+    const frontMatter = parseFrontMatter(content);
+    if (!frontMatter) continue;
+
+    const titleMatch = content.match(/#\s+(.*)/);
+    const title = titleMatch ? titleMatch[1].trim() : key;
+
+    sections[key] = {
+      title,
+      url: `${MANUAL_BASE_URL}${key}.html`,
+      description: frontMatter.excerpt,
+      keywords: frontMatter.keywords
+    };
+  }
+  
+  console.log('Generated sections:', sections);
+  return sections;
+};
+
+const manualSections = generateManualSections();
+console.log('Manual sections:', manualSections);
 
 // マニュアルの内容を読み込む
 const loadManualContent = () => {
-  const contentDir = join(__dirname, 'content');
-  try {
-    const files = readdirSync(contentDir)
-      .filter(file => file.endsWith('.md'))
-      .sort();
-
-    let content = '';
-    for (const file of files) {
-      const filePath = join(contentDir, file);
-      const fileContent = readFileSync(filePath, 'utf8');
-      content += `\n\n## ${file.replace('.md', '')}\n\n${fileContent}`;
-    }
-    return content;
-  } catch (error) {
-    console.error('マニュアルの読み込みに失敗しました:', error);
-    return ''; // エラー時は空の文字列を返す
+  let content = '';
+  for (const [section, text] of Object.entries(manualContents)) {
+    content += `\n\n${text}`;
   }
+
+  return content;
 };
 
 const MANUAL_CONTENT = loadManualContent();
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-
-const manualSections = {
-  introduction: {
-    title: 'イントロダクション',
-    url: `${MANUAL_BASE_URL}#introduction`,
-    description: 'Sigmeの基本概念とシステムアーキテクチャについて'
-  },
-  userAccess: {
-    title: 'ユーザーアクセス',
-    url: `${MANUAL_BASE_URL}#user-access`,
-    description: 'ユーザー管理とアクセス制御について'
-  },
-  cmsNavigation: {
-    title: 'CMSナビゲーション',
-    url: `${MANUAL_BASE_URL}#cms-navigation`,
-    description: 'CMSの操作方法とインターフェースについて'
-  },
-  display: {
-    title: 'ディスプレイ',
-    url: `${MANUAL_BASE_URL}#display`,
-    description: 'ディスプレイの設定と管理について'
-  },
-  layout: {
-    title: 'レイアウト',
-    url: `${MANUAL_BASE_URL}#layout`,
-    description: 'レイアウトの作成と編集について'
-  },
-  media: {
-    title: 'メディア',
-    url: `${MANUAL_BASE_URL}#media`,
-    description: 'メディアファイルの管理と使用方法について'
-  },
-  scheduling: {
-    title: 'スケジューリング',
-    url: `${MANUAL_BASE_URL}#scheduling`,
-    description: 'コンテンツのスケジュール設定について'
-  },
-  troubleshooting: {
-    title: 'トラブルシューティング',
-    url: `${MANUAL_BASE_URL}#troubleshooting`,
-    description: '一般的な問題の解決方法について'
-  }
-};
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY || '');
 
 const findRelevantSection = async (query: string) => {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
     const prompt = `あなたはXibo-CMSの専門家です。以下のマニュアルの内容を基に、ユーザーの質問に回答してください。
 
@@ -97,6 +113,7 @@ ${MANUAL_CONTENT}
     const answer = response.text();
     
     if (!answer) {
+      console.log('No answer generated');
       return {
         answer: '申し訳ありません。回答を生成できませんでした。',
         relevantSection: manualSections.introduction
@@ -107,6 +124,8 @@ ${MANUAL_CONTENT}
     const sectionMatch = Object.entries(manualSections).find(([_, section]) => 
       answer.toLowerCase().includes(section.title.toLowerCase())
     );
+
+    console.log('Section match:', sectionMatch);
 
     return {
       answer,
@@ -123,7 +142,7 @@ ${MANUAL_CONTENT}
 
 export const xiboManualTool = createTool({
   id: 'xibo-manual',
-  description: 'Xibo-CMSのマニュアルを参照して回答を提供します',
+  description: 'Xiboユーザーマニュアルを参照して回答を提供します',
   inputSchema: z.object({
     query: z.string().describe('ユーザーの質問や問題の内容'),
   }),
@@ -136,10 +155,13 @@ export const xiboManualTool = createTool({
     })
   }),
   execute: async ({ context }) => {
+    console.log(' findRelevantSection:', context.query);
     const { answer, relevantSection } = await findRelevantSection(context.query);
+    console.log(' answer:', answer);
+    console.log(' relevantSection:', relevantSection);
     
     return {
-      answer: `${answer}\n\n詳細は以下のURLをご確認ください：`,
+      answer: `${answer}\n\n詳細は以下のページをご確認ください：\n${relevantSection.url}`,
       relevantSection
     };
   },
