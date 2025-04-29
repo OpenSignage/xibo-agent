@@ -89,6 +89,91 @@ APP_ROOT=/path/to/your/project
 - マニュアルコンテンツは`.md`形式で保存してください
 - 各ファイルにはフロントマター（メタデータ）を含めてください
 - 環境変数`APP_ROOT`が設定されていない場合は、デフォルトのパスが使用されます
+=======
+Xibo Agentは、Mastraフレームワークを使用したAIエージェントアプリケーションです。
+
+## サポートされているLLMモデル
+
+### Google Gemini
+- `gemini-1.5-pro-latest` - 最新のGemini Proモデル
+- `gemini-1.5-pro` - Gemini Proモデル
+- `gemini-1.5-flash` - 高速なGemini Flashモデル
+
+特徴：
+- マルチモーダル対応
+- 高速な応答速度
+- 日本語の理解力が高い
+
+### OpenAI
+- `gpt-4-turbo` - GPT-4 Turbo
+- `gpt-4` - GPT-4
+- `gpt-3.5-turbo` - GPT-3.5 Turbo
+
+特徴：
+- 広範な知識ベース
+- 高い創造性
+- 安定した性能
+
+### Anthropic Claude
+- `claude-3-opus` - Claude 3 Opus
+- `claude-3-sonnet` - Claude 3 Sonnet
+- `claude-3-haiku` - Claude 3 Haiku
+
+特徴：
+- 長文の理解力が高い
+- 論理的な推論能力
+- 高い安全性
+
+## モデルの選択基準
+
+モデルを選択する際は、以下の要素を考慮してください：
+
+1. **応答速度**
+   - 高速な応答が必要な場合: `gemini-1.5-flash` または `gpt-3.5-turbo`
+   - より高度な処理が必要な場合: `gemini-1.5-pro` または `gpt-4-turbo`
+
+2. **タスクの複雑さ**
+   - 単純なタスク: `gpt-3.5-turbo` または `claude-3-haiku`
+   - 複雑なタスク: `gemini-1.5-pro` または `claude-3-opus`
+
+3. **コスト**
+   - コスト効率: `gpt-3.5-turbo` または `claude-3-haiku`
+   - 高性能: `gemini-1.5-pro` または `claude-3-opus`
+
+4. **言語対応**
+   - 日本語対応: すべてのモデルが対応
+   - 高度な日本語理解: `gemini-1.5-pro` が推奨
+
+5. **機能要件**
+   - マルチモーダル対応: Geminiモデル
+   - 長文処理: Claudeモデル
+   - 汎用的な用途: GPTモデル
+
+## 使用方法
+
+モデルは以下のように設定できます：
+
+```typescript
+import { google } from '@ai-sdk/google';
+import { openai } from '@ai-sdk/openai';
+import { anthropic } from '@ai-sdk/anthropic';
+
+// Google Gemini
+model: google('gemini-1.5-pro-latest')
+
+// OpenAI
+model: openai('gpt-4-turbo')
+
+// Anthropic Claude
+model: anthropic('claude-3-opus')
+```
+
+## 注意事項
+
+- 各モデルには利用制限やコストが異なります
+- APIキーの設定が必要です
+- モデルの性能は定期的に更新される可能性があります
+- 最新の情報は各プロバイダーのドキュメントを参照してくださ
 
 ## プロジェクト概要
 
@@ -277,3 +362,114 @@ npm run build
 ## ライセンス
 
 Elastic License 2.0 (ELv2) 
+
+## AgentのInstructionsの管理
+
+Agentのinstructionsは、別ファイルに分離して管理することを推奨します。これにより、以下のメリットがあります：
+
+- コードの可読性が向上
+- インストラクションの管理が容易
+- 複数のAgentで同じインストラクションを共有可能
+- バージョン管理が容易
+
+### 基本的な構成
+
+```typescript
+// agents/weather/instructions.ts
+export const weatherAgentInstructions = `
+あなたは、正確な気象情報を提供する便利な気象アシスタントです。
+
+あなたの主な役割は、ユーザーが特定の場所の天気の詳細を得るのを助けることです。応答するとき
+- 場所が提供されていない場合は、常に場所を尋ねる
+- 場所名が英語でない場合は翻訳してください。
+- 複数の部分からなる場所（例:「New York, NY」）を指定する場合は、最も関連性の高い部分（例:「New York」）を使用してください。
+- 湿度、風の状態、降水量など、関連する詳細を含める。
+- 回答は簡潔に、しかし有益なものにする
+- 可能な限り日本語で返答してください。
+- 現在の天気と、週間予報を返答します。
+`;
+
+// agents/activity/instructions.ts
+export const activityAgentInstructions = `
+あなたは、天気に基づいて適切なアクティビティを提案するエキスパートです。
+
+応答するとき
+- 天気の状態に応じて適切なアクティビティを提案する
+- 屋内・屋外のアクティビティをバランスよく提案する
+- 安全性を考慮した提案を行う
+- 具体的な場所や時間帯を含める
+- 可能な限り日本語で返答してください。
+`;
+```
+
+### Agentでの使用方法
+
+```typescript
+// agents/weather/index.ts
+import { Agent } from '@mastra/core/agent';
+import { google } from '@ai-sdk/google';
+import { weatherAgentInstructions } from './instructions';
+
+export const weatherAgent = new Agent({
+  name: 'Weather Agent',
+  model: google('gemini-1.5-pro-latest'),
+  instructions: weatherAgentInstructions,
+  tools: { /* ツールの定義 */ }
+});
+
+// agents/activity/index.ts
+import { Agent } from '@mastra/core/agent';
+import { google } from '@ai-sdk/google';
+import { activityAgentInstructions } from './instructions';
+
+export const activityAgent = new Agent({
+  name: 'Activity Agent',
+  model: google('gemini-1.5-pro-latest'),
+  instructions: activityAgentInstructions,
+  tools: { /* ツールの定義 */ }
+});
+```
+
+### インストラクションの共有
+
+複数のAgentで同じインストラクションを使用する場合：
+
+```typescript
+// agents/common/instructions.ts
+export const commonInstructions = `
+基本的な応答ルール：
+- 常に丁寧で親切な対応を心がける
+- 可能な限り日本語で返答する
+- 不明な点は質問する
+- 安全な提案を行う
+`;
+
+// agents/weather/instructions.ts
+import { commonInstructions } from '../common/instructions';
+
+export const weatherAgentInstructions = `
+${commonInstructions}
+
+あなたは、正確な気象情報を提供する便利な気象アシスタントです。
+...
+`;
+```
+
+### ベストプラクティス
+
+1. ファイル構成
+   - 各Agentディレクトリに`instructions.ts`を作成
+   - 共通のインストラクションは`common`ディレクトリに配置
+
+2. インストラクションの管理
+   - 明確な構造を持つ
+   - 定期的に見直しと更新を行う
+   - バージョン管理を適切に行う
+
+3. 命名規則
+   - ファイル名: `instructions.ts`
+   - 変数名: `{agentName}Instructions`
+
+4. ドキュメント化
+   - インストラクションの目的をコメントで説明
+   - 更新履歴を記録 
