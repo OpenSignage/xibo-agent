@@ -1,6 +1,94 @@
 # Xibo Agent
 
-Xibo Agentは、Mastraフレームワークを使用して構築されたAIエージェントプロジェクトです。
+Xibo-CMSのためのエージェントツールです。
+
+## 環境設定
+
+### APIキーの設定
+
+GoogleGenerativeAIを使用するには、APIキーを設定する必要があります。
+
+#### 方法1: 環境変数の設定
+
+```bash
+# macOS/Linux
+export GOOGLE_GENERATIVE_AI_API_KEY=your_api_key_here
+
+# Windows
+set GOOGLE_GENERATIVE_AI_API_KEY=your_api_key_here
+```
+
+#### 方法2: .envファイルの作成
+
+プロジェクトのルートディレクトリに`.env.development`ファイルを作成し、以下の内容を追加：
+
+```env
+GOOGLE_GENERATIVE_AI_API_KEY=your_api_key_here
+```
+
+APIキーの取得方法：
+1. Google Cloud Consoleにアクセス
+2. プロジェクトを作成または選択
+3. APIとサービス > 認証情報
+4. 「認証情報を作成」> 「APIキー」
+5. 生成されたAPIキーをコピー
+
+## ツール一覧
+
+### Xibo Manual Tool
+
+Xibo-CMSのマニュアルを参照して回答を提供するツールです。
+
+#### 設定
+
+`src/mastra/tools/xibo-manual/config.ts`で以下の設定を行うことができます：
+
+```typescript
+export const config = {
+  // マニュアルのベースURL
+  baseUrl: 'https://sigme.net/manual-r4/ja/',
+  
+  // パス設定
+  paths: {
+    // プロジェクトのルートディレクトリ
+    // 環境変数APP_ROOTが設定されていない場合はデフォルト値を使用
+    root: process.env.APP_ROOT || '/Users/miuramasataka/OpenSignage/xibo-agent',
+    
+    // マニュアルコンテンツのディレクトリ
+    contents: 'src/mastra/tools/xibo-manual/contents'
+  }
+} as const;
+```
+
+#### 環境変数の設定
+
+異なる環境で使用する場合は、環境変数`APP_ROOT`を設定してください：
+
+```bash
+# macOS/Linux
+export APP_ROOT=/path/to/your/project
+
+# Windows
+set APP_ROOT=C:\path\to\your\project
+```
+
+または、`.env`ファイルを作成して設定することもできます：
+
+```env
+APP_ROOT=/path/to/your/project
+```
+
+#### 使用方法
+
+1. マニュアルコンテンツを`contents`ディレクトリに配置
+2. 必要に応じて`config.ts`の設定を変更
+3. ツールを実行
+
+#### 注意事項
+
+- マニュアルコンテンツは`.md`形式で保存してください
+- 各ファイルにはフロントマター（メタデータ）を含めてください
+- 環境変数`APP_ROOT`が設定されていない場合は、デフォルトのパスが使用されます
 
 ## プロジェクト概要
 
