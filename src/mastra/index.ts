@@ -1,4 +1,3 @@
-
 import { Mastra } from '@mastra/core/mastra';
 import { createLogger } from '@mastra/core/logger';
 import { weatherWorkflow } from './workflows';
@@ -10,7 +9,8 @@ export const mastra = new Mastra({
   workflows: { weatherWorkflow },
   agents: { weatherAgent, xiboAgent, xiboManualAgent },
   logger: createLogger({
-    name: 'Mastra',
+    name: 'Xibo-Agent',
     level: 'info',
   }),
 });
+
