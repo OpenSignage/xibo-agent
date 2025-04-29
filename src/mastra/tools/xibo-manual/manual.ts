@@ -5,6 +5,14 @@ import { config } from './config';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createLogger } from '@mastra/core/logger';
+import { mastra } from '../../index';
+
+// ロガーの作成
+const logger = createLogger({
+  name: 'xibo-manual',
+  level: 'info'
+});
 
 // 元のソースコードのパスを取得
 const __filename = fileURLToPath(import.meta.url);
@@ -19,13 +27,13 @@ const MANUAL_BASE_URL = config.baseUrl;
 const CONTENTS_DIR = SOURCE_DIR;
 
 // デバッグ用：パスを確認
-console.log('BASE_DIR:', BASE_DIR);
-console.log('SOURCE_DIR:', SOURCE_DIR);
-console.log('CONTENTS_DIR:', CONTENTS_DIR);
+logger.debug('BASE_DIR', { BASE_DIR });
+logger.debug('SOURCE_DIR', { SOURCE_DIR });
+logger.info('CONTENTS_DIR', { CONTENTS_DIR });
 
 const loadManualContents = () => {
   const contents: Record<string, string> = {};
-  
+
   const files = fs.readdirSync(CONTENTS_DIR);
   for (const file of files) {
     if (file.endsWith('.md')) {
@@ -73,13 +81,11 @@ const generateManualSections = () => {
       keywords: frontMatter.keywords
     };
   }
-  
-  console.log('Generated sections:', sections);
+
   return sections;
 };
 
 const manualSections = generateManualSections();
-console.log('Manual sections:', manualSections);
 
 // マニュアルの内容を読み込む
 const loadManualContent = () => {
@@ -113,7 +119,7 @@ ${MANUAL_CONTENT}
     const answer = response.text();
     
     if (!answer) {
-      console.log('No answer generated');
+      logger.warn('No answer generated');
       return {
         answer: '申し訳ありません。回答を生成できませんでした。',
         relevantSection: manualSections.introduction
@@ -125,14 +131,12 @@ ${MANUAL_CONTENT}
       answer.toLowerCase().includes(section.title.toLowerCase())
     );
 
-    console.log('Section match:', sectionMatch);
-
     return {
       answer,
       relevantSection: sectionMatch ? manualSections[sectionMatch[0] as keyof typeof manualSections] : manualSections.introduction
     };
   } catch (error) {
-    console.error('AIによる回答生成でエラーが発生しました:', error);
+    logger.error('AIによる回答生成でエラーが発生しました', { error });
     return {
       answer: '申し訳ありません。現在、回答を生成できません。',
       relevantSection: manualSections.introduction
@@ -155,10 +159,7 @@ export const xiboManualTool = createTool({
     })
   }),
   execute: async ({ context }) => {
-    console.log(' findRelevantSection:', context.query);
     const { answer, relevantSection } = await findRelevantSection(context.query);
-    console.log(' answer:', answer);
-    console.log(' relevantSection:', relevantSection);
     
     return {
       answer: `${answer}\n\n詳細は以下のページをご確認ください：\n${relevantSection.url}`,
