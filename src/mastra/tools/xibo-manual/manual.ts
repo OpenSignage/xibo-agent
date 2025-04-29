@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { createLogger } from '@mastra/core/logger';
 import { mastra } from '../../index';
 
+// ロガーの作成
 const logger = createLogger({
   name: 'xibo-manual',
   level: 'info'
