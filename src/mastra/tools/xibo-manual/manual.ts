@@ -101,8 +101,48 @@ const MANUAL_CONTENT = loadManualContent();
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY || '');
 
+// キャッシュ用のインターフェース
+interface CacheEntry {
+  answer: string;
+  relevantSection: any;
+  timestamp: number;
+}
+
+// キャッシュの有効期限（1時間）
+const CACHE_TTL = 60 * 60 * 1000;
+
+// キャッシュストア
+const answerCache = new Map<string, CacheEntry>();
+
+// キャッシュから回答を取得する関数
+const getCachedAnswer = (query: string): CacheEntry | null => {
+  const cached = answerCache.get(query);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached;
+  }
+  return null;
+};
+
+// 回答をキャッシュに保存する関数
+const cacheAnswer = (query: string, answer: string, relevantSection: any) => {
+  answerCache.set(query, {
+    answer,
+    relevantSection,
+    timestamp: Date.now()
+  });
+};
+
 const findRelevantSection = async (query: string) => {
   try {
+    // キャッシュをチェック
+    const cached = getCachedAnswer(query);
+    if (cached) {
+      return {
+        answer: cached.answer,
+        relevantSection: cached.relevantSection
+      };
+    }
+
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
     const prompt = `あなたはXibo-CMSの専門家です。以下のマニュアルの内容を基に、ユーザーの質問に回答してください。
@@ -131,9 +171,14 @@ ${MANUAL_CONTENT}
       answer.toLowerCase().includes(section.title.toLowerCase())
     );
 
+    const relevantSection = sectionMatch ? manualSections[sectionMatch[0] as keyof typeof manualSections] : manualSections.introduction;
+
+    // 回答をキャッシュに保存
+    cacheAnswer(query, answer, relevantSection);
+
     return {
       answer,
-      relevantSection: sectionMatch ? manualSections[sectionMatch[0] as keyof typeof manualSections] : manualSections.introduction
+      relevantSection
     };
   } catch (error) {
     logger.error('AIによる回答生成でエラーが発生しました', { error });
