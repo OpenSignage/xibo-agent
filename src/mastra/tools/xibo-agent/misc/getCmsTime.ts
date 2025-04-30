@@ -1,34 +1,30 @@
 import { z } from "zod";
 import { config } from "../config";
+import { getAuthHeaders } from "../auth";
 
 interface GetCmsTimeParams {
   cmsUrl?: string;
-  apiKey?: string;
 }
 
 const getCmsTimeSchema = z.object({
   cmsUrl: z.string().optional().describe("Xibo CMSのURL"),
-  apiKey: z.string().optional().describe("Xibo CMSのAPIキー"),
 });
 
 export const getCmsTime: any = {
   name: "getCmsTime",
   description: "Xibo CMSの現在時刻を取得します",
   parameters: getCmsTimeSchema,
-  execute: async ({ cmsUrl, apiKey }: GetCmsTimeParams) => {
+  execute: async ({ cmsUrl }: GetCmsTimeParams) => {
     try {
       const url = cmsUrl || config.cmsUrl;
-      const key = apiKey || config.apiKey;
 
-      if (!url || !key) {
-        throw new Error("CMSのURLまたはAPIキーが設定されていません");
+      if (!url) {
+        throw new Error("CMSのURLが設定されていません");
       }
 
+      const headers = await getAuthHeaders();
       const response = await fetch(`${url}/api/clock`, {
-        headers: {
-          "Authorization": `Bearer ${key}`,
-          "Content-Type": "application/json",
-        },
+        headers,
       });
 
       if (!response.ok) {
