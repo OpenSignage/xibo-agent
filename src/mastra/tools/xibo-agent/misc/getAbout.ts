@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { DynamicStructuredTool } from "@langchain/core/tools";
+import { config } from "../config";
+import { getAuthHeaders } from "../auth";
 
 const aboutResponseSchema = z.object({
   version: z.string(),
@@ -14,11 +16,9 @@ export const getAbout = new DynamicStructuredTool({
   schema: z.object({}),
   func: async () => {
     try {
-      const response = await fetch(`${process.env.XIBO_API_URL}/about`, {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.XIBO_API_KEY}`,
-        },
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${config.cmsUrl}/api/about`, {
+        headers,
       });
 
       if (!response.ok) {
