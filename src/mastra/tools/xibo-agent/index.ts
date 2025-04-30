@@ -1,2 +1,3 @@
-export * from './getCmsTime';
-export { getCmsTime } from "./getCmsTime"; 
+export * from './misc/getCmsTime';
+export * from './misc/getAbout';
+export { getCmsTime } from "./misc/getCmsTime"; 
