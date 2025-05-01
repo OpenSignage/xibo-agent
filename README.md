@@ -23,7 +23,18 @@ set GOOGLE_GENERATIVE_AI_API_KEY=your_api_key_here
 プロジェクトのルートディレクトリに`.env.development`ファイルを作成し、以下の内容を追加：
 
 ```env
+# Google Generative AI APIキー
 GOOGLE_GENERATIVE_AI_API_KEY=your_api_key_here
+
+# Xibo CMS設定
+XIBO_CMS_URL=https://your-xibo-cms-url
+XIBO_CMS_USERNAME=your_username
+XIBO_CMS_PASSWORD=your_password
+XIBO_DISPLAY_ID=your_display_id
+XIBO_DISPLAY_KEY=your_display_key
+
+# アプリケーション設定
+APP_ROOT=/path/to/your/project
 ```
 
 APIキーの取得方法：
@@ -32,6 +43,71 @@ APIキーの取得方法：
 3. APIとサービス > 認証情報
 4. 「認証情報を作成」> 「APIキー」
 5. 生成されたAPIキーをコピー
+
+## Mastra アップデートガイド
+
+### アップデート方法
+
+#### 1. 現在のバージョン確認
+```bash
+npm list mastra
+```
+
+#### 2. 最新バージョンへのアップデート
+```bash
+npm update mastra
+```
+
+#### 3. 特定のバージョンへのアップデート
+```bash
+npm install mastra@<version>
+```
+
+### バージョン管理について
+
+- `package.json`でのバージョン指定方法：
+  - `^0.6.0`: メジャーバージョンが変わらない範囲で自動アップデート
+  - `~0.6.0`: パッチバージョンのみアップデート
+  - `0.6.0`: 完全一致（アップデートなし）
+  - `*`: 最新バージョン（非推奨）
+
+### アップデート後の確認事項
+
+1. バージョン確認
+```bash
+npm list mastra
+```
+
+2. 更新可能なパッケージの確認
+```bash
+npm outdated
+```
+
+3. アプリケーションの動作確認
+- アップデート後は必ずアプリケーションの動作確認を行ってください
+- 特に破壊的変更（Breaking Changes）がないか確認してください
+
+### 注意事項
+
+- メジャーバージョンの変更がある場合は、互換性の問題が発生する可能性があります
+- アップデート前に必ず変更履歴を確認することをお勧めします
+- 本番環境へのアップデートは、テスト環境で十分な検証を行ってから実施してください
+
+### トラブルシューティング
+
+アップデート後に問題が発生した場合：
+
+1. 前のバージョンに戻す
+```bash
+npm install mastra@<previous_version>
+```
+
+2. 依存関係のクリーンアップ
+```bash
+npm cache clean --force
+rm -rf node_modules
+npm install
+```
 
 ## ツール一覧
 

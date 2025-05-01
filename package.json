@@ -18,13 +18,14 @@
     "@google/generative-ai": "^0.24.0",
     "@langchain/core": "^0.3.49",
     "@mastra/core": "^0.9.1-alpha.0",
+    "@mastra/libsql": "^0.0.1",
     "@mastra/memory": "^0.2.10",
     "@mastra/rag": "^0.1.19",
     "zod": "^3.24.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.2",
-    "mastra": "^0.5.0-alpha.9",
+    "mastra": "^0.6.0",
     "typescript": "^5.8.3"
   }
 }
