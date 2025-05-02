@@ -5,6 +5,7 @@ import { weatherWorkflow } from './workflows';
 import { weatherAgent } from './agents/weather';
 import { xiboAgent } from './agents/xibo-agent';
 import { xiboManualAgent } from './agents/xibo-manual';
+import { svgWorkflow } from './workflows/svg-illustration';
 
 export const mastra = new Mastra({
   agents: {
@@ -14,6 +15,7 @@ export const mastra = new Mastra({
   },
   workflows: {
     weather: weatherWorkflow,
+    illustration: svgWorkflow,
   },
   logger: createLogger({
     name: 'Xibo-Agent',
@@ -23,4 +25,3 @@ export const mastra = new Mastra({
     url: 'file:../mastra.db',
   }),
 });
-

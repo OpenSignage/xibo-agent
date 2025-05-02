@@ -13,5 +13,5 @@ export const xiboAgent = new Agent({
     'get-user': getUser,
     'get-users': getUsers,
     'get-user-me': getUserMe
-  },
+  }
 }); 
