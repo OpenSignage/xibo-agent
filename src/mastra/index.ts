@@ -18,7 +18,7 @@ export const mastra = new Mastra({
     illustration: svgWorkflow,
   },
   logger: createLogger({
-    name: 'Xibo-Agent',
+    name: 'Xibo-System',
     level: 'debug',
   }),
   storage: new LibSQLStore({
