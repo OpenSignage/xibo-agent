@@ -70,55 +70,31 @@ const userResponseSchema = z.array(z.object({
 export const getUsers = createTool({
   id: 'get-users',
   description: 'Xiboのユーザー一覧を取得します',
-  inputSchema: z.object({
-    start: z.number().optional().describe('開始位置（デフォルト: 0）'),
-    length: z.number().optional().describe('取得件数（デフォルト: 100）'),
-    search: z.string().optional().describe('検索文字列（ユーザー名など）'),
-  }),
+  inputSchema: z.object({}),
   outputSchema: z.string(),
-  execute: async ({ context }) => {
+  execute: async () => {
     try {
       console.log("[DEBUG] getUsers: 開始");
-      console.log("[DEBUG] getUsers: config =", config);
       
       if (!config.cmsUrl) {
         console.error("[DEBUG] getUsers: CMSのURLが設定されていません");
         throw new Error("CMSのURLが設定されていません");
       }
-      console.log(`[DEBUG] getUsers: CMS URL = ${config.cmsUrl}`);
 
       const headers = await getAuthHeaders();
-      console.log("[DEBUG] getUsers: 認証ヘッダーを取得しました");
-
-      // クエリパラメータの構築
-      const queryParams = new URLSearchParams();
-      if (context.start !== undefined) queryParams.append('start', context.start.toString());
-      if (context.length !== undefined) queryParams.append('length', context.length.toString());
-      if (context.search) queryParams.append('userName', `*${context.search}*`);
-
-      const queryString = queryParams.toString();
-      const url = `${config.cmsUrl}/api/user${queryString ? `?${queryString}` : ''}`;
+      const url = `${config.cmsUrl}/api/user`;
 
       console.log(`[DEBUG] getUsers: APIリクエストを開始します: ${url}`);
       const response = await fetch(url, {
         headers,
       });
 
-      console.log(`[DEBUG] getUsers: レスポンスステータス = ${response.status}`);
       if (!response.ok) {
-        console.error(`[DEBUG] getUsers: HTTPエラーが発生しました: ${response.status}`);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log("[DEBUG] getUsers: レスポンスデータを取得しました");
-      console.log("[DEBUG] getUsers: レスポンスデータの構造:");
-      console.log("生データ:", JSON.stringify(data, null, 2));
-      console.log("データ型:", typeof data);
-      console.log("キー一覧:", Object.keys(data));
-
       const validatedData = userResponseSchema.parse(data);
-      console.log("[DEBUG] getUsers: データの検証が成功しました");
 
       // ユーザー一覧を整形して表示
       const formattedUsers = validatedData.map(user => ({
