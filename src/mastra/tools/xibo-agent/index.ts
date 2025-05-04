@@ -5,3 +5,4 @@ export { getUsers } from './user/getUsers';
 export { getUserMe } from './user/getUserMe';
 export { getModules } from './modules/getModules';
 export { getDisplays } from './display/getDisplays';
+export { getLayouts } from './layout/getLayouts';
