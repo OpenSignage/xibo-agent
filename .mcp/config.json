@@ -1,11 +1,12 @@
 {
   "mcpServers": {
-    "mastra": {
+    "canva": {
       "command": "npx",
       "args": [
         "-y",
-        "@mastra/mcp-docs-server@latest"
+        "@canva/cli@latest",
+        "mcp"
       ]
     }
   }
-}
+} 

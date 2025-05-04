@@ -28,7 +28,7 @@ const userResponseSchema = z.array(z.object({
   userId: z.number(),
   userName: z.string(),
   userTypeId: z.number(),
-  loggedIn: z.string().nullable(),
+  loggedIn: z.number().nullable(),
   email: z.string(),
   homePageId: z.string(),
   homeFolderId: z.number(),
