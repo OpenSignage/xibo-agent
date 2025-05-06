@@ -9,9 +9,6 @@ import { getCmsTime,
          getDisplays,
          getLayouts } from '../../tools/xibo-agent/';
 import { xiboAgentInstructions } from './instructions';
-import { getMCPTools } from '../../tools/xibo-agent/mcp';
-
-const mcpTools = await getMCPTools();
 
 export const xiboAgent = new Agent({
   name: 'Xibo Agent',
@@ -25,7 +22,6 @@ export const xiboAgent = new Agent({
     'get-user-me': getUserMe,
     'get-modules': getModules,
     'get-displays': getDisplays,
-    'get-layouts': getLayouts,
-    'canva': mcpTools.canva
+    'get-layouts': getLayouts
   }
 }); 

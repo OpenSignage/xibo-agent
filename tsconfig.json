@@ -9,10 +9,26 @@
     "skipLibCheck": true,
     "noEmit": true,
     "outDir": "dist",
-    "allowImportingTsExtensions": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@mcp/*": [".mcp/*"],
+      "@modelcontextprotocol/sdk": ["./node_modules/@modelcontextprotocol/sdk"]
+    },
+    "typeRoots": [
+      "./node_modules/@types",
+      "./node_modules/@modelcontextprotocol/sdk"
+    ],
+    "types": ["node"]
   },
   "include": [
-    "src/**/*"
-  ]
+    "src/**/*",
+    ".mcp/**/*.json"
+  ],
+  "exclude": [
+    "node_modules",
+    ".mastra",
+    "dist"
+  ],
+  "references": []
 }
