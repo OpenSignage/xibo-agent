@@ -1,3 +1,5 @@
+import { config } from 'dotenv';
+import { resolve } from 'path';
 import { Mastra } from '@mastra/core';
 import { LibSQLStore } from '@mastra/libsql';
 import { createLogger } from '@mastra/core/logger';
@@ -6,14 +8,18 @@ import { weatherAgent } from './agents/weather';
 import { xiboAgent } from './agents/xibo-agent';
 import { xiboManualAgent } from './agents/xibo-manual';
 import { svgWorkflow } from './workflows/svg-illustration';
-import { createMCPAgent } from './agents/mcp-agent';
+import { mcpAgent } from './agents/mcp-agent';
+
+// 環境変数の読み込み
+const envPath = resolve(process.cwd(), '.env.development');
+config({ path: envPath });
 
 export const mastra = new Mastra({
   agents: {
     weather: weatherAgent,
     xibo: xiboAgent,
     manual: xiboManualAgent,
-    mcp: await createMCPAgent()
+    mcp: mcpAgent
   },
   workflows: {
     weather: weatherWorkflow,
