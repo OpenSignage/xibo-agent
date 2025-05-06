@@ -1,12 +1,20 @@
 {
   "mcpServers": {
-    "canva": {
+    "desktop-commander": {
+      "type": "local",
       "command": "npx",
       "args": [
         "-y",
-        "@canva/cli@latest",
-        "mcp"
-      ]
+        "@smithery/cli@1.1.84",
+        "run",
+        "@wonderwhy-er/desktop-commander",
+        "--key",
+        "a8e531bf-8ac5-4ad8-bfc7-cc1c63ac0093"
+      ],
+      "provider": "@wonderwhy-er/desktop-commander",
+      "version": "latest",
+      "description": "Execute terminal commands and manage files with diff editing capabilities",
+      "capabilities": ["coding", "shell", "terminal", "task automation"]
     }
   }
 } 
