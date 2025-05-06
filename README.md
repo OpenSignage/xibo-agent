@@ -35,7 +35,70 @@ XIBO_DISPLAY_KEY=your_display_key
 
 # アプリケーション設定
 APP_ROOT=/path/to/your/project
+
+# Brave Search APIキー
+BRAVE_API_KEY=your_brave_api_key_here
 ```
+
+### MCPサーバーの設定
+
+MCP（Model Context Protocol）サーバーの設定は`.mcp/config.json`で行います。
+
+#### 設定ファイルの作成
+
+プロジェクトのルートディレクトリに`.mcp/config.json`を作成し、以下の内容を追加：
+
+```json
+{
+  "mcpServers": {
+    "desktop-commander": {
+      "type": "local",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@smithery/cli@1.1.84",
+        "run",
+        "@wonderwhy-er/desktop-commander",
+        "--key",
+        "your_desktop_commander_key_here"
+      ],
+      "provider": "@wonderwhy-er/desktop-commander",
+      "version": "latest",
+      "description": "Execute terminal commands and manage files with diff editing capabilities",
+      "capabilities": {
+        "coding": true,
+        "shell": true,
+        "terminal": true,
+        "task_automation": true
+      }
+    },
+    "brave-search": {
+      "type": "local",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "your_brave_api_key_here"
+      },
+      "provider": "@modelcontextprotocol/server-brave-search",
+      "version": "latest",
+      "description": "Search the web using Brave Search API",
+      "capabilities": {
+        "search": true,
+        "web": true
+      }
+    }
+  }
+}
+```
+
+#### 注意事項
+
+- `.mcp`ディレクトリは`.gitignore`に追加されており、GitHubには公開されません
+- APIキーなどの機密情報は環境変数から読み込むことを推奨します
+- 各開発者は自分の環境に合わせて設定を管理してください
 
 APIキーの取得方法：
 1. Google Cloud Consoleにアクセス

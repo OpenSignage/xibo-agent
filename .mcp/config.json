@@ -14,7 +14,30 @@
       "provider": "@wonderwhy-er/desktop-commander",
       "version": "latest",
       "description": "Execute terminal commands and manage files with diff editing capabilities",
-      "capabilities": ["coding", "shell", "terminal", "task automation"]
+      "capabilities": {
+        "coding": true,
+        "shell": true,
+        "terminal": true,
+        "task_automation": true
+      }
+    },
+    "brave-search": {
+      "type": "local",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "BSAESk786yTRkEWEiJ1XZ0TG4LWYVDY"
+      },
+      "provider": "@modelcontextprotocol/server-brave-search",
+      "version": "latest",
+      "description": "Search the web using Brave Search API",
+      "capabilities": {
+        "search": true,
+        "web": true
+      }
     }
   }
 } 

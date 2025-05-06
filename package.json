@@ -23,8 +23,10 @@
     "@mastra/memory": "^0.3.1",
     "@mastra/rag": "^0.1.20",
     "@modelcontextprotocol/sdk": "^1.11.0",
+    "@modelcontextprotocol/server-brave-search": "^0.6.2",
     "@smithery/sdk": "^1.2.2",
     "@wonderwhy-er/desktop-commander": "^0.1.38",
+    "dotenv": "^16.5.0",
     "zod": "^3.24.3"
   },
   "devDependencies": {
