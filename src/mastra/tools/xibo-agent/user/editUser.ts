@@ -22,17 +22,20 @@ const userSchema = z.object({
 
 const apiResponseSchema = z.object({
   success: z.boolean(),
-  data: z.array(userSchema),
+  data: userSchema,
 });
 
-export const getUsers = createTool({
-  id: "get-users",
-  description: "ユーザーを検索",
+export const editUser = createTool({
+  id: "edit-user",
+  description: "ユーザーを編集",
   inputSchema: z.object({
-    userId: z.number().optional(),
-    userName: z.string().optional(),
-    userTypeId: z.number().optional(),
-    retired: z.number().optional(),
+    userId: z.number(),
+    userName: z.string(),
+    email: z.string().optional(),
+    userTypeId: z.number(),
+    homePageId: z.number(),
+    libraryQuota: z.number().optional(),
+    newPassword: z.string().optional(),
   }),
   outputSchema: apiResponseSchema,
   execute: async ({ context }) => {
@@ -40,19 +43,23 @@ export const getUsers = createTool({
       throw new Error("CMS URL is not set");
     }
 
-    const url = new URL(`${config.cmsUrl}/user`);
+    const url = new URL(`${config.cmsUrl}/user/${context.userId}`);
     
-    // クエリパラメータの追加
-    if (context.userId) url.searchParams.append("userId", context.userId.toString());
-    if (context.userName) url.searchParams.append("userName", context.userName);
-    if (context.userTypeId) url.searchParams.append("userTypeId", context.userTypeId.toString());
-    if (context.retired) url.searchParams.append("retired", context.retired.toString());
+    // フォームデータの作成
+    const formData = new FormData();
+    formData.append("userName", context.userName);
+    if (context.email) formData.append("email", context.email);
+    formData.append("userTypeId", context.userTypeId.toString());
+    formData.append("homePageId", context.homePageId.toString());
+    if (context.libraryQuota) formData.append("libraryQuota", context.libraryQuota.toString());
+    if (context.newPassword) formData.append("newPassword", context.newPassword);
 
     console.log(`Requesting URL: ${url.toString()}`);
 
     const response = await fetch(url.toString(), {
-      method: "GET",
+      method: "PUT",
       headers: await getAuthHeaders(),
+      body: formData,
     });
 
     if (!response.ok) {
@@ -61,9 +68,9 @@ export const getUsers = createTool({
 
     const rawData = await response.json();
     const validatedData = apiResponseSchema.parse(rawData);
-    console.log("Users retrieved successfully");
+    console.log("User edited successfully");
     return validatedData;
   },
 });
 
-export default getUsers; 
+export default editUser; 
