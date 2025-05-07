@@ -1,0 +1,14 @@
+export { addWidget } from './addWidget';
+export { editWidget } from './editWidget';
+export { deleteWidget } from './deleteWidget';
+export { editWidgetTransition } from './editWidgetTransition';
+export { editWidgetAudio } from './editWidgetAudio';
+export { deleteWidgetAudio } from './deleteWidgetAudio';
+export { setWidgetRegion } from './setWidgetRegion';
+export { saveWidgetElements } from './saveWidgetElements';
+export { setWidgetDataType } from './setWidgetDataType';
+export { getWidgetData } from './getWidgetData';
+export { addWidgetData } from './addWidgetData';
+export { editWidgetData } from './editWidgetData';
+export { deleteWidgetData } from './deleteWidgetData';
+export { getWidgetDataTypes } from './getWidgetDataTypes'; 
