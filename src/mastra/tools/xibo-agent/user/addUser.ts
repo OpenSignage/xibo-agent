@@ -22,17 +22,19 @@ const userSchema = z.object({
 
 const apiResponseSchema = z.object({
   success: z.boolean(),
-  data: z.array(userSchema),
+  data: userSchema,
 });
 
-export const getUsers = createTool({
-  id: "get-users",
-  description: "ユーザーを検索",
+export const addUser = createTool({
+  id: "add-user",
+  description: "ユーザーを追加",
   inputSchema: z.object({
-    userId: z.number().optional(),
-    userName: z.string().optional(),
-    userTypeId: z.number().optional(),
-    retired: z.number().optional(),
+    userName: z.string(),
+    email: z.string().optional(),
+    userTypeId: z.number(),
+    homePageId: z.number(),
+    libraryQuota: z.number().optional(),
+    password: z.string(),
   }),
   outputSchema: apiResponseSchema,
   execute: async ({ context }) => {
@@ -42,17 +44,21 @@ export const getUsers = createTool({
 
     const url = new URL(`${config.cmsUrl}/user`);
     
-    // クエリパラメータの追加
-    if (context.userId) url.searchParams.append("userId", context.userId.toString());
-    if (context.userName) url.searchParams.append("userName", context.userName);
-    if (context.userTypeId) url.searchParams.append("userTypeId", context.userTypeId.toString());
-    if (context.retired) url.searchParams.append("retired", context.retired.toString());
+    // フォームデータの作成
+    const formData = new FormData();
+    formData.append("userName", context.userName);
+    if (context.email) formData.append("email", context.email);
+    formData.append("userTypeId", context.userTypeId.toString());
+    formData.append("homePageId", context.homePageId.toString());
+    if (context.libraryQuota) formData.append("libraryQuota", context.libraryQuota.toString());
+    formData.append("password", context.password);
 
     console.log(`Requesting URL: ${url.toString()}`);
 
     const response = await fetch(url.toString(), {
-      method: "GET",
+      method: "POST",
       headers: await getAuthHeaders(),
+      body: formData,
     });
 
     if (!response.ok) {
@@ -61,9 +67,9 @@ export const getUsers = createTool({
 
     const rawData = await response.json();
     const validatedData = apiResponseSchema.parse(rawData);
-    console.log("Users retrieved successfully");
+    console.log("User added successfully");
     return validatedData;
   },
 });
 
-export default getUsers; 
+export default addUser; 
