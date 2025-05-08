@@ -1,52 +1,54 @@
 import { z } from "zod";
-import { createTool } from '@mastra/core/tools';
+import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 
 export const assignLayout = createTool({
-  id: 'assign-layout',
-  description: 'キャンペーンにレイアウトを割り当てます',
+  id: "assign-layout",
+  description: "キャンペーンにレイアウトを割り当てる",
   inputSchema: z.object({
-    campaignId: z.number().describe('レイアウトを割り当てるキャンペーンのID'),
-    layoutId: z.number().describe('割り当てるレイアウトのID'),
-    daysOfWeek: z.array(z.number()).optional().describe('広告キャンペーン：特定の曜日（ISO週）に制限する'),
-    dayPartId: z.number().optional().describe('広告キャンペーン：特定の時間帯に制限する'),
-    geoFence: z.string().optional().describe('広告キャンペーン：特定のジオフェンスに制限する')
+    campaignId: z.number().describe("キャンペーンID"),
+    layoutId: z.number().describe("割り当てるレイアウトID"),
+    displayOrder: z.number().optional().describe("表示順序（オプション）"),
+    unassignPrevious: z.boolean().optional().describe("以前の割り当てを解除するかどうか（オプション）"),
   }),
   outputSchema: z.string(),
   execute: async ({ context }) => {
+    if (!config.cmsUrl) {
+      throw new Error("CMS URL is not set");
+    }
+
+    const url = new URL(`${config.cmsUrl}/api/campaign/layout/assign/${context.campaignId}`);
+
     try {
-      if (!config.cmsUrl) {
-        throw new Error("CMSのURLが設定されていません");
+      const formData = new FormData();
+      formData.append("layoutId", context.layoutId.toString());
+      
+      if (context.displayOrder !== undefined) {
+        formData.append("displayOrder", context.displayOrder.toString());
+      }
+      
+      if (context.unassignPrevious !== undefined) {
+        formData.append("unassignPrevious", context.unassignPrevious ? "1" : "0");
       }
 
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/campaign/layout/assign/${context.campaignId}`;
-      console.log(`[DEBUG] assignLayout: リクエストURL = ${url}`);
-
-      const formData = new FormData();
-      formData.append('layoutId', context.layoutId.toString());
-      if (context.daysOfWeek) formData.append('daysOfWeek[]', JSON.stringify(context.daysOfWeek));
-      if (context.dayPartId) formData.append('dayPartId', context.dayPartId.toString());
-      if (context.geoFence) formData.append('geoFence', context.geoFence);
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: formData
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        headers: await getAuthHeaders(),
+        body: formData,
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error(`[DEBUG] assignLayout: HTTPエラーが発生しました: ${response.status}`, errorData);
-        throw new Error(`HTTP error! status: ${response.status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      console.log("[DEBUG] assignLayout: レイアウトの割り当てが成功しました");
-      return "レイアウトが正常に割り当てられました";
+      const data = await response.json();
+      return JSON.stringify(data, null, 2);
     } catch (error) {
-      console.error("[DEBUG] assignLayout: エラーが発生しました", error);
-      return `エラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`;
+      console.error("レイアウト割り当て中にエラーが発生しました:", error);
+      throw error;
     }
   },
-}); 
+});
+
+export default assignLayout; 

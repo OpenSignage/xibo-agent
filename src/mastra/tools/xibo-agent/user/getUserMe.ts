@@ -1,8 +1,31 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Tool to retrieve current authenticated user information from Xibo CMS API
+ * 
+ * Accesses the /api/user/me endpoint to retrieve detailed information
+ * about the authenticated user (group memberships, permissions, etc.)
+ */
+
+// Import required modules
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { logger } from '../../../index';  // Import shared logger
 
+// Define user group schema
+// Validation schema to ensure API response format
 const groupSchema = z.object({
   groupId: z.number(),
   group: z.string(),
@@ -24,6 +47,8 @@ const groupSchema = z.object({
   buttons: z.array(z.unknown()),
 });
 
+// Define user response schema
+// Complete structure of user information returned from the API
 const userResponseSchema = z.object({
   userId: z.number(),
   userName: z.string(),
@@ -67,53 +92,48 @@ const userResponseSchema = z.object({
   homeFolder: z.string(),
 });
 
+// Define and export the tool
 export const getUserMe = createTool({
   id: 'get-user-me',
-  description: 'Xiboのユーザーである自分の情報を取得します  ',
+  description: 'Retrieves information about the current Xibo user',
+  // This tool doesn't require input parameters, so only define a placeholder
   inputSchema: z.object({
-    _placeholder: z.string().optional().describe('このツールは入力パラメータを必要としません')
+    _placeholder: z.string().optional().describe('This tool does not require input parameters')
   }),
+  // Output is in string format (JSON string)
   outputSchema: z.string(),
+  
+  // Tool execution logic
   execute: async ({ context }) => {
     try {
-      console.log("[DEBUG] getUserMe: 開始");
-      console.log("[DEBUG] getUserMe: config =", config);
-      
+      // Check if CMS URL is configured
       if (!config.cmsUrl) {
-        console.error("[DEBUG] getUserMe: CMSのURLが設定されていません");
-        throw new Error("CMSのURLが設定されていません");
+        throw new Error("CMS URL is not set");
       }
-      console.log(`[DEBUG] getUserMe: CMS URL = ${config.cmsUrl}`);
 
+      // Get authentication headers
       const headers = await getAuthHeaders();
-      console.log("[DEBUG] getUserMe: 認証ヘッダーを取得しました");
-      console.log("[DEBUG] getUserMe: 認証ヘッダー =", headers);
-
-      console.log(`[DEBUG] getUserMe: APIリクエストを開始します: ${config.cmsUrl}/api/user/me`);
+      
+      // Execute API request
       const response = await fetch(`${config.cmsUrl}/api/user/me`, {
         headers,
       });
 
-      console.log(`[DEBUG] getUserMe: レスポンスステータス = ${response.status}`);
+      // Handle error response
       if (!response.ok) {
-        console.error(`[DEBUG] getUserMe: HTTPエラーが発生しました: ${response.status}`);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
+      // Retrieve and validate response data
       const data = await response.json();
-      console.log("[DEBUG] getUserMe: レスポンスデータを取得しました");
-      console.log("[DEBUG] getUserMe: レスポンスデータの構造:");
-      console.log("生データ:", JSON.stringify(data, null, 2));
-      console.log("データ型:", typeof data);
-      console.log("キー一覧:", Object.keys(data));
-
       const validatedData = userResponseSchema.parse(data);
-      console.log("[DEBUG] getUserMe: データの検証が成功しました");
 
+      // Return formatted JSON
       return JSON.stringify(validatedData, null, 2);
     } catch (error) {
-      console.error("[DEBUG] getUserMe: エラーが発生しました", error);
-      return `エラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`;
+      // Log and handle errors
+      logger.error(`getUserMe: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
+      return `An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`;
     }
   },
 });

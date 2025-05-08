@@ -1,8 +1,37 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Xibo CMS User Information Retrieval Tool
+ * 
+ * This module provides functionality to retrieve user information from the Xibo CMS API.
+ * It supports filtering users by various parameters such as userId, userName, userTypeId,
+ * and retired status.
+ * 
+ * The tool validates both input parameters and API responses using Zod schemas to ensure
+ * data integrity and type safety throughout the request/response cycle.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { createLogger } from '@mastra/core/logger';
 
+const logger = createLogger({ name: 'xibo-agent:user:getUser' });
+
+/**
+ * Schema for user group data
+ */
 const groupSchema = z.object({
   groupId: z.number(),
   group: z.string(),
@@ -24,15 +53,18 @@ const groupSchema = z.object({
   buttons: z.array(z.unknown()),
 });
 
+/**
+ * Schema for user response data from the Xibo API
+ */
 const userResponseSchema = z.array(z.object({
   userId: z.number(),
   userName: z.string(),
   userTypeId: z.number(),
   loggedIn: z.number().nullable(),
-  email: z.string(),
+  email: z.string().nullable(),
   homePageId: z.string(),
   homeFolderId: z.number(),
-  lastAccessed: z.string(),
+  lastAccessed: z.string().nullable(),
   newUserWizard: z.number(),
   retired: z.number(),
   isPasswordChangeRequired: z.number(),
@@ -67,9 +99,12 @@ const userResponseSchema = z.array(z.object({
   homeFolder: z.string(),
 }));
 
+/**
+ * Tool for retrieving user information from Xibo CMS
+ */
 export const getUser = createTool({
   id: 'get-user',
-  description: 'Xiboのユーザーの情報を取得します  ',
+  description: 'Get user information from Xibo CMS',
   inputSchema: z.object({
     userId: z.number().optional().describe('Filter by User Id'),
     userName: z.string().optional().describe('Filter by User Name'),
@@ -79,20 +114,13 @@ export const getUser = createTool({
   outputSchema: z.string(),
   execute: async ({ context }) => {
     try {
-      console.log("[DEBUG] getUser: 開始");
-      console.log("[DEBUG] getUser: config =", config);
-      
       if (!config.cmsUrl) {
-        console.error("[DEBUG] getUser: CMSのURLが設定されていません");
-        throw new Error("CMSのURLが設定されていません");
+        throw new Error("CMS URL is not configured");
       }
-      console.log(`[DEBUG] getUser: CMS URL = ${config.cmsUrl}`);
 
       const headers = await getAuthHeaders();
-      console.log("[DEBUG] getUser: 認証ヘッダーを取得しました");
-      console.log("[DEBUG] getUser: 認証ヘッダー =", headers);
 
-      // クエリパラメータの構築
+      // Build query parameters
       const queryParams = new URLSearchParams();
       if (context.userId) queryParams.append('userId', context.userId.toString());
       if (context.userName) queryParams.append('userName', context.userName);
@@ -102,31 +130,21 @@ export const getUser = createTool({
       const queryString = queryParams.toString();
       const url = `${config.cmsUrl}/api/user${queryString ? `?${queryString}` : ''}`;
 
-      console.log(`[DEBUG] getUser: APIリクエストを開始します: ${url}`);
       const response = await fetch(url, {
         headers,
       });
 
-      console.log(`[DEBUG] getUser: レスポンスステータス = ${response.status}`);
       if (!response.ok) {
-        console.error(`[DEBUG] getUser: HTTPエラーが発生しました: ${response.status}`);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log("[DEBUG] getUser: レスポンスデータを取得しました");
-      console.log("[DEBUG] getUser: レスポンスデータの構造:");
-      console.log("生データ:", JSON.stringify(data, null, 2));
-      console.log("データ型:", typeof data);
-      console.log("キー一覧:", Object.keys(data));
-
       const validatedData = userResponseSchema.parse(data);
-      console.log("[DEBUG] getUser: データの検証が成功しました");
 
       return JSON.stringify(validatedData, null, 2);
     } catch (error) {
-      console.error("[DEBUG] getUser: エラーが発生しました", error);
-      return `エラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`;
+      logger.error(`Error in getUser tool: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
+      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
     }
   },
 });
