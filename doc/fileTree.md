@@ -2,10 +2,6 @@
 
 ```
 src/mastra/tools/xibo-agent/
-├── config.ts (482B, 6 lines)
-├── index.ts (1.2KB, 26 lines)
-├── auth.ts (788B, 30 lines)
-├── xibo-api.json (604KB, 15688 lines)
 ├── displayVenue/
 │   ├── index.ts (266B, 4 lines)
 │   ├── deleteDisplayVenue.ts (1.1KB, 42 lines)
@@ -71,11 +67,11 @@ src/mastra/tools/xibo-agent/
 │   ├── addCommand.ts (2.4KB, 75 lines)
 │   └── getCommands.ts (2.6KB, 73 lines)
 ├── modules/
-│   ├── index.ts (154B, 4 lines)
+│   ├── index.ts (154B, 4 lines)                                ;Reviewed 2025/5/9
 │   ├── getModuleTemplateProperties.ts (1.6KB, 58 lines)
 │   ├── getModuleTemplates.ts (2.3KB, 90 lines)
 │   ├── getModuleProperties.ts (1.4KB, 51 lines)
-│   └── getModules.ts (3.3KB, 90 lines)
+│   └── getModules.ts (3.3KB, 90 lines)                         ;Reviewed 2025/5/9
 ├── usergroup/
 │   ├── copyUserGroup.ts (2.0KB, 66 lines)
 │   ├── unassignUserFromGroup.ts (1.9KB, 64 lines)
@@ -85,7 +81,7 @@ src/mastra/tools/xibo-agent/
 │   ├── addUserGroup.ts (2.9KB, 77 lines)
 │   └── getUserGroups.ts (1.8KB, 61 lines)
 ├── user/
-│   ├── getUsers.ts (3.6KB, 115 lines)
+│   ├── getUsers.ts (3.6KB, 115 lines)                          ;Reviewd 2025/5/9
 │   ├── index.ts (411B, 12 lines)
 │   ├── setMultiEntityPermissions.ts (1.6KB, 58 lines)
 │   ├── getMultiEntityPermissions.ts (1.4KB, 53 lines)
@@ -96,8 +92,8 @@ src/mastra/tools/xibo-agent/
 │   ├── deleteUser.ts (1.4KB, 52 lines)
 │   ├── editUser.ts (2.3KB, 76 lines)
 │   ├── addUser.ts (2.2KB, 75 lines)
-│   ├── getUser.ts (4.8KB, 132 lines)
-│   └── getUserMe.ts (4.2KB, 119 lines)
+│   ├── getUser.ts (4.8KB, 132 lines)                           ;Reviewed 2025/5/9
+│   └── getUserMe.ts (4.2KB, 119 lines)                         ;Reviewed 2025/5/8
 ├── statistics/
 │   ├── getExportStatsCount.ts (1.5KB, 50 lines)
 │   ├── getTimeDisconnected.ts (1.7KB, 59 lines)
@@ -142,9 +138,9 @@ src/mastra/tools/xibo-agent/
 │   ├── editDisplay.ts (2.9KB, 71 lines)
 │   └── getDisplays.ts (4.9KB, 153 lines)
 ├── misc/
-│   ├── index.ts (58B, 2 lines)
-│   ├── getAbout.ts (2.3KB, 60 lines)
-│   └── getCmsTime.ts (2.0KB, 52 lines)
+│   ├── index.ts (58B, 2 lines)                                 ;Reviewed 2025/5/8
+│   ├── getAbout.ts (2.3KB, 60 lines)                           ;Reviewed 2025/5/8
+│   └── getCmsTime.ts (2.0KB, 52 lines)                         ;Reviewed 2025/5/8
 ├── displayprofile/
 │   ├── index.ts (297B, 5 lines)
 │   ├── copyDisplayProfile.ts (1.1KB, 39 lines)
@@ -259,8 +255,6 @@ src/mastra/tools/xibo-agent/
 │   ├── deleteLayout.ts (2.0KB, 52 lines)
 │   ├── putLayout.ts (6.7KB, 128 lines)
 │   └── postLayout.ts (5.5KB, 113 lines)
-├── utils/
-│   └── auth.ts (172B, 8 lines)
 ├── campaign/
 │   ├── selectCampaignFolder.ts (1.9KB, 47 lines)
 │   ├── removeLayout.ts (2.0KB, 48 lines)
@@ -269,6 +263,4 @@ src/mastra/tools/xibo-agent/
 │   ├── putCampaign.ts (3.5KB, 63 lines)
 │   ├── postCampaign.ts (3.4KB, 62 lines)
 │   └── getCampaigns.ts (3.6KB, 66 lines)
-└── utility/
-    └── validateAndFormatDate.ts (855B, 26 lines)
 ``` 

@@ -1,8 +1,34 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Xibo CMS Module Information Tool
+ * 
+ * This module provides functionality to retrieve information about all available
+ * modules in the Xibo CMS. It accesses the /api/module endpoint to get details
+ * about module properties, configuration options, and compatibility.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { logger } from '../../../index';
 
+/**
+ * Schema for module property definition
+ * 
+ * Represents configurable properties of Xibo modules
+ */
 const propertySchema = z.object({
   id: z.string(),
   type: z.string(),
@@ -11,6 +37,12 @@ const propertySchema = z.object({
   default: z.union([z.string(), z.number(), z.null()]),
 });
 
+/**
+ * Schema for module response data from Xibo API
+ * 
+ * Comprehensive definition of module information returned by the API,
+ * including module metadata, compatibility settings, and configuration options.
+ */
 const moduleResponseSchema = z.array(z.object({
   moduleId: z.union([z.number(), z.string().transform(Number)]),
   name: z.string().nullable(),
@@ -57,17 +89,20 @@ const moduleResponseSchema = z.array(z.object({
   allowPreview: z.union([z.number(), z.string().transform(Number)]).nullable(),
 }));
 
+/**
+ * Tool for retrieving all module information from Xibo CMS
+ */
 export const getModules = createTool({
   id: 'get-modules',
-  description: 'Xiboのモジュールを取得します  ',
+  description: 'Get information about all available Xibo CMS modules',
   inputSchema: z.object({
-    _placeholder: z.string().optional().describe('このツールは入力パラメータを必要としません')
+    _placeholder: z.string().optional().describe('This tool does not require input parameters')
   }),
   outputSchema: z.string(),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
-        throw new Error("CMSのURLが設定されていません");
+        throw new Error("CMS URL is not configured");
       }
 
       const headers = await getAuthHeaders();
@@ -84,7 +119,8 @@ export const getModules = createTool({
 
       return JSON.stringify(validatedData, null, 2);
     } catch (error) {
-      return `エラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`;
+      logger.error(`getModules: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
+      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
     }
   },
 });
