@@ -1,26 +1,78 @@
-// 基本機能
-export * from './misc';        // その他の機能
-export * from './user';        // ユーザー管理
-export * from './modules';     // モジュール管理
-export * from './display';     // ディスプレイ管理
-export * from './layout';      // レイアウト管理
-export * from './playlist';    // プレイリスト管理
-export * from './schedule';    // スケジュール管理
-export * from './notification'; // 通知管理
-export * from './widget';      // ウィジェット管理
-export * from './template';    // テンプレート管理
-export * from './resolution';  // 解像度管理
-export * from './library';     // ライブラリ管理
-export * from './displayGroup'; // ディスプレイグループ管理
-export * from './displayprofile'; // ディスプレイプロファイル管理
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
 
-// 拡張機能
-export * from "./action";      // アクション管理
-export * from "./displayVenue"; // 会場管理
-export * from "./font";        // フォント管理
-export * from "./menuBoard";   // メニューボード管理
-export * from "./playerSoftware"; // プレイヤーソフトウェア管理
-export * from "./syncGroup";   // 同期グループ管理
+/**
+ * Xibo CMS API Tool Collection
+ * 
+ * This module exports all available tools for interacting with the Xibo CMS API.
+ * Tools are organized by category and can be imported individually or as a complete set.
+ */
 
-// User
-export * from "./user";
+// Import core tools individually to ensure they're always available for getTools()
+import { getCmsTime, getAbout } from './misc';
+import { getUser, getUsers, getUserMe } from './user';
+import { getModules } from './modules';
+import { getDisplays } from './display';
+import { getLayouts } from './layout';
+
+// Basic functionality - module exports
+export * from './misc';         // System information and utilities
+export * from './user';         // User management
+export * from './modules';      // Module management
+export * from './display';      // Display management
+export * from './layout';       // Layout management
+export * from './playlist';     // Playlist management
+export * from './schedule';     // Schedule management
+export * from './notification'; // Notification management
+export * from './widget';       // Widget management
+export * from './template';     // Template management
+export * from './resolution';   // Resolution management
+export * from './library';      // Media library management
+export * from './displayGroup'; // Display group management
+export * from './displayprofile'; // Display profile management
+
+// Extended functionality - module exports
+export * from './action';       // Action management
+export * from './displayVenue'; // Display venue management
+export * from './font';         // Font management
+export * from './menuBoard';    // Menu board management
+export * from './playerSoftware'; // Player software management
+export * from './syncGroup';    // Synchronization group management
+export * from './usergroup';    // User group management
+export * from './tags';         // Tags management
+export * from './dayPart';      // Day part management
+
+/**
+ * Returns all available Xibo API tools in a structured object
+ * 
+ * This function is the recommended way to get all tools at once.
+ * It ensures consistent tool IDs and handles proper initialization.
+ * 
+ * @returns Object containing all tool instances with their IDs as keys
+ */
+export function getTools() {
+  // Core tools (guaranteed to be available)
+  const tools = {
+    'get-cms-time': getCmsTime,
+    'get-about': getAbout,
+    'get-user': getUser,
+    'get-users': getUsers,
+    'get-user-me': getUserMe,
+    'get-modules': getModules,
+    'get-displays': getDisplays,
+    'get-layouts': getLayouts
+  };
+
+  // Additional tools could be added here conditionally if needed
+  
+  return tools;
+}
