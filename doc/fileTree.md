@@ -100,11 +100,11 @@ src/mastra/tools/xibo-agent/
 │   ├── getStats.ts (3.3KB, 89 lines)
 │   └── index.ts (106B, 3 lines)
 ├── folder/
-│   ├── addFolder.ts (1.4KB, 59 lines)
-│   ├── deleteFolder.ts (1.3KB, 53 lines)
-│   ├── editFolder.ts (1.3KB, 58 lines)
-│   ├── getFolders.ts (1.8KB, 63 lines)
-│   └── index.ts (121B, 4 lines)
+│   ├── addFolder.ts (1.4KB, 59 lines)                          ;Reviewed 2025/5/9
+│   ├── deleteFolder.ts (1.3KB, 53 lines)                       ;Reviewed 2025/5/9
+│   ├── editFolder.ts (1.3KB, 58 lines)                         ;Reviewed 2025/5/9
+│   ├── getFolders.ts (1.8KB, 63 lines)                         ;Reviewed 2025/5/9
+│   └── index.ts (121B, 4 lines)                                ;Reviewed 2025/5/9
 ├── dataset/
 │   ├── selectDataSetFolder.ts (2.2KB, 76 lines)
 │   ├── addDataSet.ts (1.8KB, 62 lines)
@@ -128,7 +128,7 @@ src/mastra/tools/xibo-agent/
 │   ├── editDataSet.ts (1.9KB, 63 lines)
 │   └── getDataSets.ts (943B, 33 lines)
 ├── display/
-│   ├── index.ts (258B, 8 lines)
+│   ├── index.ts (258B, 8 lines)                                ;Reviewed 2025/5/9
 │   ├── wakeOnLan.ts (911B, 33 lines)
 │   ├── purgeAll.ts (925B, 33 lines)
 │   ├── getDisplayStatus.ts (986B, 34 lines)
@@ -136,7 +136,7 @@ src/mastra/tools/xibo-agent/
 │   ├── setDefaultLayout.ts (1.1KB, 38 lines)
 │   ├── toggleAuthorise.ts (960B, 33 lines)
 │   ├── editDisplay.ts (2.9KB, 71 lines)
-│   └── getDisplays.ts (4.9KB, 153 lines)
+│   └── getDisplays.ts (4.9KB, 153 lines)                       ;Reviewd 2025/5/9
 ├── misc/
 │   ├── index.ts (58B, 2 lines)                                 ;Reviewed 2025/5/8
 │   ├── getAbout.ts (2.3KB, 60 lines)                           ;Reviewed 2025/5/8
@@ -174,11 +174,11 @@ src/mastra/tools/xibo-agent/
 │   ├── addMedia.ts (1.5KB, 48 lines)
 │   └── getLibrary.ts (1.7KB, 48 lines)
 ├── resolution/
-│   ├── index.ts (206B, 4 lines)
+│   ├── index.ts (206B, 4 lines)                                ;Reviewed 2025/5/10
 │   ├── addResolution.ts (1.2KB, 42 lines)
 │   ├── deleteResolution.ts (933B, 33 lines)
 │   ├── editResolution.ts (1.2KB, 43 lines)
-│   └── getResolutions.ts (1.6KB, 46 lines)
+│   └── getResolutions.ts (1.6KB, 46 lines)                     ；Reviewed 2025/5/10
 ├── template/
 │   ├── index.ts (216B, 4 lines)
 │   ├── addTemplateFromLayout.ts (2.3KB, 53 lines)
