@@ -19,10 +19,12 @@
 
 // Import core tools individually to ensure they're always available for getTools()
 import { getCmsTime, getAbout } from './misc';
-import { getUser, getUsers, getUserMe } from './user';
+import { getUser, getUsers, getUserMe, addUser } from './user';
 import { getModules } from './modules';
 import { getDisplays } from './display';
 import { getLayouts } from './layout';
+import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
+import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -39,8 +41,9 @@ export * from './resolution';   // Resolution management
 export * from './library';      // Media library management
 export * from './displayGroup'; // Display group management
 export * from './displayprofile'; // Display profile management
+export * from './folder';       // Folder management
 
-// Extended functionality - module exports
+// Extendednctionality  fu- module exports
 export * from './action';       // Action management
 export * from './displayVenue'; // Display venue management
 export * from './font';         // Font management
@@ -67,9 +70,18 @@ export function getTools() {
     'get-user': getUser,
     'get-users': getUsers,
     'get-user-me': getUserMe,
+    'add-user': addUser,
     'get-modules': getModules,
     'get-displays': getDisplays,
-    'get-layouts': getLayouts
+    'get-layouts': getLayouts,
+    'get-folders': getFolders,
+    'add-folder': addFolder,
+    'edit-folder': editFolder,
+    'delete-folder': deleteFolder,
+    'get-resolutions': getResolutions,
+    'add-resolution': addResolution,
+    'edit-resolution': editResolution,
+    'delete-resolution': deleteResolution
   };
 
   // Additional tools could be added here conditionally if needed
