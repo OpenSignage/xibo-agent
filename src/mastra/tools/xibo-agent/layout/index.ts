@@ -1,6 +1,5 @@
 export { getLayouts } from './getLayouts';
-export { postLayout } from './postLayout';
-export { putLayout } from './putLayout';
+export { addLayout } from './addLayout';
 export { deleteLayout } from './deleteLayout';
 export { copyLayout } from './copyLayout';
 export { publishLayout } from './publishLayout';

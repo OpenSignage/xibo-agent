@@ -22,7 +22,7 @@ import { getCmsTime, getAbout } from './misc';
 import { getUser, getUsers, getUserMe, addUser } from './user';
 import { getModules } from './modules';
 import { getDisplays } from './display';
-import { getLayouts } from './layout';
+import { getLayouts, addLayout } from './layout';
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
 
@@ -74,6 +74,7 @@ export function getTools() {
     'get-modules': getModules,
     'get-displays': getDisplays,
     'get-layouts': getLayouts,
+    'add-layout': addLayout,
     'get-folders': getFolders,
     'add-folder': addFolder,
     'edit-folder': editFolder,
