@@ -23,6 +23,7 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Schema for resolution data returned from the API
@@ -79,24 +80,17 @@ export const getResolutions = createTool({
         headers: headers,
       });
 
-      // Get the complete response text
-      const responseText = await response.text();
-      
+      const text = await response.text();
       if (!response.ok) {
-        logger.error(`Failed to retrieve resolutions: ${responseText}`, { 
-          status: response.status,
-          url: url.toString(),
-          filters: context
-        });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
+        throw new Error(decodeErrorMessage(text));
       }
 
       // Parse the response data
       let data;
       try {
-        data = JSON.parse(responseText);
+        data = JSON.parse(text);
       } catch (error) {
-        logger.error(`Failed to parse response as JSON: ${responseText}`);
+        logger.error(`Failed to parse response as JSON: ${text}`);
         throw new Error(`Invalid JSON response from server: ${error instanceof Error ? error.message : "Unknown error"}`);
       }
 
