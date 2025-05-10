@@ -1,8 +1,25 @@
+/*
+ * Copyright (C) 2024 OpenSignage Project.
+ * All rights reserved.
+ *
+ * This software is licensed under the Elastic License 2.0 (ELv2).
+ * You may obtain a copy of the license at:
+ * https://www.elastic.co/licensing/elastic-license
+ */
+
+/**
+ * Layout Management Tool
+ * This module provides functionality to retrieve and manage Xibo layouts
+ * through the CMS API with comprehensive data validation
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { decodeErrorMessage } from "../utility/error";
 
+// Schema definition for layout response validation
 const layoutResponseSchema = z.array(z.object({
   layoutId: z.union([z.number(), z.string().transform(Number)]),
   ownerId: z.union([z.number(), z.string().transform(Number)]),
@@ -161,78 +178,61 @@ const layoutResponseSchema = z.array(z.object({
   permissionsFolderId: z.union([z.number(), z.string().transform(Number)])
 }));
 
+/**
+ * Tool for retrieving Xibo layouts with filtering options
+ */
 export const getLayouts = createTool({
   id: 'get-layouts',
-  description: 'Xiboのレイアウト一覧を取得します',
+  description: 'Retrieves a list of Xibo layouts with optional filtering',
   inputSchema: z.object({
-    layoutId: z.number().optional().describe('レイアウトIDでフィルタリング'),
-    parentId: z.number().optional().describe('親IDでフィルタリング'),
-    showDrafts: z.number().optional().describe('下書きを表示するかどうか（0-1）'),
-    layout: z.string().optional().describe('レイアウト名で部分一致検索'),
-    userId: z.number().optional().describe('ユーザーIDでフィルタリング'),
-    retired: z.number().optional().describe('廃止フラグでフィルタリング（0-1）'),
-    tags: z.string().optional().describe('タグでフィルタリング'),
-    exactTags: z.number().optional().describe('タグを完全一致で検索するかどうか（0-1）'),
-    logicalOperator: z.enum(['AND', 'OR']).optional().describe('複数タグでの検索時の論理演算子'),
-    ownerUserGroupId: z.number().optional().describe('ユーザーグループIDでフィルタリング'),
-    publishedStatusId: z.number().optional().describe('公開状態でフィルタリング（1: 公開済み、2: 下書き）'),
-    embed: z.string().optional().describe('関連データ（regions, playlists, widgets, tags, campaigns, permissions）を含めるかどうか'),
-    campaignId: z.number().optional().describe('キャンペーンIDに属するレイアウトを取得'),
-    folderId: z.number().optional().describe('フォルダIDでフィルタリング')
+    layoutId: z.number().optional().describe('Filter by layout ID'),
+    parentId: z.number().optional().describe('Filter by parent ID'),
+    showDrafts: z.number().optional().describe('Show drafts (0-1)'),
+    layout: z.string().optional().describe('Filter by layout name (partial match)'),
+    userId: z.number().optional().describe('Filter by user ID'),
+    retired: z.number().optional().describe('Filter by retired status (0-1)'),
+    tags: z.string().optional().describe('Filter by tags'),
+    exactTags: z.number().optional().describe('Use exact tag matching (0-1)'),
+    logicalOperator: z.enum(['AND', 'OR']).optional().describe('Logical operator for multiple tags'),
+    ownerUserGroupId: z.number().optional().describe('Filter by user group ID'),
+    publishedStatusId: z.number().optional().describe('Filter by publish status (1: Published, 2: Draft)'),
+    embed: z.string().optional().describe('Include related data (regions, playlists, widgets, tags, campaigns, permissions)'),
+    campaignId: z.number().optional().describe('Get layouts belonging to campaign ID'),
+    folderId: z.number().optional().describe('Filter by folder ID')
   }),
   outputSchema: z.string(),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
-        throw new Error("CMSのURLが設定されていません");
+        throw new Error("CMS URL is not configured");
       }
 
       const headers = await getAuthHeaders();
       
-      // クエリパラメータの構築
+      // Build query parameters
       const queryParams = new URLSearchParams();
-      if (context.layoutId) queryParams.append('layoutId', context.layoutId.toString());
-      if (context.parentId) queryParams.append('parentId', context.parentId.toString());
-      if (context.showDrafts !== undefined) queryParams.append('showDrafts', context.showDrafts.toString());
-      if (context.layout) queryParams.append('layout', context.layout);
-      if (context.userId) queryParams.append('userId', context.userId.toString());
-      if (context.retired !== undefined) queryParams.append('retired', context.retired.toString());
-      if (context.tags) queryParams.append('tags', context.tags);
-      if (context.exactTags !== undefined) queryParams.append('exactTags', context.exactTags.toString());
-      if (context.logicalOperator) queryParams.append('logicalOperator', context.logicalOperator);
-      if (context.ownerUserGroupId) queryParams.append('ownerUserGroupId', context.ownerUserGroupId.toString());
-      if (context.publishedStatusId) queryParams.append('publishedStatusId', context.publishedStatusId.toString());
-      if (context.embed) queryParams.append('embed', context.embed);
-      if (context.campaignId) queryParams.append('campaignId', context.campaignId.toString());
-      if (context.folderId) queryParams.append('folderId', context.folderId.toString());
-
-      const url = `${config.cmsUrl}/api/layout${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-      console.log(`[DEBUG] getLayouts: リクエストURL = ${url}`);
-
-      const response = await fetch(url, {
-        headers,
+      Object.entries(context).forEach(([key, value]) => {
+        if (value !== undefined) {
+          queryParams.append(key, value.toString());
+        }
       });
 
+      const url = `${config.cmsUrl}/api/layout${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+      const response = await fetch(url, { headers });
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error(`[DEBUG] getLayouts: HTTPエラーが発生しました: ${response.status}`, errorData);
-        throw new Error(`HTTP error! status: ${response.status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`);
+        const errorText = await response.text();
+        const decodedError = decodeErrorMessage(errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
       }
 
       const data = await response.json();
-      console.log("[DEBUG] getLayouts: レスポンスデータを取得しました");
-      console.log("[DEBUG] getLayouts: レスポンスデータの構造:");
-      console.log("生データ:", JSON.stringify(data, null, 2));
-      console.log("データ型:", typeof data);
-      console.log("キー一覧:", Object.keys(data));
-
       const validatedData = layoutResponseSchema.parse(data);
-      console.log("[DEBUG] getLayouts: データの検証が成功しました");
 
       return JSON.stringify(validatedData, null, 2);
     } catch (error) {
-      console.error("[DEBUG] getLayouts: エラーが発生しました", error);
-      return `エラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`;
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      return `Error occurred: ${errorMessage}`;
     }
   },
 });
