@@ -23,6 +23,7 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Folder interface representing folder data structure
@@ -258,15 +259,18 @@ export const getFolders = createTool({
       });
 
       // Get the complete response text
-      const responseText = await response.text();
+      let responseText = await response.text();
       
       // Check if response is successful
       if (!response.ok) {
-        logger.error(`Failed to retrieve folders: ${responseText}`, { 
+        // Decode the error message for better readability
+        const decodedText = decodeErrorMessage(responseText);
+        
+        logger.error(`Failed to retrieve folders: ${decodedText}`, { 
           status: response.status,
           url: url.toString()
         });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${decodedText}`);
       }
 
       // Parse the response text as JSON
@@ -282,6 +286,8 @@ export const getFolders = createTool({
       if (context.treeView) {
         const folderTree = buildFolderTree(data);
         const treeViewString = generateTreeView(folderTree);
+        // マークダウンコードブロックとしてフォーマット
+        const formattedTreeView = "```text\n" + treeViewString + "```";
         const flattenedTree = flattenFolderTree(folderTree);
         
         logger.info(`Retrieved ${data.length} folders successfully and generated tree view`);
@@ -289,7 +295,7 @@ export const getFolders = createTool({
           success: true,
           data: data,
           tree: flattenedTree,
-          treeViewText: treeViewString
+          treeViewText: formattedTreeView
         };
       }
 

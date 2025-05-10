@@ -23,6 +23,7 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Schema for folder data returned from the API
@@ -100,17 +101,11 @@ export const editFolder = createTool({
       });
       
       // Get the complete response text
-      const responseText = await response.text();
+      let responseText = await response.text();
       
       // Handle error responses
       if (!response.ok) {
-        logger.error(`Failed to edit folder: ${responseText}`, { 
-          status: response.status,
-          url: url.toString(),
-          folderId: context.folderId,
-          newName: context.text
-        });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
+        throw new Error(decodeErrorMessage(responseText));
       }
 
       // Parse and validate the response data

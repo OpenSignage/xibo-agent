@@ -23,6 +23,7 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { createLogger } from '@mastra/core/logger';
+import { decodeErrorMessage } from "../utility/error";
 
 const logger = createLogger({ name: 'xibo-agent:misc:getAbout' });
 
@@ -57,7 +58,8 @@ export const getAbout = createTool({
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const text = await response.text();
+        throw new Error(decodeErrorMessage(text));
       }
 
       const data = await response.json();

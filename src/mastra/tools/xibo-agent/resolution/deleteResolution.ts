@@ -22,12 +22,10 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Schema for API response after deleting a resolution
- * 
- * For DELETE operations, the API typically returns a 204 No Content status
- * with no response body. Our implementation returns a standardized success structure.
  */
 const apiResponseSchema = z.object({
   success: z.boolean(),
@@ -47,31 +45,42 @@ export const deleteResolution = createTool({
     }
 
     try {
-      // Prepare the API endpoint URL with the resolution ID
       const url = new URL(`${config.cmsUrl}/api/resolution/${context.resolutionId}`);
       logger.info(`Deleting resolution with ID: ${context.resolutionId}`);
 
+      const formData = new URLSearchParams();
+      formData.append("resolutionId", context.resolutionId.toString());
+
       // Get authentication headers
       const headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
 
-      // Send the delete request
       const response = await fetch(url.toString(), {
         method: "DELETE",
         headers: headers,
+        body: formData.toString(),
       });
-      
-      // Handle error responses
+
+      const text = await response.text();
       if (!response.ok) {
-        const responseText = await response.text();
-        logger.error(`Failed to delete resolution: ${responseText}`, { 
+        // Decode the error message for better readability
+        const decodedText = decodeErrorMessage(text);
+        let errorMessage;
+        try {
+          const errorObj = JSON.parse(decodedText);
+          errorMessage = errorObj.message || decodedText;
+        } catch {
+          errorMessage = decodedText;
+        }
+        
+        logger.error(`Failed to delete resolution: ${errorMessage}`, { 
           status: response.status,
           url: url.toString(),
           resolutionId: context.resolutionId
         });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
+        throw new Error(errorMessage);
       }
 
-      // For successful deletion (typically 204 No Content)
       logger.info(`Resolution with ID ${context.resolutionId} deleted successfully`);
       return {
         success: true,

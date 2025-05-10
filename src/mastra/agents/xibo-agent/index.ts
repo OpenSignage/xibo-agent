@@ -19,22 +19,49 @@
  * 1. A set of specialized tools for interacting with Xibo CMS API
  * 2. Custom instructions tailored for Xibo-specific tasks
  * 3. The Gemini 1.5 Pro model for sophisticated natural language understanding
+ * 4. Memory functionality to maintain context across conversations
  */
 
 import { Agent } from '@mastra/core/agent';
 import { google } from '@ai-sdk/google';
 import { getTools } from '../../tools/xibo-agent/';
 import { xiboAgentInstructions } from './instructions';
+import { Memory } from '@mastra/memory';
+import { LibSQLVector } from '@mastra/libsql';
 
 /**
  * Xibo Agent instance
  * 
  * An AI agent specialized for managing and interacting with 
  * Xibo Digital Signage CMS through natural language.
+ * 
+ * Features:
+ * - Natural language interaction with Xibo CMS
+ * - Context-aware responses using memory
+ * - Specialized tools for CMS operations
+ * - Persistent conversation history
  */
 export const xiboAgent = new Agent({
   name: 'Xibo Agent',
   instructions: xiboAgentInstructions, // Custom instructions for Xibo operations
   model: google('gemini-1.5-pro'),     // Using Google's Gemini 1.5 Pro model
-  tools: getTools()                     // All Xibo CMS API tools
+  tools: getTools(),                   // All Xibo CMS API tools
+  memory: new Memory({
+    options: {
+      lastMessages: 40,
+      semanticRecall: {
+        topK: 2,
+        messageRange: {
+          before: 2,
+          after: 2
+        }
+      },
+      threads: {
+        generateTitle: true
+      }
+    },
+    vector: new LibSQLVector({
+      connectionUrl: 'file:../memory.db'
+    })
+  })
 }); 

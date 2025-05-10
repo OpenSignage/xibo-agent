@@ -18,76 +18,45 @@
  */
 
 import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for API response after deleting a folder
- * 
- * For DELETE operations, the API typically returns a 204 No Content status
- * with no response body. Our implementation returns a standardized success structure.
+ * Tool to delete a folder from Xibo CMS
  */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.null(),
-});
-
-/**
- * Tool for deleting a folder from Xibo CMS
- * 
- * This tool requires a folder ID and will completely remove the folder
- * and potentially its contents from the CMS. This operation cannot be undone.
- */
-export const deleteFolder = createTool({
-  id: "delete-folder",
+export const deleteFolder = {
+  name: "delete-folder",
   description: "Delete a folder from Xibo CMS",
-  inputSchema: z.object({
-    folderId: z.number().describe('ID of the folder to delete'),
+  parameters: z.object({
+    folderId: z.number().describe("ID of the folder to delete"),
   }),
-  outputSchema: apiResponseSchema,
-  execute: async ({ context }) => {
-    if (!config.cmsUrl) {
-      throw new Error("CMS URL is not configured");
-    }
-
+  execute: async (params: { folderId: number }) => {
     try {
-      // Prepare the API endpoint URL with the folder ID
-      const url = new URL(`${config.cmsUrl}/api/folders/${context.folderId}`);
-      logger.info(`Deleting folder with ID: ${context.folderId}`);
+      const { folderId } = params;
+      const url = `${process.env.XIBO_API_URL}/folder/delete/${folderId}`;
+      const formData = new URLSearchParams();
+      formData.append("folderId", folderId.toString());
 
-      // Get authentication headers
-      const headers = await getAuthHeaders();
-
-      // Send the delete request
-      const response = await fetch(url.toString(), {
-        method: "DELETE",
-        headers: headers,
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString(),
       });
-      
-      // Handle error responses
+
+      const text = await response.text();
       if (!response.ok) {
-        const responseText = await response.text();
-        logger.error(`Failed to delete folder: ${responseText}`, { 
-          status: response.status,
-          url: url.toString(),
-          folderId: context.folderId
-        });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
+        throw new Error(decodeErrorMessage(text));
       }
 
-      // For successful deletion (typically 204 No Content)
-      logger.info(`Folder with ID ${context.folderId} deleted successfully`);
-      return {
-        success: true,
-        data: null
-      };
+      return { success: true, message: "Folder deleted successfully" };
     } catch (error) {
-      logger.error(`deleteFolder: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
+      logger.error("Error deleting folder:", { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   },
-});
+};
 
 export default deleteFolder; 

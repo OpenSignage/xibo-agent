@@ -143,7 +143,7 @@ export const getUser = createTool({
 
       return JSON.stringify(validatedData, null, 2);
     } catch (error) {
-      logger.error(`Error in getUser tool: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
+      logger.error(`getUser: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
       return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
     }
   },

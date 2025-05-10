@@ -23,6 +23,7 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Schema for resolution data returned from the API
@@ -61,30 +62,41 @@ export const addResolution = createTool({
       const url = new URL(`${config.cmsUrl}/api/resolution`);
       logger.info(`Creating resolution: ${context.resolution} (${context.width}x${context.height})`);
 
-      const formData = new FormData();
+      const formData = new URLSearchParams();
       formData.append("resolution", context.resolution);
       formData.append("width", context.width.toString());
       formData.append("height", context.height.toString());
 
       // Get authentication headers
       const headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
 
       const response = await fetch(url.toString(), {
         method: "POST",
         headers: headers,
-        body: formData,
+        body: formData.toString(),
       });
 
       // Get the complete response text
-      const responseText = await response.text();
+      let responseText = await response.text();
       
       if (!response.ok) {
-        logger.error(`Failed to create resolution: ${responseText}`, { 
+        // Decode the error message for better readability
+        const decodedText = decodeErrorMessage(responseText);
+        let errorMessage;
+        try {
+          const errorObj = JSON.parse(decodedText);
+          errorMessage = errorObj.message || decodedText;
+        } catch {
+          errorMessage = decodedText;
+        }
+        
+        logger.error(`Failed to create resolution: ${errorMessage}`, { 
           status: response.status,
           url: url.toString(),
           resolution: context.resolution
         });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
+        throw new Error(errorMessage);
       }
 
       // Parse the response data
