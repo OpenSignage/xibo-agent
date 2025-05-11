@@ -22,7 +22,7 @@ import { getCmsTime, getAbout } from './misc';
 import { getUser, getUsers, getUserMe, addUser } from './user';
 import { getModules } from './modules';
 import { getDisplays } from './display';
-import { getLayouts, addLayout } from './layout';
+import { getLayouts, addLayout, deleteLayout } from './layout';
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
 
@@ -82,7 +82,8 @@ export function getTools() {
     'get-resolutions': getResolutions,
     'add-resolution': addResolution,
     'edit-resolution': editResolution,
-    'delete-resolution': deleteResolution
+    'delete-resolution': deleteResolution,
+    'delete-layout': deleteLayout
   };
 
   // Additional tools could be added here conditionally if needed

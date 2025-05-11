@@ -1,25 +1,41 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { decodeErrorMessage } from "../utility/error";
 
+/**
+ * Tool to apply a template to an existing layout
+ * Implements the layout/applyTemplate endpoint from Xibo API
+ */
 export const applyLayoutTemplate = createTool({
   id: 'apply-layout-template',
-  description: 'テンプレートをレイアウトに適用します',
+  description: 'Apply a template to an existing layout',
   inputSchema: z.object({
-    layoutId: z.number().describe('テンプレートを適用するレイアウトのID'),
-    templateId: z.number().describe('適用するテンプレートのID')
+    layoutId: z.number().describe('ID of the layout to apply template to'),
+    templateId: z.number().describe('ID of the template to apply')
   }),
   outputSchema: z.string(),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
-        throw new Error("CMSのURLが設定されていません");
+        throw new Error("CMS URL is not configured");
       }
 
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/layout/applyTemplate/${context.layoutId}`;
-      console.log(`[DEBUG] applyLayoutTemplate: リクエストURL = ${url}`);
 
       const formData = new FormData();
       formData.append('templateId', context.templateId.toString());
@@ -31,16 +47,14 @@ export const applyLayoutTemplate = createTool({
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error(`[DEBUG] applyLayoutTemplate: HTTPエラーが発生しました: ${response.status}`, errorData);
-        throw new Error(`HTTP error! status: ${response.status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`);
+        const responseText = await response.text();
+        const errorMessage = decodeErrorMessage(responseText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
       }
 
-      console.log("[DEBUG] applyLayoutTemplate: テンプレートの適用が成功しました");
-      return "テンプレートが正常に適用されました";
+      return "Template applied successfully";
     } catch (error) {
-      console.error("[DEBUG] applyLayoutTemplate: エラーが発生しました", error);
-      return `エラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`;
+      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
     }
   },
 }); 

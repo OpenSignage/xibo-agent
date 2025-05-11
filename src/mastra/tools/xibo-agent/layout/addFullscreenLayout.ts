@@ -17,7 +17,7 @@ import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Response schema for Layout objects
+ * Response schema for layout objects
  * Based on Xibo API documentation
  */
 const layoutResponseSchema = z.object({
@@ -51,17 +51,23 @@ const layoutResponseSchema = z.object({
 });
 
 /**
- * Tool to copy a layout from the Xibo CMS
- * Implements the layout/copy endpoint from Xibo API
+ * Tool to add a new fullscreen layout
+ * Implements the layout endpoint with resolution values for fullscreen display
+ * Creates a layout with one full size region covering the entire layout area
  */
-export const copyLayout = createTool({
-  id: 'copy-layout',
-  description: 'Copy a layout with a new name',
+export const addFullscreenLayout = createTool({
+  id: 'add-fullscreen-layout',
+  description: 'Add a new fullscreen layout with a single region',
   inputSchema: z.object({
-    layoutId: z.number().describe('Source Layout ID to copy'),
-    name: z.string().describe('Name for the new layout copy'),
-    description: z.string().optional().describe('Description for the new layout copy'),
-    folderId: z.number().optional().describe('Folder ID to place the copied layout')
+    name: z.string().describe('Name for the new layout'),
+    width: z.number().default(1920).describe('Width of the layout in pixels (default: 1920)'),
+    height: z.number().default(1080).describe('Height of the layout in pixels (default: 1080)'),
+    backgroundColor: z.string().default('#000000').describe('Background color in hex format (default: black)'),
+    description: z.string().optional().describe('Description for the layout'),
+    resolution: z.string().optional().describe('Resolution code, e.g., "1080p" (optional)'),
+    enableStat: z.number().min(0).max(1).default(0).describe('Enable statistics collection (0: disabled, 1: enabled)'),
+    folderId: z.number().optional().describe('Folder ID to assign the layout to'),
+    tags: z.array(z.string()).optional().describe('Array of tags to add to the layout')
   }),
   outputSchema: z.string(),
   execute: async ({ context }) => {
@@ -71,12 +77,30 @@ export const copyLayout = createTool({
       }
 
       const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/${context.layoutId}/copy`;
+      const url = `${config.cmsUrl}/api/layout`;
 
+      // Build form data
       const formData = new FormData();
       formData.append('name', context.name);
+      formData.append('width', context.width.toString());
+      formData.append('height', context.height.toString());
+      formData.append('backgroundColor', context.backgroundColor);
+      
+      // Add optional parameters
       if (context.description) formData.append('description', context.description);
+      if (context.resolution) formData.append('resolution', context.resolution);
+      formData.append('enableStat', context.enableStat.toString());
       if (context.folderId) formData.append('folderId', context.folderId.toString());
+      
+      // Add fullscreen region parameter
+      formData.append('fullScreenRegion', '1');
+      
+      // Add tags if provided
+      if (context.tags && context.tags.length > 0) {
+        context.tags.forEach(tag => {
+          formData.append('tags[]', tag);
+        });
+      }
 
       const response = await fetch(url, {
         method: 'POST',
@@ -91,7 +115,9 @@ export const copyLayout = createTool({
       }
 
       const data = await response.json();
-      return JSON.stringify(data, null, 2);
+      const validatedData = layoutResponseSchema.parse(data);
+
+      return JSON.stringify(validatedData, null, 2);
     } catch (error) {
       return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
     }
