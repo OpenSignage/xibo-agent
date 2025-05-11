@@ -36,10 +36,10 @@ export const retireLayout = createTool({
       }
 
       const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/${context.layoutId}/retire`;
+      const url = `${config.cmsUrl}/api/layout/retire/${context.layoutId}`;
 
       const response = await fetch(url, {
-        method: 'POST',
+        method: 'PUT',
         headers,
       });
 

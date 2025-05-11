@@ -24,6 +24,13 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
 import { decodeErrorMessage } from "../utility/error";
+import { 
+  TreeNode, 
+  treeResponseSchema, 
+  generateTreeView, 
+  flattenTree, 
+  createTreeViewResponse 
+} from "../utility/treeView";
 
 /**
  * Folder interface representing folder data structure
@@ -38,31 +45,6 @@ interface FolderData {
   permissionsFolderId?: number | null;
   folderId?: number;
   folderName?: string;
-}
-
-/**
- * Folder tree node interface with additional tree metadata
- */
-interface FolderTreeNode {
-  id: number;
-  text: string;
-  children: FolderTreeNode[];
-  depth?: number;
-  isLast?: boolean;
-  path?: string;
-  [key: string]: any; // Allow other properties from the original folder
-}
-
-/**
- * Interface for a flattened tree node in the output
- */
-interface FlatTreeNode {
-  id: number;
-  text: string;
-  children?: any[];
-  depth: number;
-  isLast: boolean;
-  path: string;
 }
 
 /**
@@ -90,20 +72,6 @@ const folderSchema: z.ZodType<any> = z.lazy(() =>
 );
 
 /**
- * Schema for folder tree structure with organized hierarchy
- */
-const folderTreeSchema = z.array(
-  z.object({
-    id: z.number(),
-    text: z.string(),
-    children: z.array(z.any()).optional(),
-    depth: z.number(),
-    isLast: z.boolean(),
-    path: z.string()
-  })
-);
-
-/**
  * Schema for API response after retrieving folders
  */
 const apiResponseSchema = z.object({
@@ -112,43 +80,47 @@ const apiResponseSchema = z.object({
 });
 
 /**
- * Schema for API response with tree view
- */
-const apiTreeResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.array(folderSchema),
-  tree: folderTreeSchema.optional(),
-  treeViewText: z.string().optional()
-});
-
-/**
- * Builds a folder tree structure from flat folder list
+ * フォルダーデータからツリーノード構造を構築する
  * 
- * @param folders Array of folder objects from API
- * @returns Hierarchical tree structure of folders
+ * @param folders APIから取得したフォルダー配列
+ * @returns ツリーノード構造
  */
-function buildFolderTree(folders: FolderData[]): FolderTreeNode[] {
+function buildFolderTree(folders: FolderData[]): TreeNode[] {
   // Create a map for quick folder lookup by ID
-  const folderMap = new Map<number, FolderTreeNode>();
-  folders.forEach(folder => folderMap.set(folder.id, { ...folder, children: [] }));
+  const folderMap = new Map<number, TreeNode>();
+  
+  // Initialize tree nodes with basic structure
+  folders.forEach(folder => {
+    folderMap.set(folder.id, {
+      id: folder.id,
+      name: folder.text,
+      type: 'folder',
+      children: []
+    });
+  });
   
   // Build the tree structure
-  const tree: FolderTreeNode[] = [];
+  const tree: TreeNode[] = [];
   
   folders.forEach(folder => {
-    const folderWithChildren = folderMap.get(folder.id);
+    const folderNode = folderMap.get(folder.id);
     
-    // If this is a root folder (parentId is null, 0, or "0")
+    if (!folderNode) return; // Skip if node not found
+    
+    // Root folders (parentId is null, 0, or "0")
     if (!folder.parentId || folder.parentId === 0 || folder.parentId === "0") {
-      tree.push(folderWithChildren!);
+      tree.push(folderNode);
     } else {
-      // Add as child to parent folder if parent exists
-      const parent = folderMap.get(Number(folder.parentId));
-      if (parent) {
-        parent.children.push(folderWithChildren!);
+      // Add as child to parent folder
+      const parentId = typeof folder.parentId === 'string' ? 
+        parseInt(folder.parentId, 10) : folder.parentId;
+      
+      const parent = folderMap.get(parentId);
+      if (parent && parent.children) {
+        parent.children.push(folderNode);
       } else {
         // If parent not found, add to root level
-        tree.push(folderWithChildren!);
+        tree.push(folderNode);
       }
     }
   });
@@ -157,62 +129,10 @@ function buildFolderTree(folders: FolderData[]): FolderTreeNode[] {
 }
 
 /**
- * Generates a string representation of the folder tree
- * 
- * @param tree Hierarchical folder tree
- * @param indent Current indentation string
- * @returns String with formatted tree view
+ * フォルダノードのカスタム表示フォーマッタ
  */
-function generateTreeView(tree: FolderTreeNode[], indent = ''): string {
-  let output = '';
-  
-  tree.forEach((folder, index, array) => {
-    const isLast = index === array.length - 1;
-    const linePrefix = isLast ? '└─ ' : '├─ ';
-    output += `${indent}${linePrefix}${folder.text}\n`;
-    
-    if (folder.children && folder.children.length) {
-      const childIndent = indent + (isLast ? '   ' : '│  ');
-      output += generateTreeView(folder.children, childIndent);
-    }
-  });
-  
-  return output;
-}
-
-/**
- * Flattens a folder tree into an array with path and depth information
- * 
- * @param tree Hierarchical folder tree
- * @param depth Current depth in the tree
- * @param path Current path in the tree
- * @param result Array collecting the flattened result
- * @returns Array of folder objects with depth and path information
- */
-function flattenFolderTree(
-  tree: FolderTreeNode[], 
-  depth = 0, 
-  path = '', 
-  result: FlatTreeNode[] = []
-): FlatTreeNode[] {
-  tree.forEach((folder, index, array) => {
-    const isLast = index === array.length - 1;
-    const currentPath = path ? `${path} > ${folder.text}` : folder.text;
-    
-    result.push({
-      id: folder.id,
-      text: folder.text,
-      depth,
-      isLast,
-      path: currentPath
-    });
-    
-    if (folder.children && folder.children.length) {
-      flattenFolderTree(folder.children, depth + 1, currentPath, result);
-    }
-  });
-  
-  return result;
+function folderNodeFormatter(node: TreeNode): string {
+  return node.name;
 }
 
 /**
@@ -231,7 +151,10 @@ export const getFolders = createTool({
     exactFolderName: z.number().optional().describe('Set to 1 to require exact name match'),
     treeView: z.boolean().optional().describe('Set to true to return folders in tree structure'),
   }),
-  outputSchema: apiTreeResponseSchema,
+  outputSchema: z.union([
+    apiResponseSchema,
+    treeResponseSchema
+  ]),
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
       throw new Error("CMS URL is not configured");
@@ -285,18 +208,9 @@ export const getFolders = createTool({
       // Generate tree view if requested
       if (context.treeView) {
         const folderTree = buildFolderTree(data);
-        const treeViewString = generateTreeView(folderTree);
-        // マークダウンコードブロックとしてフォーマット
-        const formattedTreeView = "```text\n" + treeViewString + "```";
-        const flattenedTree = flattenFolderTree(folderTree);
         
         logger.info(`Retrieved ${data.length} folders successfully and generated tree view`);
-        return {
-          success: true,
-          data: data,
-          tree: flattenedTree,
-          treeViewText: formattedTreeView
-        };
+        return createTreeViewResponse(data, folderTree, folderNodeFormatter);
       }
 
       // Validate the response data against schema
