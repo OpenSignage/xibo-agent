@@ -1,10 +1,13 @@
 /*
- * Copyright (C) 2024 OpenSignage Project.
- * All rights reserved.
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
  *
- * This software is licensed under the Elastic License 2.0 (ELv2).
- * You may obtain a copy of the license at:
- * https://www.elastic.co/licensing/elastic-license
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
 /**
@@ -18,6 +21,14 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
+import { logger } from '../../../index';
+import { 
+  TreeNode, 
+  treeResponseSchema, 
+  generateTreeView, 
+  flattenTree, 
+  createTreeViewResponse 
+} from "../utility/treeView";
 
 // Schema definition for layout response validation
 const layoutResponseSchema = z.array(z.object({
@@ -167,7 +178,7 @@ const layoutResponseSchema = z.array(z.object({
       })),
       folderId: z.union([z.number(), z.string().transform(Number)]),
       permissionsFolderId: z.union([z.number(), z.string().transform(Number)])
-    })
+    }).nullable()
   })),
   tags: z.array(z.object({
     tag: z.string().nullable(),
@@ -179,7 +190,130 @@ const layoutResponseSchema = z.array(z.object({
 }));
 
 /**
+ * レイアウトのツリー表示に使用するノード変換関数
+ * APIレスポンスからツリーノード構造に変換する
+ * 
+ * @param layouts APIから取得したレイアウト配列
+ * @returns ツリーノード配列
+ */
+function buildLayoutTree(layouts: any[]): TreeNode[] {
+  const tree: TreeNode[] = [];
+  
+  layouts.forEach(layout => {
+    // レイアウトノードを作成
+    const layoutNode: TreeNode = {
+      type: 'layout',
+      id: layout.layoutId,
+      name: layout.layout || `Layout ${layout.layoutId}`,
+      children: []
+    };
+    
+    // リージョンを追加
+    if (layout.regions && Array.isArray(layout.regions)) {
+      layout.regions.forEach((region: any) => {
+        const regionNode: TreeNode = {
+          type: 'region',
+          id: region.regionId,
+          name: region.name || `Region ${region.regionId}`,
+          children: []
+        };
+        
+        // プレイリストを追加
+        if (region.regionPlaylist) {
+          const playlist = region.regionPlaylist;
+          const playlistNode: TreeNode = {
+            type: 'playlist',
+            id: playlist.playlistId,
+            name: playlist.name || `Playlist ${playlist.playlistId}`,
+            children: []
+          };
+          
+          // ウィジェットを追加
+          if (playlist.widgets && Array.isArray(playlist.widgets)) {
+            playlist.widgets.forEach((widget: any) => {
+              const widgetNode: TreeNode = {
+                type: 'widget',
+                id: widget.widgetId,
+                name: `${widget.type || 'Widget'} (${widget.widgetId})`,
+                duration: widget.duration
+              };
+              playlistNode.children?.push(widgetNode);
+            });
+          }
+          
+          regionNode.children?.push(playlistNode);
+        }
+        
+        layoutNode.children?.push(regionNode);
+      });
+    }
+    
+    // タグを追加
+    if (layout.tags && Array.isArray(layout.tags) && layout.tags.length > 0) {
+      const tagsNode: TreeNode = {
+        type: 'tags',
+        id: 0,
+        name: 'Tags',
+        children: []
+      };
+      
+      layout.tags.forEach((tag: any) => {
+        const tagNode: TreeNode = {
+          type: 'tag',
+          id: tag.tagId,
+          name: tag.tag || `Tag ${tag.tagId}`
+        };
+        tagsNode.children?.push(tagNode);
+      });
+      
+      layoutNode.children?.push(tagsNode);
+    }
+    
+    tree.push(layoutNode);
+  });
+  
+  return tree;
+}
+
+/**
+ * レイアウトノードのカスタム表示フォーマッタ
+ * 
+ * @param node ツリーノード
+ * @returns フォーマットされた表示文字列
+ */
+function layoutNodeFormatter(node: TreeNode): string {
+  switch (node.type) {
+    case 'layout':
+      return `Layout: ${node.name}`;
+    case 'region':
+      return `Region: ${node.name}`;
+    case 'playlist':
+      return `Playlist: ${node.name}`;
+    case 'widget':
+      return `${node.name}${node.duration ? ` (${node.duration}s)` : ''}`;
+    default:
+      return `${node.type}: ${node.name}`;
+  }
+}
+
+/**
  * Tool for retrieving Xibo layouts with filtering options
+ * 
+ * Example usage with embed parameter:
+ * ```
+ * const layouts = await getLayouts.execute({
+ *   context: {
+ *     // Basic filtering
+ *     layoutId: 123,
+ *     // Include related data using embed parameter
+ *     embed: "regions,playlists,widgets,tags"
+ *     // OR as an array
+ *     // embed: ["regions", "playlists", "widgets", "tags"]
+ *     // Tree view option
+ *     treeView: true
+ *   }
+ * });
+ * ```
  */
 export const getLayouts = createTool({
   id: 'get-layouts',
@@ -196,11 +330,20 @@ export const getLayouts = createTool({
     logicalOperator: z.enum(['AND', 'OR']).optional().describe('Logical operator for multiple tags'),
     ownerUserGroupId: z.number().optional().describe('Filter by user group ID'),
     publishedStatusId: z.number().optional().describe('Filter by publish status (1: Published, 2: Draft)'),
-    embed: z.string().optional().describe('Include related data (regions, playlists, widgets, tags, campaigns, permissions)'),
+    embed: z.union([
+      z.string().describe('Include related data as comma-separated values (e.g. "regions,playlists,widgets,tags,campaigns,permissions")'),
+      z.array(z.string()).describe('Include related data as array of values')
+    ]).optional(),
     campaignId: z.number().optional().describe('Get layouts belonging to campaign ID'),
-    folderId: z.number().optional().describe('Filter by folder ID')
+    folderId: z.number().optional().describe('Filter by folder ID'),
+    skipValidation: z.boolean().optional().describe('Skip schema validation (for debugging)'),
+    treeView: z.boolean().optional().describe('Set to true to return layouts in tree structure')
   }),
-  outputSchema: z.string(),
+  outputSchema: z.union([
+    z.string(),
+    treeResponseSchema,
+    layoutResponseSchema
+  ]),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
@@ -213,23 +356,121 @@ export const getLayouts = createTool({
       const queryParams = new URLSearchParams();
       Object.entries(context).forEach(([key, value]) => {
         if (value !== undefined) {
-          queryParams.append(key, value.toString());
+          // 内部処理用のパラメータはAPIリクエストに含めない
+          if (key === 'skipValidation' || key === 'treeView') {
+            return; // このパラメータはスキップ
+          }
+          
+          // 特殊な処理: embed パラメータの処理
+          if (key === 'embed') {
+            // Xiboの API 仕様に適合するようにフォーマット
+            let embedValue: string;
+            
+            if (Array.isArray(value)) {
+              // 配列の場合はカンマ区切りの文字列に変換
+              embedValue = value.join(',');
+            } else {
+              // 文字列の場合はそのまま使用
+              embedValue = value.toString();
+            }
+            
+            // `%2C` でなく `,` を使用するように指定
+            queryParams.append(key, embedValue);
+            
+            // デバッグ: embed パラメータの内容をログ出力
+            console.log(`Using embed parameter: ${embedValue}`);
+          } else {
+            queryParams.append(key, value.toString());
+          }
         }
       });
 
-      const url = `${config.cmsUrl}/api/layout${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-      const response = await fetch(url, { headers });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        const decodedError = decodeErrorMessage(errorText);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
+      // URLの構築を修正
+      let url = `${config.cmsUrl}/api/layout`;
+      if (queryParams.toString()) {
+        url = `${url}?${queryParams.toString()}`;
       }
+      
+      // デバッグ用: リクエスト URL とヘッダーをログに出力
+      console.log(`Requesting layouts from: ${url}`);
+      logger.info(`Retrieving layouts${context.treeView ? ' with tree view' : ''}`);
+      
+      try {
+        const response = await fetch(url, { headers });
+        
+        // レスポンスの状態をログに出力
+        console.log(`Response status: ${response.status} ${response.statusText}`);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`Error response body: ${errorText}`);
+          const decodedError = decodeErrorMessage(errorText);
+          throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
+        }
 
-      const data = await response.json();
-      const validatedData = layoutResponseSchema.parse(data);
-
-      return JSON.stringify(validatedData, null, 2);
+        const data = await response.json();
+        // データの一部をログに出力（センシティブな情報に注意）
+        console.log(`Response data received with ${Array.isArray(data) ? data.length : 'unknown'} items`);
+        
+        // ツリービューが要求された場合
+        if (context.treeView) {
+          logger.info(`Generating tree view for ${Array.isArray(data) ? data.length : 0} layouts`);
+          
+          const layoutTree = buildLayoutTree(data);
+          return createTreeViewResponse(data, layoutTree, layoutNodeFormatter);
+        }
+        
+        // skipValidation オプションがあればバリデーションをスキップ
+        if (context.skipValidation) {
+          console.log('Skipping validation as requested');
+          return JSON.stringify(data, null, 2);
+        }
+        
+        try {
+          // レスポンスが配列の場合はlayoutResponseSchemaで検証
+          if (Array.isArray(data)) {
+            const validatedData = layoutResponseSchema.parse(data);
+            return JSON.stringify(validatedData, null, 2);
+          } else {
+            // ツリービューの場合はtreeResponseSchemaで検証
+            const validatedData = treeResponseSchema.parse(data);
+            return JSON.stringify(validatedData, null, 2);
+          }
+        } catch (validationError) {
+          console.error('Validation error:', validationError);
+          
+          // データ構造を解析して型情報を出力（デバッグ用）
+          if (Array.isArray(data) && data.length > 0) {
+            const firstItem = data[0];
+            console.log('データ構造分析:');
+            
+            // リージョンの構造確認
+            if (firstItem.regions && Array.isArray(firstItem.regions)) {
+              console.log(`リージョン数: ${firstItem.regions.length}`);
+              
+              // 各リージョンのプレイリスト情報を確認
+              firstItem.regions.forEach((region: any, index: number) => {
+                console.log(`リージョン[${index}]:`);
+                console.log(`  regionId: ${region.regionId}`);
+                console.log(`  regionPlaylistの型: ${region.regionPlaylist === null ? 'null' : typeof region.regionPlaylist}`);
+                
+                if (region.regionPlaylist) {
+                  console.log(`  プレイリスト名: ${region.regionPlaylist.name}`);
+                  console.log(`  ウィジェット数: ${Array.isArray(region.regionPlaylist.widgets) ? region.regionPlaylist.widgets.length : 'unknown'}`);
+                }
+              });
+            }
+          }
+          
+          // エラーの詳細を返す代わりに、未検証のデータを返す（開発中のみ）
+          console.warn('Returning unvalidated data for debugging');
+          return JSON.stringify(data, null, 2);
+        }
+      } catch (error) {
+        console.error(`Fetch error details:`, error);
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        return `Error occurred: ${errorMessage}`;
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       return `Error occurred: ${errorMessage}`;

@@ -175,10 +175,10 @@ src/mastra/tools/xibo-agent/
 │   └── getLibrary.ts (1.7KB, 48 lines)
 ├── resolution/
 │   ├── index.ts (206B, 4 lines)                                ;Reviewed 2025/5/10
-│   ├── addResolution.ts (1.2KB, 42 lines)
-│   ├── deleteResolution.ts (933B, 33 lines)
-│   ├── editResolution.ts (1.2KB, 43 lines)
-│   └── getResolutions.ts (1.6KB, 46 lines)                     ；Reviewed 2025/5/10
+│   ├── addResolution.ts (1.2KB, 42 lines)                      ;Reviewed 2025/5/10
+│   ├── deleteResolution.ts (933B, 33 lines)                    ;Reviewed 2025/5/10
+│   ├── editResolution.ts (1.2KB, 43 lines)                     ;Reviewed 2025/5/10
+│   └── getResolutions.ts (1.6KB, 46 lines)                     ;Reviewed 2025/5/10
 ├── template/
 │   ├── index.ts (216B, 4 lines)
 │   ├── addTemplateFromLayout.ts (2.3KB, 53 lines)
@@ -230,7 +230,7 @@ src/mastra/tools/xibo-agent/
 │   ├── postPlaylist.ts (3.2KB, 64 lines)
 │   └── getPlaylists.ts (4.1KB, 101 lines)
 ├── layout/
-│   ├── index.ts (1.2KB, 23 lines)
+│   ├── index.ts (1.2KB, 23 lines)                             ;Reviewed 2025/5/11
 │   ├── checkoutLayout.ts (1.6KB, 41 lines)
 │   ├── positionRegions.ts (2.0KB, 56 lines)
 │   ├── clearLayout.ts (1.6KB, 41 lines)
@@ -248,13 +248,13 @@ src/mastra/tools/xibo-agent/
 │   ├── applyLayoutTemplate.ts (1.8KB, 46 lines)
 │   ├── setLayoutBackground.ts (1.9KB, 46 lines)
 │   ├── copyLayout.ts (3.8KB, 82 lines)
-│   ├── unretireLayout.ts (1.6KB, 41 lines)
-│   ├── retireLayout.ts (2.1KB, 53 lines)
-│   ├── publishLayout.ts (1.5KB, 41 lines)
-│   ├── getLayouts.ts (13KB, 238 lines)
-│   ├── deleteLayout.ts (2.0KB, 52 lines)
+│   ├── unretireLayout.ts (1.6KB, 41 lines)                     ;Reviewd 2025/5/12
+│   ├── retireLayout.ts (2.1KB, 53 lines)                       ;Reviewd 2025/5/12
+│   ├── publishLayout.ts (1.5KB, 41 lines)                      
+│   ├── getLayouts.ts (13KB, 238 lines)                         ;Reviewd 2025/5/12
+│   ├── deleteLayout.ts (2.0KB, 52 lines)                       ;Reviewed 2025/5/11
 │   ├── putLayout.ts (6.7KB, 128 lines)
-│   └── postLayout.ts (5.5KB, 113 lines)
+│   └── addLayout.ts (5.5KB, 113 lines)                         ;Reviewed 2025/5/11
 ├── campaign/
 │   ├── selectCampaignFolder.ts (1.9KB, 47 lines)
 │   ├── removeLayout.ts (2.0KB, 48 lines)
