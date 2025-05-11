@@ -1,9 +1,25 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { decodeErrorMessage } from "../utility/error";
 
-// レスポンススキーマはgetLayouts.tsと同じものを使用
+/**
+ * Response schema for layout objects
+ * Based on Xibo API documentation
+ */
 const layoutResponseSchema = z.object({
   layoutId: z.union([z.number(), z.string().transform(Number)]),
   ownerId: z.union([z.number(), z.string().transform(Number)]),
@@ -34,46 +50,42 @@ const layoutResponseSchema = z.object({
   isLocked: z.union([z.boolean(), z.array(z.any())]).transform(val => Array.isArray(val) ? false : val)
 });
 
+/**
+ * Tool to update an existing layout
+ * Implements the layout/{id} PUT endpoint from Xibo API
+ * Allows updating various properties of a layout
+ */
 export const putLayout = createTool({
   id: 'put-layout',
-  description: '既存のレイアウトを更新します',
+  description: 'Update an existing layout',
   inputSchema: z.object({
-    layoutId: z.number().describe('更新するレイアウトID'),
-    name: z.string().optional().describe('レイアウト名'),
-    description: z.string().optional().describe('レイアウトの説明'),
-    backgroundColor: z.string().optional().describe('背景色'),
-    backgroundImageId: z.number().optional().describe('背景画像ID'),
-    backgroundzIndex: z.number().optional().describe('背景のz-index'),
-    width: z.number().optional().describe('幅'),
-    height: z.number().optional().describe('高さ'),
-    orientation: z.string().optional().describe('向き'),
-    displayOrder: z.number().optional().describe('表示順'),
-    duration: z.number().optional().describe('表示時間（秒）'),
-    enableStat: z.number().optional().describe('統計を有効にするかどうか（0-1）'),
-    autoApplyTransitions: z.number().optional().describe('トランジションを自動適用するかどうか（0-1）'),
-    code: z.string().optional().describe('レイアウトの識別コード'),
-    folderId: z.number().optional().describe('レイアウトを割り当てるフォルダID')
+    layoutId: z.number().describe('ID of the layout to update'),
+    name: z.string().optional().describe('Layout name'),
+    description: z.string().optional().describe('Layout description'),
+    backgroundColor: z.string().optional().describe('Background color in hex format'),
+    backgroundImageId: z.number().optional().describe('Background image ID'),
+    backgroundzIndex: z.number().optional().describe('Background z-index'),
+    width: z.number().optional().describe('Width of the layout'),
+    height: z.number().optional().describe('Height of the layout'),
+    orientation: z.string().optional().describe('Orientation (landscape or portrait)'),
+    displayOrder: z.number().optional().describe('Display order'),
+    duration: z.number().optional().describe('Duration in seconds'),
+    enableStat: z.number().optional().describe('Enable statistics (0-1)'),
+    autoApplyTransitions: z.number().optional().describe('Auto-apply transitions (0-1)'),
+    code: z.string().optional().describe('Layout identification code'),
+    folderId: z.number().optional().describe('Folder ID to assign the layout to')
   }),
 
   outputSchema: z.string(),
   execute: async ({ context }) => {
     try {
-      console.log("[DEBUG] putLayout: 開始");
-      console.log("[DEBUG] putLayout: config =", config);
-      
       if (!config.cmsUrl) {
-        console.error("[DEBUG] putLayout: CMSのURLが設定されていません");
-        throw new Error("CMSのURLが設定されていません");
+        throw new Error("CMS URL is not configured");
       }
-      console.log(`[DEBUG] putLayout: CMS URL = ${config.cmsUrl}`);
 
       const headers = await getAuthHeaders();
-      console.log("[DEBUG] putLayout: 認証ヘッダーを取得しました");
-      console.log("[DEBUG] putLayout: 認証ヘッダー =", headers);
 
-      console.log("[DEBUG] putLayout: リクエストデータ =", context);
-
-      // フォームデータの構築
+      // Build form data
       const formData = new URLSearchParams();
       if (context.name) formData.append('name', context.name);
       if (context.description) formData.append('description', context.description);
@@ -91,7 +103,6 @@ export const putLayout = createTool({
       if (context.folderId) formData.append('folderId', context.folderId.toString());
 
       const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
-      console.log(`[DEBUG] putLayout: リクエストURL = ${url}`);
 
       const response = await fetch(url, {
         method: 'PUT',
@@ -102,27 +113,18 @@ export const putLayout = createTool({
         body: formData.toString()
       });
 
-      console.log(`[DEBUG] putLayout: レスポンスステータス = ${response.status}`);
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error(`[DEBUG] putLayout: HTTPエラーが発生しました: ${response.status}`, errorData);
-        throw new Error(`HTTP error! status: ${response.status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`);
+        const responseText = await response.text();
+        const errorMessage = decodeErrorMessage(responseText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
       }
 
       const data = await response.json();
-      console.log("[DEBUG] putLayout: レスポンスデータを取得しました");
-      console.log("[DEBUG] putLayout: レスポンスデータの構造:");
-      console.log("生データ:", JSON.stringify(data, null, 2));
-      console.log("データ型:", typeof data);
-      console.log("キー一覧:", Object.keys(data));
-
       const validatedData = layoutResponseSchema.parse(data);
-      console.log("[DEBUG] putLayout: データの検証が成功しました");
 
       return JSON.stringify(validatedData, null, 2);
     } catch (error) {
-      console.error("[DEBUG] putLayout: エラーが発生しました", error);
-      return `エラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`;
+      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
     }
   },
 }); 
