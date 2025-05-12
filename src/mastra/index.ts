@@ -22,7 +22,6 @@ import { createLogger } from '@mastra/core/logger';
 
 // Import workflows and agents
 import { weatherWorkflow } from './workflows';
-import { weatherAgent } from './agents/weather';
 import { xiboAgent } from './agents/xibo-agent';
 import { xiboManualAgent } from './agents/xibo-manual';
 import { svgWorkflow } from './workflows/svg-illustration';
@@ -42,7 +41,6 @@ export const logger = createLogger({
 export const mastra = new Mastra({
   // Register available agents
   agents: {
-    weather: weatherAgent,   // Weather information agent
     xibo: xiboAgent,         // Xibo system operation agent
     manual: xiboManualAgent, // Xibo manual operation agent
     mcp: mcpAgent            // MCP (Master Control Program) agent
