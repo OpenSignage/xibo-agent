@@ -21,6 +21,7 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
+import { logger } from '../../../index';
 
 /**
  * Tool for deleting layouts in Xibo CMS
@@ -39,7 +40,10 @@ export const deleteLayout = createTool({
   }),
   execute: async ({ context }) => {
     try {
+      logger.info(`Deleting layout with ID: ${context.layoutId}`);
+
       if (!config.cmsUrl) {
+        logger.error("CMS URL is not configured");
         throw new Error("CMS URL is not configured");
       }
 
@@ -48,6 +52,7 @@ export const deleteLayout = createTool({
 
       // Construct the API endpoint URL for the layout deletion
       const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
+      logger.debug(`Sending DELETE request to ${url}`);
 
       // Make a DELETE request to the Xibo CMS API
       const response = await fetch(url, {
@@ -59,14 +64,24 @@ export const deleteLayout = createTool({
       if (!response.ok) {
         const errorText = await response.text();
         const decodedError = decodeErrorMessage(errorText);
+        logger.error(`Failed to delete layout: ${decodedError}`, {
+          status: response.status,
+          layoutId: context.layoutId
+        });
         throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
       }
 
+      logger.info(`Layout ID ${context.layoutId} deleted successfully`);
       return { success: true, message: "Layout deleted successfully" };
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error(`Error in deleteLayout: ${errorMessage}`, {
+        error,
+        layoutId: context.layoutId
+      });
       return { 
         success: false, 
-        message: `Error occurred: ${error instanceof Error ? error.message : "Unknown error"}`
+        message: `Error occurred: ${errorMessage}`
       };
     }
   },

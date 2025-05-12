@@ -15,6 +15,7 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
+import { logger } from '../../../index';
 
 /**
  * Tool to unretire a previously retired layout
@@ -30,12 +31,16 @@ export const unretireLayout = createTool({
   outputSchema: z.string(),
   execute: async ({ context }) => {
     try {
+      logger.info(`Unretiring layout with ID: ${context.layoutId}`);
+
       if (!config.cmsUrl) {
+        logger.error("CMS URL is not configured");
         throw new Error("CMS URL is not configured");
       }
 
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/layout/unretire/${context.layoutId}`;
+      logger.debug(`Sending PUT request to ${url}`);
 
       const response = await fetch(url, {
         method: 'PUT',
@@ -45,12 +50,22 @@ export const unretireLayout = createTool({
       if (!response.ok) {
         const responseText = await response.text();
         const errorMessage = decodeErrorMessage(responseText);
+        logger.error(`Failed to unretire layout: ${errorMessage}`, {
+          status: response.status,
+          layoutId: context.layoutId
+        });
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
       }
 
+      logger.info(`Layout ID ${context.layoutId} unretired successfully`);
       return "Layout unretired successfully";
     } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error(`Error in unretireLayout: ${errorMessage}`, {
+        error,
+        layoutId: context.layoutId
+      });
+      return `Error: ${errorMessage}`;
     }
   },
 }); 

@@ -15,6 +15,142 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
+import { TreeNode, createTreeViewResponse } from "../utility/treeView";
+import { logger } from '../../../index';
+
+/**
+ * Permission schema
+ */
+const permissionSchema = z.object({
+  permissionId: z.number(),
+  entityId: z.number(),
+  groupId: z.number(),
+  objectId: z.number(),
+  isUser: z.number(),
+  entity: z.string(),
+  objectIdString: z.string(),
+  group: z.string(),
+  view: z.number(),
+  edit: z.number(),
+  delete: z.number(),
+  modifyPermissions: z.number()
+});
+
+/**
+ * Tag schema
+ */
+const tagSchema = z.object({
+  tag: z.string(),
+  tagId: z.number(),
+  value: z.string()
+});
+
+/**
+ * Region option schema
+ */
+const regionOptionSchema = z.object({
+  regionId: z.number(),
+  option: z.string(),
+  value: z.string()
+});
+
+/**
+ * Widget option schema
+ */
+const widgetOptionSchema = z.object({
+  widgetId: z.number(),
+  type: z.string(),
+  option: z.string(),
+  value: z.string()
+});
+
+/**
+ * Audio schema
+ */
+const audioSchema = z.object({
+  widgetId: z.number(),
+  mediaId: z.number(),
+  volume: z.number(),
+  loop: z.number()
+});
+
+/**
+ * Widget schema
+ */
+const widgetSchema = z.object({
+  widgetId: z.number(),
+  playlistId: z.number(),
+  ownerId: z.number(),
+  type: z.string(),
+  duration: z.number(),
+  displayOrder: z.number(),
+  useDuration: z.number(),
+  calculatedDuration: z.number().optional(),
+  createdDt: z.string(),
+  modifiedDt: z.string(),
+  fromDt: z.number().nullable(),
+  toDt: z.number().nullable(),
+  schemaVersion: z.number(),
+  transitionIn: z.number().nullable(),
+  transitionOut: z.number().nullable(),
+  transitionDurationIn: z.number().nullable(),
+  transitionDurationOut: z.number().nullable(),
+  widgetOptions: z.array(widgetOptionSchema).optional(),
+  mediaIds: z.array(z.number()).optional(),
+  audio: z.array(audioSchema).optional(),
+  permissions: z.array(permissionSchema).optional(),
+  playlist: z.string().optional()
+});
+
+/**
+ * Playlist schema
+ */
+const playlistSchema = z.object({
+  playlistId: z.number(),
+  ownerId: z.number(),
+  name: z.string(),
+  regionId: z.number().optional(),
+  isDynamic: z.number(),
+  filterMediaName: z.string().nullable(),
+  filterMediaNameLogicalOperator: z.string().nullable(),
+  filterMediaTags: z.string().nullable(),
+  filterExactTags: z.number().nullable(),
+  filterMediaTagsLogicalOperator: z.string().nullable(),
+  filterFolderId: z.number().nullable(),
+  maxNumberOfItems: z.number().nullable(),
+  createdDt: z.string(),
+  modifiedDt: z.string(),
+  duration: z.number(),
+  requiresDurationUpdate: z.number(),
+  enableStat: z.string().nullable(),
+  tags: z.array(tagSchema).optional(),
+  widgets: z.array(widgetSchema).optional(),
+  permissions: z.array(permissionSchema).optional(),
+  folderId: z.number().nullable(),
+  permissionsFolderId: z.number().nullable()
+});
+
+/**
+ * Region schema
+ */
+const regionSchema = z.object({
+  regionId: z.number(),
+  layoutId: z.number(),
+  ownerId: z.number(),
+  type: z.string().nullable(),
+  name: z.string(),
+  width: z.number(),
+  height: z.number(),
+  top: z.number(),
+  left: z.number(),
+  zIndex: z.number(),
+  syncKey: z.string().nullable(),
+  regionOptions: z.array(regionOptionSchema).optional(),
+  permissions: z.array(permissionSchema).optional(),
+  duration: z.number(),
+  isDrawer: z.number().optional(),
+  regionPlaylist: playlistSchema.optional()
+});
 
 /**
  * Schema for layout status response
@@ -22,15 +158,141 @@ import { decodeErrorMessage } from "../utility/error";
  * publication state, and locking information
  */
 const layoutStatusSchema = z.object({
-  status: z.number(),
-  message: z.string().nullable(),
+  layoutId: z.number(),
+  ownerId: z.number(),
+  campaignId: z.number(),
+  parentId: z.number().nullable(),
   publishedStatusId: z.number(),
-  publishedStatus: z.string().nullable(),
+  publishedStatus: z.string(),
   publishedDate: z.string().nullable(),
-  isLocked: z.boolean(),
-  lockedBy: z.string().nullable(),
-  lockedAt: z.string().nullable()
+  backgroundImageId: z.number().nullable(),
+  schemaVersion: z.number(),
+  layout: z.string(),
+  description: z.string().nullable(),
+  backgroundColor: z.string(),
+  createdDt: z.string(),
+  modifiedDt: z.string(),
+  status: z.number(),
+  retired: z.number(),
+  backgroundzIndex: z.number(),
+  width: z.number(),
+  height: z.number(),
+  orientation: z.string(),
+  displayOrder: z.number().nullable(),
+  duration: z.number(),
+  statusMessage: z.string().nullable(),
+  enableStat: z.number(),
+  autoApplyTransitions: z.number(),
+  code: z.string().nullable(),
+  isLocked: z.union([z.boolean(), z.array(z.any())]),
+  regions: z.array(z.any()),
+  tags: z.array(z.any()),
+  drawers: z.array(z.any()).optional(),
+  actions: z.array(z.any()).optional(),
+  permissions: z.array(z.any()).optional(),
+  campaigns: z.array(z.any()).optional(),
+  owner: z.string().optional(),
+  groupsWithPermissions: z.any().nullable(),
+  folderId: z.number(),
+  permissionsFolderId: z.number()
 });
+
+/**
+ * Convert layout information to tree structure
+ * 
+ * @param layout Layout information
+ * @returns Tree structure
+ */
+function buildLayoutTree(layout: any): TreeNode[] {
+  // Create layout as root node
+  const rootNode: TreeNode = {
+    id: layout.layoutId,
+    name: layout.layout,
+    type: 'layout',
+    children: []
+  };
+
+  // Add regions as child nodes
+  if (layout.regions && Array.isArray(layout.regions)) {
+    const regionNodes = layout.regions.map((region: any) => {
+      const regionNode: TreeNode = {
+        id: region.regionId,
+        name: region.name || `Region ${region.regionId}`,
+        type: 'region',
+        children: []
+      };
+
+      // Add playlist information if region has a playlist
+      if (region.regionPlaylist) {
+        const playlistNode: TreeNode = {
+          id: region.regionPlaylist.playlistId,
+          name: region.regionPlaylist.name,
+          type: 'playlist',
+          children: []
+        };
+
+        // Add widgets if playlist has widgets
+        if (region.regionPlaylist.widgets && Array.isArray(region.regionPlaylist.widgets)) {
+          playlistNode.children = region.regionPlaylist.widgets.map((widget: any) => ({
+            id: widget.widgetId,
+            name: widget.type,
+            type: 'widget',
+            duration: widget.duration
+          }));
+        }
+
+        regionNode.children?.push(playlistNode);
+      }
+
+      return regionNode;
+    });
+
+    rootNode.children = regionNodes;
+  }
+
+  // Add drawers if present
+  if (layout.drawers && Array.isArray(layout.drawers) && layout.drawers.length > 0) {
+    const drawerFolder: TreeNode = {
+      id: 0,
+      name: 'Drawers',
+      type: 'folder',
+      children: layout.drawers.map((drawer: any) => ({
+        id: drawer.regionId,
+        name: drawer.name || `Drawer ${drawer.regionId}`,
+        type: 'drawer'
+      }))
+    };
+    
+    rootNode.children?.push(drawerFolder);
+  }
+
+  return [rootNode];
+}
+
+/**
+ * Custom formatter for layout nodes
+ * 
+ * @param node Tree node
+ * @returns Formatted display string
+ */
+function layoutNodeFormatter(node: TreeNode): string {
+  switch (node.type) {
+    case 'layout':
+      return `Layout: ${node.name} (ID: ${node.id})`;
+    case 'region':
+      return `Region: ${node.name}`;
+    case 'playlist':
+      return `Playlist: ${node.name}`;
+    case 'widget':
+      return `Widget: ${node.name}${node.duration ? ` (${node.duration}s)` : ''}`;
+    case 'folder':
+      return `Folder: ${node.name}`;
+    case 'drawer':
+      return `Drawer: ${node.name}`;
+    default:
+      return `${node.type}: ${node.name}`;
+  }
+}
 
 /**
  * Tool to get the current status of a layout
@@ -41,34 +303,68 @@ export const getLayoutStatus = createTool({
   id: 'get-layout-status',
   description: 'Get the current status of a layout',
   inputSchema: z.object({
-    layoutId: z.number().describe('ID of the layout to check status for')
+    layoutId: z.number().describe('ID of the layout to check status for'),
+    treeView: z.boolean().optional().describe('Whether to display the layout structure as a tree view')
   }),
-  outputSchema: z.string(),
+  outputSchema: z.union([layoutStatusSchema, z.any()]),
   execute: async ({ context }) => {
     try {
+      logger.info(`Getting layout status for layoutId: ${context.layoutId}${context.treeView ? ' with tree view' : ''}`);
+      
       if (!config.cmsUrl) {
+        logger.error('CMS URL is not configured');
         throw new Error("CMS URL is not configured");
       }
 
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/layout/status/${context.layoutId}`;
+      logger.debug(`Request URL: ${url}`);
 
       const response = await fetch(url, {
         headers,
       });
+      
+      logger.debug(`Response status: ${response.status}`);
 
       if (!response.ok) {
         const responseText = await response.text();
         const errorMessage = decodeErrorMessage(responseText);
+        logger.error(`Failed to retrieve layout status: ${errorMessage}`, {
+          status: response.status,
+          layoutId: context.layoutId,
+          url
+        });
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
       }
 
       const data = await response.json();
-      const validatedData = layoutStatusSchema.parse(data);
-
-      return JSON.stringify(validatedData, null, 2);
+      
+      try {
+        const validatedData = layoutStatusSchema.parse(data);
+        
+        // Generate tree view if requested
+        if (context.treeView) {
+          logger.info(`Generating tree view for layout: ${validatedData.layout} (ID: ${validatedData.layoutId})`);
+          const layoutTree = buildLayoutTree(validatedData);
+          return createTreeViewResponse(validatedData, layoutTree, layoutNodeFormatter);
+        }
+        
+        logger.info(`Successfully retrieved layout status for: ${validatedData.layout} (ID: ${validatedData.layoutId})`);
+        return validatedData;
+      } catch (validationError) {
+        logger.warn(`Layout data validation failed`, {
+          error: validationError,
+          layoutId: context.layoutId,
+          responseData: data
+        });
+        throw validationError;
+      }
     } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+      logger.error(`Error in getLayoutStatus: ${error instanceof Error ? error.message : "Unknown error"}`, {
+        error,
+        layoutId: context.layoutId
+      });
+      throw new Error(`Error: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
   },
 }); 

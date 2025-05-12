@@ -17,6 +17,8 @@
  * Tools are organized by category and can be imported individually or as a complete set.
  */
 
+import { logger } from '../../index';
+
 // Import core tools individually to ensure they're always available for getTools()
 import { getCmsTime, getAbout } from './misc';
 import { getUser, getUsers, getUserMe, addUser } from './user';
@@ -93,57 +95,57 @@ export function getTools() {
     'discard-layout': discardLayout
   };
 
-  // 確認が必要な危険なツールのリスト
+  // List of tools that require confirmation due to potentially dangerous operations
   const dangerousTools = [
     'delete-layout',
     'delete-folder',
     'delete-resolution',
-    // 他の削除系ツールもここに追加
+    // Add other destructive tools here
   ];
 
-  /* 一時的に無効化（コメントアウト）
-  // ユーザー確認を求める関数
+  /* Temporarily disabled (commented out)
+  // Function to request user confirmation
   const confirmDangerousOperation = async (toolId: string, context: any): Promise<boolean> => {
-    // コンテキストをログに出力（デバッグ用）
-    console.log(`確認処理が呼び出されました。ツールID: ${toolId}`);
-    console.log(`コンテキスト:`, context);
+    // Log context for debugging
+    logger.debug(`Confirmation process called. Tool ID: ${toolId}`);
+    logger.debug(`Context:`, context);
 
-    // confirmed フラグが true なら無条件に確認済みとする
+    // If confirmed flag is true, bypass confirmation
     if (context && context.confirmed === true) {
-      console.log("確認済みフラグが見つかりました。操作を続行します。");
+      logger.info("Confirmation flag found. Proceeding with operation.");
       return true;
     }
 
-    // ツールIDに基づいて確認メッセージをカスタマイズ
-    let confirmMessage = "この操作は取り消せません。続行しますか？";
+    // Customize confirmation message based on tool ID
+    let confirmMessage = "This operation cannot be undone. Do you want to continue?";
     
-    // ツール別のメッセージ
+    // Tool-specific messages
     switch (toolId) {
       case 'delete-layout':
-        confirmMessage = `レイアウト(ID: ${context.layoutId})を削除します。この操作は取り消せません。続行しますか？`;
+        confirmMessage = `You are about to delete layout (ID: ${context.layoutId}). This operation cannot be undone. Continue?`;
         break;
       case 'delete-folder':
-        confirmMessage = `フォルダ(ID: ${context.folderId})を削除します。この操作は取り消せません。続行しますか？`;
+        confirmMessage = `You are about to delete folder (ID: ${context.folderId}). This operation cannot be undone. Continue?`;
         break;
       case 'delete-resolution':
-        confirmMessage = `解像度(ID: ${context.resolutionId})を削除します。この操作は取り消せません。続行しますか？`;
+        confirmMessage = `You are about to delete resolution (ID: ${context.resolutionId}). This operation cannot be undone. Continue?`;
         break;
-      // 他のケースもここに追加
+      // Add other cases here
     }
     
-    // 確認ダイアログ表示（実際の実装は環境に依存）
-    console.warn(`警告: ${confirmMessage}`);
+    // Display confirmation dialog (implementation depends on environment)
+    logger.warn(`Warning: ${confirmMessage}`);
     
-    // 環境変数による自動確認モード
-    // AUTO_CONFIRM=true の場合、確認なしで自動的に処理を続行
+    // Auto-confirm mode via environment variable
+    // If AUTO_CONFIRM=true, proceed without confirmation
     const autoConfirm = process.env.AUTO_CONFIRM === 'false';
     
     if (autoConfirm) {
-      console.log("自動確認モードが有効です。ユーザー確認なしで操作を続行します。");
+      logger.info("Auto-confirm mode enabled. Proceeding without user confirmation.");
       return true;
     }
     
-    // Mastraの環境でブラウザ側に確認を促すための特殊なエラー
+    // Special error to prompt confirmation in browser in Mastra environment
     throw {
       requiresConfirmation: true,
       message: confirmMessage,
@@ -153,87 +155,87 @@ export function getTools() {
   };
   */
 
-  // ツールのラッパー作成関数
+  // Function to create tool wrappers
   const wrapWithConfirmation = (tool: any) => {
-    // オリジナルのexecute関数を保存
+    // Save the original execute function
     const originalExecute = tool.execute;
     
-    // execute関数をオーバーライド
+    // Override the execute function
     tool.execute = async (params: any) => {
-      // 危険な操作の確認を一時的に無効化（コメントアウト）
+      // Confirmation for dangerous operations temporarily disabled (commented out)
       /* 
-      console.log(`${tool.id} が実行されました。パラメータ:`, JSON.stringify(params, null, 2));
+      logger.debug(`${tool.id} executed with parameters:`, JSON.stringify(params, null, 2));
       
-      // 特別な「実行する」コマンドを検出して確認済みとして処理
+      // Detect special "execute" command as confirmation
       const isConfirmedByCommand = 
         params?.context?.command === '実行する' || 
         params?.context?.message === '実行する';
       
       if (isConfirmedByCommand) {
-        console.log(`「実行する」コマンドを検出しました。確認済みとして実行します。`);
-        // 危険なコマンドでも確認済みとして実行
+        logger.info(`"Execute" command detected. Proceeding as confirmed.`);
+        // Execute even if it's a dangerous command
         return await originalExecute(params);
       }
       
       try {
-        // 確認済みフラグをチェック (複数の場所をチェック)
+        // Check for confirmation flags (check multiple locations)
         const isConfirmed = 
           params?.context?.confirmed === true || 
           params?.confirmed === true || 
           params?.context?.context?.confirmed === true;
         
-        console.log(`確認済みフラグの状態: ${isConfirmed}`);
+        logger.debug(`Confirmation flag status: ${isConfirmed}`);
         
-        // ツールIDが危険なリストに含まれていて、確認されていない場合
+        // If tool ID is in dangerous list and not confirmed
         if (dangerousTools.includes(tool.id) && !isConfirmed) {
           
-          console.log(`${tool.id} は確認が必要です。`);
+          logger.info(`${tool.id} requires confirmation.`);
           
           try {
-            // ユーザーに確認を求める
+            // Request user confirmation
             await confirmDangerousOperation(tool.id, params.context);
-            // ここには到達しないはず（確認処理は例外をスロー）
+            // Should not reach here (confirmation process throws exception)
           } catch (confirmError: any) {
-            // 確認が必要なエラーの場合
+            // If it's a confirmation required error
             if (confirmError && confirmError.requiresConfirmation) {
-              console.log(`確認が必要なエラーが発生しました: ${confirmError.message}`);
+              logger.info(`Confirmation required error occurred: ${confirmError.message}`);
               
-              // クライアント側に確認が必要なことを伝えるレスポンス
+              // Response to client indicating confirmation is required
               return {
                 success: false,
                 requiresConfirmation: true,
                 message: confirmError.message,
                 toolId: confirmError.toolId,
-                // 元のコンテキストに確認済みフラグを追加
+                // Add confirmation flag to original context
                 context: {
                   ...confirmError.context,
                   confirmed: true
                 }
               };
             }
-            // その他のエラーは再スロー
+            // Re-throw other errors
             throw confirmError;
           }
         }
       } catch (error) {
-        // その他のエラー処理
-        console.error(`Tool execution error in ${tool.id}:`, error);
+        // Other error handling
+        logger.error(`Tool execution error in ${tool.id}:`, error);
         return {
           success: false,
-          message: error instanceof Error ? error.message : "不明なエラーが発生しました。"
+          message: error instanceof Error ? error.message : "An unknown error occurred."
         };
       }
       */
       
-      // 確認をスキップして直接実行
-      console.log(`${tool.id} を実行します（確認ダイアログを一時的に無効化）`);
+      // Skip confirmation and execute directly
+      logger.info(`Executing ${tool.id} (confirmation dialog temporarily disabled)`);
       return await originalExecute(params);
     };
     
     return tool;
   };
 
-  // すべてのツールをラップ
+  // Wrap all tools
   Object.keys(tools).forEach(key => {
     // @ts-ignore
     tools[key] = wrapWithConfirmation(tools[key]);
