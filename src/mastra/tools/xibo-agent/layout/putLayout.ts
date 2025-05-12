@@ -10,15 +10,168 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
+/**
+ * Xibo CMS Layout Update Tool
+ * 
+ * This module provides functionality to update layout information in the Xibo CMS system.
+ * It implements the layout/{id} PUT endpoint from Xibo API and supports tree view visualization
+ * of the layout structure with regions and widgets.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
+import { TreeNode, createTreeViewResponse } from "../utility/treeView";
+import { logger } from '../../../index';
+
+/**
+ * Schema for region options
+ * Defines the configuration options specific to a region
+ */
+const regionOptionSchema = z.object({
+  regionId: z.union([z.number(), z.string().transform(Number)]),
+  option: z.string(),
+  value: z.string()
+});
+
+/**
+ * Schema for permissions
+ * Defines the access control entries for layout elements
+ */
+const permissionSchema = z.object({
+  permissionId: z.union([z.number(), z.string().transform(Number)]),
+  entityId: z.union([z.number(), z.string().transform(Number)]),
+  groupId: z.union([z.number(), z.string().transform(Number)]),
+  objectId: z.union([z.number(), z.string().transform(Number)]),
+  isUser: z.union([z.number(), z.string().transform(Number)]),
+  entity: z.string(),
+  objectIdString: z.string(),
+  group: z.string(),
+  view: z.union([z.number(), z.string().transform(Number)]),
+  edit: z.union([z.number(), z.string().transform(Number)]),
+  delete: z.union([z.number(), z.string().transform(Number)]),
+  modifyPermissions: z.union([z.number(), z.string().transform(Number)])
+});
+
+/**
+ * Schema for widget options
+ * Defines the configuration options specific to a widget
+ */
+const widgetOptionSchema = z.object({
+  widgetId: z.union([z.number(), z.string().transform(Number)]),
+  type: z.string(),
+  option: z.string(),
+  value: z.string()
+});
+
+/**
+ * Schema for audio objects
+ * Defines audio settings associated with widgets
+ */
+const audioSchema = z.object({
+  widgetId: z.union([z.number(), z.string().transform(Number)]),
+  mediaId: z.union([z.number(), z.string().transform(Number)]),
+  volume: z.union([z.number(), z.string().transform(Number)]),
+  loop: z.union([z.number(), z.string().transform(Number)])
+});
+
+/**
+ * Schema for widgets
+ * Defines the media content items placed within regions
+ */
+const widgetSchema = z.object({
+  widgetId: z.union([z.number(), z.string().transform(Number)]),
+  playlistId: z.union([z.number(), z.string().transform(Number)]),
+  ownerId: z.union([z.number(), z.string().transform(Number)]),
+  type: z.string(),
+  duration: z.union([z.number(), z.string().transform(Number)]),
+  displayOrder: z.union([z.number(), z.string().transform(Number)]),
+  useDuration: z.union([z.number(), z.string().transform(Number)]),
+  calculatedDuration: z.union([z.number(), z.string().transform(Number)]),
+  createdDt: z.string(),
+  modifiedDt: z.string(),
+  fromDt: z.union([z.number(), z.string().transform(Number)]),
+  toDt: z.union([z.number(), z.string().transform(Number)]),
+  schemaVersion: z.union([z.number(), z.string().transform(Number)]),
+  transitionIn: z.union([z.number(), z.string().transform(Number)]),
+  transitionOut: z.union([z.number(), z.string().transform(Number)]),
+  transitionDurationIn: z.union([z.number(), z.string().transform(Number)]),
+  transitionDurationOut: z.union([z.number(), z.string().transform(Number)]),
+  widgetOptions: z.array(widgetOptionSchema),
+  mediaIds: z.array(z.union([z.number(), z.string().transform(Number)])),
+  audio: z.array(audioSchema),
+  permissions: z.array(permissionSchema),
+  playlist: z.string().nullable()
+}).nullable();
+
+/**
+ * Schema for tags
+ * Defines metadata tags that can be applied to layouts
+ */
+const tagSchema = z.object({
+  tag: z.string(),
+  tagId: z.union([z.number(), z.string().transform(Number)]),
+  value: z.string()
+});
+
+/**
+ * Schema for playlists
+ * Defines collections of widgets that play in sequence within a region
+ */
+const playlistSchema = z.object({
+  playlistId: z.union([z.number(), z.string().transform(Number)]),
+  ownerId: z.union([z.number(), z.string().transform(Number)]),
+  name: z.string(),
+  regionId: z.union([z.number(), z.string().transform(Number)]),
+  isDynamic: z.union([z.number(), z.string().transform(Number)]),
+  filterMediaName: z.string().nullable(),
+  filterMediaNameLogicalOperator: z.string().nullable(),
+  filterMediaTags: z.string().nullable(),
+  filterExactTags: z.union([z.number(), z.string().transform(Number)]),
+  filterMediaTagsLogicalOperator: z.string().nullable(),
+  filterFolderId: z.union([z.number(), z.string().transform(Number)]),
+  maxNumberOfItems: z.union([z.number(), z.string().transform(Number)]),
+  createdDt: z.string(),
+  modifiedDt: z.string(),
+  duration: z.union([z.number(), z.string().transform(Number)]),
+  requiresDurationUpdate: z.union([z.number(), z.string().transform(Number)]),
+  enableStat: z.string().nullable(),
+  tags: z.array(tagSchema),
+  widgets: z.array(widgetSchema.nullish()),
+  permissions: z.array(permissionSchema),
+  folderId: z.union([z.number(), z.string().transform(Number)]),
+  permissionsFolderId: z.union([z.number(), z.string().transform(Number)])
+});
+
+/**
+ * Schema for regions
+ * Defines the display areas within a layout where content can be placed
+ */
+const regionSchema = z.object({
+  regionId: z.union([z.number(), z.string().transform(Number)]),
+  layoutId: z.union([z.number(), z.string().transform(Number)]),
+  ownerId: z.union([z.number(), z.string().transform(Number)]),
+  type: z.string().nullable(),
+  name: z.string(),
+  width: z.union([z.number(), z.string().transform(Number)]),
+  height: z.union([z.number(), z.string().transform(Number)]),
+  top: z.union([z.number(), z.string().transform(Number)]),
+  left: z.union([z.number(), z.string().transform(Number)]),
+  zIndex: z.union([z.number(), z.string().transform(Number)]),
+  syncKey: z.string().nullable(),
+  regionOptions: z.array(regionOptionSchema),
+  permissions: z.array(permissionSchema),
+  duration: z.union([z.number(), z.string().transform(Number)]),
+  isDrawer: z.union([z.number(), z.string().transform(Number)]),
+  regionPlaylist: playlistSchema
+});
 
 /**
  * Response schema for layout objects
  * Based on Xibo API documentation
+ * Defines the complete structure of a layout with all its components
  */
 const layoutResponseSchema = z.object({
   layoutId: z.union([z.number(), z.string().transform(Number)]),
@@ -47,63 +200,125 @@ const layoutResponseSchema = z.object({
   enableStat: z.union([z.number(), z.string().transform(Number)]),
   autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
   code: z.string().nullable(),
-  isLocked: z.union([z.boolean(), z.array(z.any())]).transform(val => Array.isArray(val) ? false : val)
+  isLocked: z.union([z.boolean(), z.array(z.any())]).transform(val => Array.isArray(val) ? false : val),
+  regions: z.array(regionSchema).optional(),
+  tags: z.array(tagSchema).optional(),
+  folderId: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  permissionsFolderId: z.union([z.number(), z.string().transform(Number)]).nullable()
 });
+
+/**
+ * Converts a layout object to a tree structure for visualization
+ * 
+ * @param layout Layout object retrieved from Xibo CMS API
+ * @returns Tree structure representing the layout and its components
+ */
+export function layoutToTree(layout: any): TreeNode[] {
+  // Create the root node representing the layout
+  const rootNode: TreeNode = {
+    id: layout.layoutId,
+    name: layout.layout || `Layout ${layout.layoutId}`,
+    type: 'layout',
+    width: layout.width,
+    height: layout.height,
+    backgroundColor: layout.backgroundColor,
+    orientation: layout.orientation,
+    duration: layout.duration,
+    children: []
+  };
+
+  // Add regions if they exist
+  if (layout.regions && Array.isArray(layout.regions)) {
+    rootNode.children = layout.regions.map((region: any) => {
+      const regionNode: TreeNode = {
+        id: region.regionId,
+        name: region.name || `Region ${region.regionId}`,
+        type: 'region',
+        width: region.width,
+        height: region.height,
+        top: region.top,
+        left: region.left,
+        zIndex: region.zIndex,
+        duration: region.duration,
+        children: []
+      };
+
+      // Add widgets from the region's playlist if they exist
+      if (region.regionPlaylist && region.regionPlaylist.widgets && Array.isArray(region.regionPlaylist.widgets)) {
+        regionNode.children = region.regionPlaylist.widgets
+          .filter((widget: any) => widget !== null) // Filter out null values
+          .map((widget: any) => {
+            return {
+              id: widget.widgetId,
+              name: widget.type || `Widget ${widget.widgetId}`,
+              type: 'widget',
+              duration: widget.duration,
+              displayOrder: widget.displayOrder
+            };
+          });
+      }
+
+      return regionNode;
+    });
+  }
+
+  return [rootNode];
+}
 
 /**
  * Tool to update an existing layout
  * Implements the layout/{id} PUT endpoint from Xibo API
- * Allows updating various properties of a layout
+ * Allows updating various properties of a layout and supports tree view visualization
  */
 export const putLayout = createTool({
   id: 'put-layout',
   description: 'Update an existing layout',
   inputSchema: z.object({
     layoutId: z.number().describe('ID of the layout to update'),
-    name: z.string().optional().describe('Layout name'),
+    name: z.string().describe('Layout name'),
     description: z.string().optional().describe('Layout description'),
-    backgroundColor: z.string().optional().describe('Background color in hex format'),
-    backgroundImageId: z.number().optional().describe('Background image ID'),
-    backgroundzIndex: z.number().optional().describe('Background z-index'),
-    width: z.number().optional().describe('Width of the layout'),
-    height: z.number().optional().describe('Height of the layout'),
-    orientation: z.string().optional().describe('Orientation (landscape or portrait)'),
-    displayOrder: z.number().optional().describe('Display order'),
-    duration: z.number().optional().describe('Duration in seconds'),
-    enableStat: z.number().optional().describe('Enable statistics (0-1)'),
-    autoApplyTransitions: z.number().optional().describe('Auto-apply transitions (0-1)'),
+    tags: z.string().optional().describe('A comma separated list of Tags'),
+    retired: z.number().optional().describe('Flag indicating whether this Layout is retired (0-1)'),
+    enableStat: z.number().optional().describe('Flag indicating whether the Layout stat is enabled (0-1)'),
     code: z.string().optional().describe('Layout identification code'),
-    folderId: z.number().optional().describe('Folder ID to assign the layout to')
+    folderId: z.number().optional().describe('Folder ID to which this object should be assigned to'),
+    includeTree: z.boolean().optional().default(false).describe('Include the layout structure as a tree view')
   }),
 
   outputSchema: z.string(),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
+        logger.error("putLayout: CMS URL is not configured");
         throw new Error("CMS URL is not configured");
       }
+
+      logger.info(`Updating layout ${context.layoutId} with parameters: ${JSON.stringify({
+        name: context.name,
+        description: context.description,
+        tags: context.tags,
+        retired: context.retired,
+        enableStat: context.enableStat,
+        code: context.code,
+        folderId: context.folderId
+      })}`);
 
       const headers = await getAuthHeaders();
 
       // Build form data
       const formData = new URLSearchParams();
-      if (context.name) formData.append('name', context.name);
+      formData.append('name', context.name);
       if (context.description) formData.append('description', context.description);
-      if (context.backgroundColor) formData.append('backgroundColor', context.backgroundColor);
-      if (context.backgroundImageId) formData.append('backgroundImageId', context.backgroundImageId.toString());
-      if (context.backgroundzIndex) formData.append('backgroundzIndex', context.backgroundzIndex.toString());
-      if (context.width) formData.append('width', context.width.toString());
-      if (context.height) formData.append('height', context.height.toString());
-      if (context.orientation) formData.append('orientation', context.orientation);
-      if (context.displayOrder) formData.append('displayOrder', context.displayOrder.toString());
-      if (context.duration) formData.append('duration', context.duration.toString());
+      if (context.tags) formData.append('tags', context.tags);
+      if (context.retired !== undefined) formData.append('retired', context.retired.toString());
       if (context.enableStat !== undefined) formData.append('enableStat', context.enableStat.toString());
-      if (context.autoApplyTransitions !== undefined) formData.append('autoApplyTransitions', context.autoApplyTransitions.toString());
       if (context.code) formData.append('code', context.code);
       if (context.folderId) formData.append('folderId', context.folderId.toString());
 
       const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
 
+      // Send the update request
+      logger.debug(`Sending PUT request to ${url}`);
       const response = await fetch(url, {
         method: 'PUT',
         headers: {
@@ -113,18 +328,85 @@ export const putLayout = createTool({
         body: formData.toString()
       });
 
+      // Handle error response
       if (!response.ok) {
         const responseText = await response.text();
         const errorMessage = decodeErrorMessage(responseText);
+        logger.error(`Failed to update layout ${context.layoutId}: ${errorMessage}`, {
+          statusCode: response.status,
+          response: responseText
+        });
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
       }
 
+      // Parse and validate the response
       const data = await response.json();
       const validatedData = layoutResponseSchema.parse(data);
+      logger.info(`Successfully updated layout ${context.layoutId}`);
 
+      // Generate tree view if requested
+      if (context.includeTree) {
+        logger.info(`Generating tree view for layout ${context.layoutId}`);
+        
+        // Fetch detailed layout data including regions and widgets
+        const detailUrl = `${config.cmsUrl}/api/layout/${context.layoutId}?embed=regions,playlists,widgets`;
+        logger.debug(`Fetching detailed layout data from ${detailUrl}`);
+        
+        const detailResponse = await fetch(detailUrl, {
+          method: 'GET',
+          headers: headers
+        });
+
+        if (!detailResponse.ok) {
+          const responseText = await detailResponse.text();
+          const errorMessage = decodeErrorMessage(responseText);
+          logger.warn(`Failed to fetch detailed layout data for tree view: ${errorMessage}`, {
+            statusCode: detailResponse.status,
+            response: responseText
+          });
+          // Return basic layout data without tree view
+          return JSON.stringify(validatedData, null, 2);
+        }
+
+        const detailData = await detailResponse.json();
+        
+        // Convert layout to tree structure
+        const layoutTree = layoutToTree(detailData);
+        logger.debug(`Generated tree structure with ${layoutTree[0].children?.length || 0} regions`);
+        
+        // Create tree view response with visual formatting
+        const treeResponse = createTreeViewResponse(validatedData, layoutTree, (node) => {
+          let displayText = `${node.name}`;
+          
+          if (node.type === 'layout') {
+            displayText += ` (${node.width}×${node.height})`;
+            if (node.duration) {
+              displayText += ` [${node.duration}s]`;
+            }
+          } else if (node.type === 'region') {
+            displayText += ` (${node.width}×${node.height} at ${node.left},${node.top})`;
+            if (node.duration) {
+              displayText += ` [${node.duration}s]`;
+            }
+          } else if (node.type === 'widget') {
+            if (node.duration) {
+              displayText += ` [${node.duration}s]`;
+            }
+          }
+          
+          return displayText;
+        });
+        
+        logger.info(`Successfully generated tree view for layout ${context.layoutId}`);
+        return JSON.stringify(treeResponse, null, 2);
+      }
+
+      // Return basic layout data without tree view
       return JSON.stringify(validatedData, null, 2);
     } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error(`putLayout: An error occurred: ${errorMessage}`, { error });
+      return `Error: ${errorMessage}`;
     }
   },
 }); 

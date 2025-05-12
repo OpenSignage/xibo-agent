@@ -21,6 +21,7 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
+import { logger } from '../../../index';
 
 // Response schema for layout validation
 const layoutResponseSchema = z.object({
@@ -72,7 +73,14 @@ export const addLayout = createTool({
   outputSchema: z.string(),
   execute: async ({ context }) => {
     try {
+      logger.info(`Creating new layout "${context.name}"`, {
+        templateId: context.layoutId,
+        resolutionId: context.resolutionId,
+        folderId: context.folderId
+      });
+
       if (!config.cmsUrl) {
+        logger.error("CMS URL is not configured");
         throw new Error("CMS URL is not configured");
       }
 
@@ -87,6 +95,8 @@ export const addLayout = createTool({
       });
 
       const url = `${config.cmsUrl}/api/layout`;
+      logger.debug(`Sending request to ${url}`);
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -99,15 +109,33 @@ export const addLayout = createTool({
       if (!response.ok) {
         const errorText = await response.text();
         const decodedError = decodeErrorMessage(errorText);
+        logger.error(`Failed to create layout: ${decodedError}`, {
+          status: response.status, 
+          name: context.name
+        });
         throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
       }
 
       const data = await response.json();
-      const validatedData = layoutResponseSchema.parse(data);
-
-      return JSON.stringify(validatedData, null, 2);
+      
+      try {
+        const validatedData = layoutResponseSchema.parse(data);
+        logger.info(`Layout created successfully with ID: ${validatedData.layoutId}`, {
+          layoutId: validatedData.layoutId,
+          name: validatedData.layout
+        });
+        return JSON.stringify(validatedData, null, 2);
+      } catch (validationError) {
+        logger.warn(`Response validation failed`, {
+          error: validationError,
+          responseData: data
+        });
+        // Return raw data even if validation fails
+        return JSON.stringify(data, null, 2);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error(`Error in addLayout: ${errorMessage}`, { error });
       return `Error occurred: ${errorMessage}`;
     }
   },

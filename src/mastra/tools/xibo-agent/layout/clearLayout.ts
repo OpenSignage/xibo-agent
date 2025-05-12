@@ -10,11 +10,20 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
+/**
+ * Xibo CMS Layout Clear Tool
+ * 
+ * This module provides functionality to clear all regions and widgets from a layout
+ * in the Xibo CMS system, resulting in an empty canvas while preserving layout settings.
+ * It implements the layout/{id} POST endpoint from Xibo API.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
+import { logger } from '../../../index';
 
 /**
  * Tool to clear all regions and widgets from a layout
@@ -31,12 +40,16 @@ export const clearLayout = createTool({
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
+        logger.error("clearLayout: CMS URL is not configured");
         throw new Error("CMS URL is not configured");
       }
 
+      logger.info(`Clearing layout with ID: ${context.layoutId}`);
+      
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
 
+      logger.debug(`Sending POST request to ${url} to clear layout`);
       const response = await fetch(url, {
         method: 'POST',
         headers,
@@ -45,12 +58,20 @@ export const clearLayout = createTool({
       if (!response.ok) {
         const responseText = await response.text();
         const errorMessage = decodeErrorMessage(responseText);
+        logger.error(`Failed to clear layout ${context.layoutId}: ${errorMessage}`, {
+          statusCode: response.status,
+          response: responseText
+        });
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
       }
 
+      // Process successful response
+      logger.info(`Successfully cleared layout ${context.layoutId}`);
       return "Layout cleared successfully";
     } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error(`clearLayout: An error occurred: ${errorMessage}`, { error });
+      return `Error: ${errorMessage}`;
     }
   },
 }); 

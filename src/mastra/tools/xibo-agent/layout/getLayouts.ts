@@ -190,17 +190,16 @@ const layoutResponseSchema = z.array(z.object({
 }));
 
 /**
- * レイアウトのツリー表示に使用するノード変換関数
- * APIレスポンスからツリーノード構造に変換する
+ * Convert layout data to tree structure
  * 
- * @param layouts APIから取得したレイアウト配列
- * @returns ツリーノード配列
+ * @param layouts Layout array from API
+ * @returns Tree node array
  */
 function buildLayoutTree(layouts: any[]): TreeNode[] {
   const tree: TreeNode[] = [];
   
   layouts.forEach(layout => {
-    // レイアウトノードを作成
+    // Create layout node
     const layoutNode: TreeNode = {
       type: 'layout',
       id: layout.layoutId,
@@ -208,7 +207,7 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
       children: []
     };
     
-    // リージョンを追加
+    // Add regions
     if (layout.regions && Array.isArray(layout.regions)) {
       layout.regions.forEach((region: any) => {
         const regionNode: TreeNode = {
@@ -218,7 +217,7 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
           children: []
         };
         
-        // プレイリストを追加
+        // Add playlist
         if (region.regionPlaylist) {
           const playlist = region.regionPlaylist;
           const playlistNode: TreeNode = {
@@ -228,7 +227,7 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
             children: []
           };
           
-          // ウィジェットを追加
+          // Add widgets
           if (playlist.widgets && Array.isArray(playlist.widgets)) {
             playlist.widgets.forEach((widget: any) => {
               const widgetNode: TreeNode = {
@@ -248,7 +247,7 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
       });
     }
     
-    // タグを追加
+    // Add tags
     if (layout.tags && Array.isArray(layout.tags) && layout.tags.length > 0) {
       const tagsNode: TreeNode = {
         type: 'tags',
@@ -276,10 +275,10 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
 }
 
 /**
- * レイアウトノードのカスタム表示フォーマッタ
+ * Custom formatter for layout nodes
  * 
- * @param node ツリーノード
- * @returns フォーマットされた表示文字列
+ * @param node Tree node
+ * @returns Formatted display string
  */
 function layoutNodeFormatter(node: TreeNode): string {
   switch (node.type) {
@@ -346,7 +345,14 @@ export const getLayouts = createTool({
   ]),
   execute: async ({ context }) => {
     try {
+      // Log the request with relevant filter criteria
+      const logContext = { ...context };
+      delete logContext.skipValidation; // Don't log internal parameters
+      
+      logger.info(`Retrieving layouts with filters`, logContext);
+      
       if (!config.cmsUrl) {
+        logger.error("CMS URL is not configured");
         throw new Error("CMS URL is not configured");
       }
 
@@ -356,123 +362,101 @@ export const getLayouts = createTool({
       const queryParams = new URLSearchParams();
       Object.entries(context).forEach(([key, value]) => {
         if (value !== undefined) {
-          // 内部処理用のパラメータはAPIリクエストに含めない
+          // Skip internal processing parameters from API request
           if (key === 'skipValidation' || key === 'treeView') {
-            return; // このパラメータはスキップ
+            return;
           }
           
-          // 特殊な処理: embed パラメータの処理
+          // Special handling for embed parameter
           if (key === 'embed') {
-            // Xiboの API 仕様に適合するようにフォーマット
+            // Format according to Xibo API specification
             let embedValue: string;
             
             if (Array.isArray(value)) {
-              // 配列の場合はカンマ区切りの文字列に変換
+              // Convert array to comma-separated string
               embedValue = value.join(',');
             } else {
-              // 文字列の場合はそのまま使用
+              // Use string as is
               embedValue = value.toString();
             }
             
-            // `%2C` でなく `,` を使用するように指定
             queryParams.append(key, embedValue);
-            
-            // デバッグ: embed パラメータの内容をログ出力
-            console.log(`Using embed parameter: ${embedValue}`);
+            logger.debug(`Using embed parameter: ${embedValue}`);
           } else {
             queryParams.append(key, value.toString());
           }
         }
       });
 
-      // URLの構築を修正
+      // Build URL
       let url = `${config.cmsUrl}/api/layout`;
       if (queryParams.toString()) {
         url = `${url}?${queryParams.toString()}`;
       }
       
-      // デバッグ用: リクエスト URL とヘッダーをログに出力
-      console.log(`Requesting layouts from: ${url}`);
-      logger.info(`Retrieving layouts${context.treeView ? ' with tree view' : ''}`);
+      logger.debug(`Requesting layouts from: ${url}`);
       
       try {
         const response = await fetch(url, { headers });
-        
-        // レスポンスの状態をログに出力
-        console.log(`Response status: ${response.status} ${response.statusText}`);
+        logger.debug(`Response status: ${response.status}`);
         
         if (!response.ok) {
           const errorText = await response.text();
-          console.error(`Error response body: ${errorText}`);
           const decodedError = decodeErrorMessage(errorText);
+          logger.error(`Failed to retrieve layouts: ${decodedError}`, {
+            status: response.status,
+            filters: logContext
+          });
           throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
         }
 
         const data = await response.json();
-        // データの一部をログに出力（センシティブな情報に注意）
-        console.log(`Response data received with ${Array.isArray(data) ? data.length : 'unknown'} items`);
+        logger.debug(`Received ${Array.isArray(data) ? data.length : 'unknown'} layout records`);
         
-        // ツリービューが要求された場合
+        // Generate tree view if requested
         if (context.treeView) {
           logger.info(`Generating tree view for ${Array.isArray(data) ? data.length : 0} layouts`);
-          
           const layoutTree = buildLayoutTree(data);
           return createTreeViewResponse(data, layoutTree, layoutNodeFormatter);
         }
         
-        // skipValidation オプションがあればバリデーションをスキップ
+        // Skip validation if requested
         if (context.skipValidation) {
-          console.log('Skipping validation as requested');
+          logger.debug('Skipping validation as requested');
           return JSON.stringify(data, null, 2);
         }
         
         try {
-          // レスポンスが配列の場合はlayoutResponseSchemaで検証
+          // Validate response based on format
           if (Array.isArray(data)) {
             const validatedData = layoutResponseSchema.parse(data);
+            logger.info(`Successfully retrieved ${validatedData.length} layouts`);
             return JSON.stringify(validatedData, null, 2);
           } else {
-            // ツリービューの場合はtreeResponseSchemaで検証
+            // For tree view response
             const validatedData = treeResponseSchema.parse(data);
             return JSON.stringify(validatedData, null, 2);
           }
         } catch (validationError) {
-          console.error('Validation error:', validationError);
+          logger.warn(`Layout data validation failed`, {
+            error: validationError,
+            dataSize: Array.isArray(data) ? data.length : 'unknown',
+            dataPreview: Array.isArray(data) && data.length > 0 ? 
+              { layoutId: data[0].layoutId, type: typeof data[0] } : 'No data'
+          });
           
-          // データ構造を解析して型情報を出力（デバッグ用）
-          if (Array.isArray(data) && data.length > 0) {
-            const firstItem = data[0];
-            console.log('データ構造分析:');
-            
-            // リージョンの構造確認
-            if (firstItem.regions && Array.isArray(firstItem.regions)) {
-              console.log(`リージョン数: ${firstItem.regions.length}`);
-              
-              // 各リージョンのプレイリスト情報を確認
-              firstItem.regions.forEach((region: any, index: number) => {
-                console.log(`リージョン[${index}]:`);
-                console.log(`  regionId: ${region.regionId}`);
-                console.log(`  regionPlaylistの型: ${region.regionPlaylist === null ? 'null' : typeof region.regionPlaylist}`);
-                
-                if (region.regionPlaylist) {
-                  console.log(`  プレイリスト名: ${region.regionPlaylist.name}`);
-                  console.log(`  ウィジェット数: ${Array.isArray(region.regionPlaylist.widgets) ? region.regionPlaylist.widgets.length : 'unknown'}`);
-                }
-              });
-            }
-          }
-          
-          // エラーの詳細を返す代わりに、未検証のデータを返す（開発中のみ）
-          console.warn('Returning unvalidated data for debugging');
+          // Return unvalidated data for debugging
+          logger.warn('Returning unvalidated data due to validation failure');
           return JSON.stringify(data, null, 2);
         }
       } catch (error) {
-        console.error(`Fetch error details:`, error);
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        logger.error(`Error fetching layouts: ${errorMessage}`, { error, url });
         return `Error occurred: ${errorMessage}`;
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error(`Error in getLayouts: ${errorMessage}`, { error });
       return `Error occurred: ${errorMessage}`;
     }
   },
