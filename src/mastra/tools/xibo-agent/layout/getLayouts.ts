@@ -196,9 +196,12 @@ const layoutResponseSchema = z.array(z.object({
  * @returns Tree node array
  */
 function buildLayoutTree(layouts: any[]): TreeNode[] {
-  const tree: TreeNode[] = [];
-  
-  layouts.forEach(layout => {
+  if (!Array.isArray(layouts)) {
+    logger.warn('buildLayoutTree received non-array data:', { type: typeof layouts });
+    return [];
+  }
+
+  return layouts.map(layout => {
     // Create layout node
     const layoutNode: TreeNode = {
       type: 'layout',
@@ -209,7 +212,7 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
     
     // Add regions
     if (layout.regions && Array.isArray(layout.regions)) {
-      layout.regions.forEach((region: any) => {
+      layoutNode.children = layout.regions.map((region: any) => {
         const regionNode: TreeNode = {
           type: 'region',
           id: region.regionId,
@@ -229,21 +232,20 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
           
           // Add widgets
           if (playlist.widgets && Array.isArray(playlist.widgets)) {
-            playlist.widgets.forEach((widget: any) => {
-              const widgetNode: TreeNode = {
+            playlistNode.children = playlist.widgets.map((widget: any) => {
+              return {
                 type: 'widget',
                 id: widget.widgetId,
                 name: `${widget.type || 'Widget'} (${widget.widgetId})`,
                 duration: widget.duration
               };
-              playlistNode.children?.push(widgetNode);
             });
           }
           
-          regionNode.children?.push(playlistNode);
+          regionNode.children = [playlistNode];
         }
         
-        layoutNode.children?.push(regionNode);
+        return regionNode;
       });
     }
     
@@ -253,25 +255,18 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
         type: 'tags',
         id: 0,
         name: 'Tags',
-        children: []
-      };
-      
-      layout.tags.forEach((tag: any) => {
-        const tagNode: TreeNode = {
+        children: layout.tags.map((tag: any) => ({
           type: 'tag',
           id: tag.tagId,
           name: tag.tag || `Tag ${tag.tagId}`
-        };
-        tagsNode.children?.push(tagNode);
-      });
+        }))
+      };
       
       layoutNode.children?.push(tagsNode);
     }
     
-    tree.push(layoutNode);
+    return layoutNode;
   });
-  
-  return tree;
 }
 
 /**

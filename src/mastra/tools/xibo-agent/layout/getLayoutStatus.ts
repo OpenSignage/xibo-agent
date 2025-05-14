@@ -204,6 +204,11 @@ const layoutStatusSchema = z.object({
  * @returns Tree structure
  */
 function buildLayoutTree(layout: any): TreeNode[] {
+  if (!layout) {
+    logger.warn('buildLayoutTree received null/undefined layout data');
+    return [];
+  }
+
   // Create layout as root node
   const rootNode: TreeNode = {
     id: layout.layoutId,
@@ -214,7 +219,7 @@ function buildLayoutTree(layout: any): TreeNode[] {
 
   // Add regions as child nodes
   if (layout.regions && Array.isArray(layout.regions)) {
-    const regionNodes = layout.regions.map((region: any) => {
+    rootNode.children = layout.regions.map((region: any) => {
       const regionNode: TreeNode = {
         id: region.regionId,
         name: region.name || `Region ${region.regionId}`,
@@ -241,30 +246,33 @@ function buildLayoutTree(layout: any): TreeNode[] {
           }));
         }
 
-        regionNode.children?.push(playlistNode);
+        regionNode.children = [playlistNode];
       }
 
       return regionNode;
     });
-
-    rootNode.children = regionNodes;
   }
 
-  // Add drawers if present
-  if (layout.drawers && Array.isArray(layout.drawers) && layout.drawers.length > 0) {
-    const drawerFolder: TreeNode = {
+  // Add tags section if present
+  if (layout.tags && Array.isArray(layout.tags) && layout.tags.length > 0) {
+    const tagsNode: TreeNode = {
       id: 0,
-      name: 'Drawers',
-      type: 'folder',
-      children: layout.drawers.map((drawer: any) => ({
-        id: drawer.regionId,
-        name: drawer.name || `Drawer ${drawer.regionId}`,
-        type: 'drawer'
+      name: 'Tags',
+      type: 'tags',
+      children: layout.tags.map((tag: any) => ({
+        id: tag.tagId,
+        name: tag.tag,
+        type: 'tag'
       }))
     };
-    
-    rootNode.children?.push(drawerFolder);
+
+    rootNode.children?.push(tagsNode);
   }
+
+  // Add status information
+  rootNode.publishedStatus = layout.publishedStatus;
+  rootNode.dimensions = `${layout.width}×${layout.height}`;
+  rootNode.duration = layout.duration;
 
   return [rootNode];
 }

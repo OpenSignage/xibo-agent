@@ -80,56 +80,44 @@ const apiResponseSchema = z.object({
 });
 
 /**
- * フォルダーデータからツリーノード構造を構築する
+ * Convert folder data to tree node structure
  * 
- * @param folders APIから取得したフォルダー配列
- * @returns ツリーノード構造
+ * This function recursively converts the nested folder structure from the API
+ * into a TreeNode structure that can be used for tree view rendering.
+ * 
+ * @param folder The folder data to convert
+ * @returns The converted TreeNode
  */
-function buildFolderTree(folders: FolderData[]): TreeNode[] {
-  // Create a map for quick folder lookup by ID
-  const folderMap = new Map<number, TreeNode>();
+function convertFolderToTreeNode(folder: FolderData): TreeNode {
+  // Create base node
+  const node: TreeNode = {
+    id: folder.id,
+    name: folder.text,
+    type: 'folder',
+    children: []
+  };
   
-  // Initialize tree nodes with basic structure
-  folders.forEach(folder => {
-    folderMap.set(folder.id, {
-      id: folder.id,
-      name: folder.text,
-      type: 'folder',
-      children: []
-    });
-  });
+  // Process children if they exist
+  if (folder.children && folder.children.length > 0) {
+    node.children = folder.children.map(child => convertFolderToTreeNode(child));
+  }
   
-  // Build the tree structure
-  const tree: TreeNode[] = [];
-  
-  folders.forEach(folder => {
-    const folderNode = folderMap.get(folder.id);
-    
-    if (!folderNode) return; // Skip if node not found
-    
-    // Root folders (parentId is null, 0, or "0")
-    if (!folder.parentId || folder.parentId === 0 || folder.parentId === "0") {
-      tree.push(folderNode);
-    } else {
-      // Add as child to parent folder
-      const parentId = typeof folder.parentId === 'string' ? 
-        parseInt(folder.parentId, 10) : folder.parentId;
-      
-      const parent = folderMap.get(parentId);
-      if (parent && parent.children) {
-        parent.children.push(folderNode);
-      } else {
-        // If parent not found, add to root level
-        tree.push(folderNode);
-      }
-    }
-  });
-  
-  return tree;
+  return node;
 }
 
 /**
- * フォルダノードのカスタム表示フォーマッタ
+ * Build a tree structure from folder data
+ * 
+ * @param folders Array of folder data from the API
+ * @returns Array of TreeNode structures
+ */
+function buildFolderTree(folders: FolderData[]): TreeNode[] {
+  // Convert each top-level folder to a TreeNode
+  return folders.map(folder => convertFolderToTreeNode(folder));
+}
+
+/**
+ * Folder node custom formatter
  */
 function folderNodeFormatter(node: TreeNode): string {
   return node.name;
@@ -210,6 +198,7 @@ export const getFolders = createTool({
         const folderTree = buildFolderTree(data);
         
         logger.info(`Retrieved ${data.length} folders successfully and generated tree view`);
+        logger.debug(`Tree structure: ${JSON.stringify(folderTree)}`);
         return createTreeViewResponse(data, folderTree, folderNodeFormatter);
       }
 

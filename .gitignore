@@ -7,4 +7,4 @@ dist
 *.db
 *.db-*
 .mcp/config.json
-doc/*
+doc/*.md

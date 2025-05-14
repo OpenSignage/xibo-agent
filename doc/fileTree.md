@@ -17,12 +17,12 @@ src/mastra/tools/xibo-agent/
 │   ├── addSyncGroup.ts (1.8KB, 65 lines)
 │   └── getSyncGroups.ts (1.9KB, 66 lines)
 ├── font/
-│   ├── index.ts (278B, 5 lines)
+│   ├── index.ts (278B, 5 lines)                            ;Reviewed 2025/5/13
 │   ├── deleteFont.ts (1.0KB, 43 lines)
 │   ├── downloadFont.ts (1.1KB, 44 lines)
 │   ├── getFontDetails.ts (1.2KB, 46 lines)
-│   ├── uploadFont.ts (1.5KB, 61 lines)
-│   └── getFonts.ts (1.5KB, 60 lines)
+│   ├── uploadFont.ts (1.5KB, 61 lines)                     ;Reviewed 2025/5/13
+│   └── getFonts.ts (1.5KB, 60 lines)                       ;Reviewed 2025/5/13
 ├── action/
 │   ├── addAction.ts (2.3KB, 77 lines)
 │   ├── getActions.ts (2.8KB, 79 lines)
@@ -234,14 +234,9 @@ src/mastra/tools/xibo-agent/
 │   ├── checkoutLayout.ts (1.6KB, 41 lines)
 │   ├── positionRegions.ts (2.0KB, 56 lines)
 │   ├── clearLayout.ts (1.6KB, 41 lines)
-│   ├── getLayoutUsageByCampaigns.ts (2.1KB, 57 lines)
-│   ├── getLayoutUsageByDisplays.ts (2.1KB, 57 lines)
-│   ├── getLayoutUsageByPlaylists.ts (2.1KB, 57 lines)
-│   ├── getLayoutUsageByLayouts.ts (2.1KB, 57 lines)
-│   ├── getLayoutUsage.ts (2.0KB, 57 lines)
 │   ├── getFullscreenLayout.ts (1.0B, 1 lines)
 │   ├── discardLayout.ts (1.6KB, 41 lines)
-│   ├── getLayoutStatus.ts (2.0KB, 56 lines)
+│   ├── getLayoutStatus.ts (2.0KB, 56 lines)                    ;Reviewd 2025/5/12
 │   ├── untagLayout.ts (1.7KB, 48 lines)
 │   ├── tagLayout.ts (1.7KB, 48 lines)
 │   ├── setLayoutEnableStat.ts (1.9KB, 46 lines)
@@ -263,4 +258,8 @@ src/mastra/tools/xibo-agent/
 │   ├── putCampaign.ts (3.5KB, 63 lines)
 │   ├── postCampaign.ts (3.4KB, 62 lines)
 │   └── getCampaigns.ts (3.6KB, 66 lines)
+├── etc/
+│   ├── index.ts                                                ;Reviewd 2025/5/13
+│   ├── getGoogleFonts.ts                                       ;Reviewd 2025/5/13
+│   └── getNews.ts                                              ;Reviewd 2025/5/13
 ``` 
