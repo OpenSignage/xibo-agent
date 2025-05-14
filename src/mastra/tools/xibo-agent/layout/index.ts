@@ -41,10 +41,3 @@ export { setLayoutEnableStat } from './setLayoutEnableStat';
 // Layout tagging
 export { tagLayout } from './tagLayout';
 export { untagLayout } from './untagLayout';
-
-// Layout usage information
-export { getLayoutUsage } from './getLayoutUsage';
-export { getLayoutUsageByLayouts } from './getLayoutUsageByLayouts';
-export { getLayoutUsageByPlaylists } from './getLayoutUsageByPlaylists';
-export { getLayoutUsageByDisplays } from './getLayoutUsageByDisplays';
-export { getLayoutUsageByCampaigns } from './getLayoutUsageByCampaigns'; 

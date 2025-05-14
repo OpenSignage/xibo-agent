@@ -28,6 +28,8 @@ import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
   clearLayout, getLayoutStatus, checkoutLayout, discardLayout } from './layout';
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
+import { getNews, getGoogleFonts, uploadGoogleFonts } from './etc';
+import { getFonts, getFontDetails, uploadFont } from './font';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -45,8 +47,7 @@ export * from './library';      // Media library management
 export * from './displayGroup'; // Display group management
 export * from './displayprofile'; // Display profile management
 export * from './folder';       // Folder management
-
-// Extendednctionality  fu- module exports
+export * from './etc';          // Miscellaneous utilities
 export * from './action';       // Action management
 export * from './displayVenue'; // Display venue management
 export * from './font';         // Font management
@@ -92,7 +93,13 @@ export function getTools() {
     'clear-layout': clearLayout,
     'get-layout-status': getLayoutStatus,
     'checkout-layout': checkoutLayout,
-    'discard-layout': discardLayout
+    'discard-layout': discardLayout,
+    'get-news': getNews,
+    'get-google-fonts': getGoogleFonts,
+    'upload-google-fonts': uploadGoogleFonts,
+    'get-fonts': getFonts,
+    'get-font-details': getFontDetails,
+    'upload-font': uploadFont
   };
 
   // List of tools that require confirmation due to potentially dangerous operations
