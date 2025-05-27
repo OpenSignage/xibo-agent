@@ -83,20 +83,20 @@ export const addUser = createTool({
     // Use the standard API endpoint
     const url = new URL(`${config.cmsUrl}/api/user`);
     
-    // ユーザー名をそのまま使用
+    // Use the original username as is
     logger.info(`Creating new user: ${context.userName}`);
 
     try {
       // Get authentication headers
       const headers = await getAuthHeaders();
       
-      // form-urlencoded形式でContent-Typeヘッダーを設定
+      // Set Content-Type header for form-urlencoded
       const requestHeaders = {
         ...headers,
         'Content-Type': 'application/x-www-form-urlencoded'
       };
       
-      // URLSearchParamsを使用してフォームデータを作成
+      // Create form data using URLSearchParams
       const formData = new URLSearchParams();
       formData.append("userName", context.userName);
       formData.append("userTypeId", context.userTypeId.toString());
@@ -107,7 +107,7 @@ export const addUser = createTool({
       formData.append("newUserWizard", context.newUserWizard.toString());
       formData.append("hideNavigation", context.hideNavigation.toString());
       
-      // オプションパラメータがある場合は追加
+      // Add optional parameters if they exist
       if (context.email) {
         formData.append("email", context.email);
       }
@@ -124,24 +124,17 @@ export const addUser = createTool({
         formData.append("isPasswordChangeRequired", context.isPasswordChangeRequired.toString());
       }
       
-      // 変換前と変換後のデータをログに出力
-      logger.info(`Form data being sent: ${formData.toString().replace(/password=[^&]*/, 'password=********')}`);
-      
-      // Submit request to Xibo CMS API - form-urlencoded形式でデータを送信
-      logger.info(`Sending request to ${url.toString()}`);
+      // Submit request to Xibo CMS API with form-urlencoded data
       const response = await fetch(url.toString(), {
         method: "POST",
         headers: requestHeaders,
         body: formData.toString(),
       });
 
-      // Debug the request (safely)
-      logger.info(`Request sent with headers: ${JSON.stringify(requestHeaders)}`);
-      
       // Log the complete response
       const responseText = await response.text();
       
-      // レスポンスメッセージをデコード
+      // Decode response message
       let decodedResponse = responseText;
       try {
         const responseObj = JSON.parse(responseText);
@@ -150,61 +143,56 @@ export const addUser = createTool({
           decodedResponse = JSON.stringify(responseObj);
         }
       } catch (e) {
-        // JSONパースに失敗した場合は元のメッセージをそのまま使用
+        // Use original message if JSON parsing fails
       }
-      
-      logger.info(`Complete response: ${decodedResponse}`);
       
       // Check if response is successful
       if (!response.ok) {
-        // 詳細なエラー情報の取得を試みる
+        // Try to get detailed error information
         try {
           const errorData = JSON.parse(responseText);
           
-          // エラーメッセージをデコード
+          // Decode error message
           if (errorData.message) {
             errorData.message = decodeURIComponent(errorData.message);
           }
           
-          // 特に422エラー（バリデーションエラー）の場合は詳細を記録
+          // Log detailed information for validation errors (422)
           if (response.status === 422 && errorData.error) {
-            logger.error(`バリデーションエラー: ${errorData.error.message}`, {
+            logger.error(`Validation error: ${errorData.error.message}`, {
               status: response.status,
               url: url.toString(),
               userName: context.userName,
-              errorDetails: errorData.error,
-              requestData: formData.toString().replace(/password=[^&]*/, 'password=********')
+              errorDetails: errorData.error
             });
           } else {
             logger.error(`Failed to create user: ${JSON.stringify(errorData)}`, { 
               status: response.status,
               url: url.toString(),
               userName: context.userName,
-              email: context.email,
-              requestData: formData.toString().replace(/password=[^&]*/, 'password=********')
+              email: context.email
             });
           }
         } catch (parseError) {
-          // JSONパースに失敗した場合は元のエラーメッセージを記録
+          // Log original error message if JSON parsing fails
           logger.error(`Failed to create user: ${responseText}`, { 
             status: response.status,
             url: url.toString(),
             userName: context.userName,
-            email: context.email,
-            requestData: formData.toString().replace(/password=[^&]*/, 'password=********')
+            email: context.email
           });
         }
         
         throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
       }
 
-      // レスポンスが成功した場合は空のオブジェクトを返す
+      // Return empty object for successful response
       logger.info(`User created successfully`);
       return {};
     } catch (error) {
       logger.error(`addUser: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
       
-      // エラーメッセージをデコード
+      // Decode error message
       if (error instanceof Error) {
         try {
           const errorObj = JSON.parse(error.message);
@@ -213,7 +201,7 @@ export const addUser = createTool({
             error.message = JSON.stringify(errorObj);
           }
         } catch (e) {
-          // JSONパースに失敗した場合は元のエラーメッセージをそのまま使用
+          // Use original error message if JSON parsing fails
         }
       }
       
