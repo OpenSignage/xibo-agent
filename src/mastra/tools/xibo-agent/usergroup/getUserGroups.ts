@@ -1,32 +1,75 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Xibo CMS User Group Search Tool
+ * 
+ * This module provides functionality to search user groups in the Xibo CMS system.
+ * It implements the user group search API endpoint and handles the necessary validation
+ * and data transformation for retrieving user group information.
+ */
+
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
-import { getAuthHeaders } from "../utils/auth";
+import { getAuthHeaders } from "../auth";
+import { logger } from "../../../index";
 
+/**
+ * Schema for user group data validation
+ * Defines the structure of user group data in the Xibo CMS system
+ */
 const userGroupSchema = z.object({
   groupId: z.number(),
   group: z.string(),
-  description: z.string().optional(),
+  description: z.string().nullable().optional(),
   libraryQuota: z.number().optional(),
   isSystemNotification: z.number().optional(),
   isDisplayNotification: z.number().optional(),
   isScheduleNotification: z.number().optional(),
   isCustomNotification: z.number().optional(),
   isShownForAddUser: z.number().optional(),
-  defaultHomePageId: z.number().optional(),
+  defaultHomePageId: z.number().nullable().optional(),
+  isUserSpecific: z.number().optional(),
+  isEveryone: z.number().optional(),
+  isDataSetNotification: z.number().optional(),
+  isLayoutNotification: z.number().optional(),
+  isLibraryNotification: z.number().optional(),
+  isReportNotification: z.number().optional(),
+  features: z.array(z.string()).optional(),
+  buttons: z.array(z.string()).optional(),
 });
 
+/**
+ * Schema for API response validation
+ * Expected response format from the Xibo CMS API
+ */
 const apiResponseSchema = z.object({
   success: z.boolean(),
   data: z.array(userGroupSchema),
 });
 
+/**
+ * Tool for searching user groups in Xibo CMS
+ * 
+ * This tool accepts search criteria and retrieves matching user groups
+ * from the Xibo CMS system.
+ */
 export const getUserGroups = createTool({
   id: "get-user-groups",
-  description: "ユーザーグループを検索",
+  description: "Search user groups in Xibo CMS",
   inputSchema: z.object({
-    userGroupId: z.number().optional(),
-    userGroup: z.string().optional(),
+    userGroupId: z.number().optional().describe("User group ID (optional)"),
+    userGroup: z.string().optional().describe("User group name (optional)"),
   }),
   outputSchema: apiResponseSchema,
   execute: async ({ context }) => {
@@ -34,27 +77,44 @@ export const getUserGroups = createTool({
       throw new Error("CMS URL is not set");
     }
 
-    const url = new URL(`${config.cmsUrl}/group`);
+    const url = new URL(`${config.cmsUrl}/api/group`);
     
-    // クエリパラメータの追加
+    // Add query parameters
     if (context.userGroupId) url.searchParams.append("userGroupId", context.userGroupId.toString());
     if (context.userGroup) url.searchParams.append("userGroup", context.userGroup);
-
-    console.log(`Requesting URL: ${url.toString()}`);
 
     const response = await fetch(url.toString(), {
       method: "GET",
       headers: await getAuthHeaders(),
     });
 
+    // Get response text
+    const responseText = await response.text();
+
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
     }
 
-    const rawData = await response.json();
-    const validatedData = apiResponseSchema.parse(rawData);
-    console.log("User groups retrieved successfully");
-    return validatedData;
+    // Parse and validate response data
+    try {
+      const rawData = JSON.parse(responseText);
+      
+      // Handle array response
+      const validatedData = {
+        success: true,
+        data: Array.isArray(rawData) ? rawData : [rawData]
+      };
+
+      // Validate the transformed data
+      const validatedResult = apiResponseSchema.parse(validatedData);
+      return validatedResult;
+    } catch (error) {
+      logger.error(`Failed to parse response: ${error instanceof Error ? error.message : "Unknown error"}`, { 
+        error,
+        responseText
+      });
+      throw error;
+    }
   },
 });
 

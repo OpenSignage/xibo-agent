@@ -23,6 +23,7 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { base64Encode } from "../utility/encoding";
 
 /**
  * Create a safe version of data for logging without sensitive information
@@ -40,16 +41,6 @@ function getSafeDataForLogging(data: any): any {
 }
 
 /**
- * Base64 encode a string
- * 
- * @param str String to encode
- * @returns Base64 encoded string
- */
-function base64Encode(str: string): string {
-  return Buffer.from(str).toString('base64');
-}
-
-/**
  * Tool for creating new users in Xibo CMS
  * 
  * This tool accepts user details and creates a new user account
@@ -60,21 +51,28 @@ export const addUser = createTool({
   id: "add-user",
   description: "Add a new user to Xibo CMS",
   inputSchema: z.object({
-    userName: z.string(),
-    email: z.string().optional(),
-    userTypeId: z.number().default(3),
-    homeFolderId: z.number().default(1),
-    homePageId: z.string().default("icondashboard.view"),
-    password: z.string(),
-    groupId: z.number().default(1),
-    newUserWizard: z.number().default(0),
-    hideNavigation: z.number().default(0),
-    firstName: z.string().optional(),
-    lastName: z.string().optional(),
-    libraryQuota: z.number().default(4096),
-    isPasswordChangeRequired: z.number().optional().default(0)
+    userName: z.string().describe("Username for the new user account"),
+    email: z.string().optional().describe("Email address for the user (optional)"),
+    userTypeId: z.number().default(3).describe("User type ID (default: 3 for standard user)"),
+    homeFolderId: z.number().default(1).describe("Home folder ID for the user (default: 1)"),
+    homePageId: z.string().default("icondashboard.view").describe("Default home page for the user (default: icondashboard.view)"),
+    password: z.string().describe("Password for the user account"),
+    groupId: z.number().default(1).describe("Group ID for the user (default: 1)"),
+    newUserWizard: z.number().default(0).describe("Whether to show new user wizard (0: no, 1: yes)"),
+    hideNavigation: z.number().default(0).describe("Whether to hide navigation (0: no, 1: yes)"),
+    firstName: z.string().optional().describe("User's first name (optional)"),
+    lastName: z.string().optional().describe("User's last name (optional)"),
+    libraryQuota: z.number().default(4096).describe("Library quota in MB (default: 4096)"),
+    isPasswordChangeRequired: z.number().optional().default(0).describe("Whether password change is required on first login (0: no, 1: yes)"),
+    phone: z.string().optional().describe("Phone number for the user (optional)"),
+    ref1: z.string().optional().describe("Reference 1 for the user (optional)"),
+    ref2: z.string().optional().describe("Reference 2 for the user (optional)"),
+    ref3: z.string().optional().describe("Reference 3 for the user (optional)"),
+    ref4: z.string().optional().describe("Reference 4 for the user (optional)"),
+    ref5: z.string().optional().describe("Reference 5 for the user (optional)"),
+    isPasswordChangeReuest: z.number().default(0).describe("Whether to change password on first login (0: no, 1: yes)"),
   }),
-  outputSchema: z.object({}),  // 空のオブジェクトを返す
+  outputSchema: z.object({}),  // Returns an empty object
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
       throw new Error("CMS URL is not configured");
@@ -102,10 +100,12 @@ export const addUser = createTool({
       formData.append("userTypeId", context.userTypeId.toString());
       formData.append("homePageId", context.homePageId);
       formData.append("homeFolderId", context.homeFolderId.toString());
-      formData.append("password", context.password);
+      formData.append("password", base64Encode(context.password));
       formData.append("groupId", context.groupId.toString());
       formData.append("newUserWizard", context.newUserWizard.toString());
       formData.append("hideNavigation", context.hideNavigation.toString());
+      formData.append("libraryQuota", context.libraryQuota.toString());
+      formData.append("isPasswordChangeReuest", context.isPasswordChangeReuest.toString());
       
       // Add optional parameters if they exist
       if (context.email) {
@@ -117,11 +117,26 @@ export const addUser = createTool({
       if (context.lastName) {
         formData.append("lastName", context.lastName);
       }
-      if (context.libraryQuota) {
-        formData.append("libraryQuota", context.libraryQuota.toString());
-      }
       if (context.isPasswordChangeRequired) {
         formData.append("isPasswordChangeRequired", context.isPasswordChangeRequired.toString());
+      }
+      if (context.phone) {
+        formData.append("phone", context.phone);
+      }
+      if (context.ref1) {
+        formData.append("ref1", context.ref1);
+      }
+      if (context.ref2) {
+        formData.append("ref2", context.ref2);
+      }
+      if (context.ref3) {
+        formData.append("ref3", context.ref3);
+      }
+      if (context.ref4) {
+        formData.append("ref4", context.ref4);
+      }
+      if (context.ref5) {
+        formData.append("ref5", context.ref5);
       }
       
       // Submit request to Xibo CMS API with form-urlencoded data
