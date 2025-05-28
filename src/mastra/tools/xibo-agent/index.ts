@@ -21,7 +21,7 @@ import { logger } from '../../index';
 
 // Import core tools individually to ensure they're always available for getTools()
 import { getCmsTime, getAbout } from './misc';
-import { getUser, getUsers, getUserMe, addUser } from './user';
+import { getUser, getUsers, getUserMe, addUser, deleteUser, editUser } from './user';
 import { getModules } from './modules';
 import { getDisplays } from './display';
 import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
@@ -30,6 +30,7 @@ import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
 import { getNews, getGoogleFonts, uploadGoogleFonts } from './etc';
 import { getFonts, getFontDetails, uploadFont } from './font';
+import { getUserGroups } from './usergroup';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -99,7 +100,10 @@ export function getTools() {
     'upload-google-fonts': uploadGoogleFonts,
     'get-fonts': getFonts,
     'get-font-details': getFontDetails,
-    'upload-font': uploadFont
+    'upload-font': uploadFont,
+    'delete-user': deleteUser,
+    'edit-user': editUser,
+    'get-user-groups': getUserGroups
   };
 
   // List of tools that require confirmation due to potentially dangerous operations
@@ -107,6 +111,7 @@ export function getTools() {
     'delete-layout',
     'delete-folder',
     'delete-resolution',
+    'delete-user',
     // Add other destructive tools here
   ];
 

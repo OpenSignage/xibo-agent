@@ -91,7 +91,7 @@ src/mastra/tools/xibo-agent/
 │   ├── getUserPermissions.ts (1.3KB, 52 lines)
 │   ├── deleteUser.ts (1.4KB, 52 lines)
 │   ├── editUser.ts (2.3KB, 76 lines)
-│   ├── addUser.ts (2.2KB, 75 lines)
+│   ├── addUser.ts (2.2KB, 75 lines)                            ;reviewed 2025/5/28
 │   ├── getUser.ts (4.8KB, 132 lines)                           ;Reviewed 2025/5/9
 │   └── getUserMe.ts (4.2KB, 119 lines)                         ;Reviewed 2025/5/8
 ├── statistics/
