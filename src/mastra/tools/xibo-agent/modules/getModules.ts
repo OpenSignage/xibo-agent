@@ -23,6 +23,7 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Schema for module property definition
@@ -90,6 +91,18 @@ const moduleResponseSchema = z.array(z.object({
 }));
 
 /**
+ * Schema for error response
+ */
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  data: z.array(z.any()),
+  error: z.object({
+    status: z.number().optional(),
+    message: z.string()
+  })
+});
+
+/**
  * Tool for retrieving all module information from Xibo CMS
  */
 export const getModules = createTool({
@@ -98,11 +111,17 @@ export const getModules = createTool({
   inputSchema: z.object({
     _placeholder: z.string().optional().describe('This tool does not require input parameters')
   }),
-  outputSchema: z.string(),
+  outputSchema: z.union([moduleResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
-        throw new Error("CMS URL is not configured");
+        return {
+          success: false as const,
+          data: [],
+          error: {
+            message: "CMS URL is not configured"
+          }
+        };
       }
 
       const headers = await getAuthHeaders();
@@ -111,16 +130,37 @@ export const getModules = createTool({
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        const decodedError = decodeErrorMessage(errorText);
+        logger.error('Failed to get modules:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: decodedError
+        });
+        return {
+          success: false as const,
+          data: [],
+          error: {
+            status: response.status,
+            message: decodedError
+          }
+        };
       }
 
       const data = await response.json();
       const validatedData = moduleResponseSchema.parse(data);
-
-      return JSON.stringify(validatedData, null, 2);
+      return validatedData;
     } catch (error) {
       logger.error(`getModules: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+      return {
+        success: false as const,
+        data: [],
+        error: {
+          message: error instanceof Error ? error.message : "Unknown error"
+        }
+      };
     }
   },
 });
+
+export default getModules;
