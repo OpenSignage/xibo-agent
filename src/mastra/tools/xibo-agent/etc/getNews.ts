@@ -17,11 +17,9 @@
  */
 
 import { XMLParser } from 'fast-xml-parser';
-import { createLogger } from '@mastra/core/logger';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-
-const logger = createLogger({ name: 'xibo-agent:etc:getNews' });
+import { logger } from '../../../index';
 
 /**
  * News item structure from Xibo RSS feed
