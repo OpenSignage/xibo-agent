@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
-import { getAuthHeaders } from "../utils/auth";
+import { getAuthHeaders } from "../auth";
 
 const actionSchema = z.object({
   actionId: z.number(),

@@ -26,6 +26,18 @@ import { logger } from '../../../index';
 import { base64Encode } from "../utility/encoding";
 
 /**
+ * Available home page options for users
+ */
+const HomePageId = {
+  STATUS_DASHBOARD: 'statusdashboard.view',
+  ICON_DASHBOARD: 'icondashboard.view',
+  MEDIA_MANAGER: 'mediamanager.view',
+  PLAYLIST_DASHBOARD: 'playlistdashboard.view',
+} as const;
+
+type HomePageIdType = typeof HomePageId[keyof typeof HomePageId];
+
+/**
  * Create a safe version of data for logging without sensitive information
  * 
  * @param data The original data object
@@ -39,6 +51,57 @@ function getSafeDataForLogging(data: any): any {
   }
   return safeCopy;
 }
+
+/**
+ * Schema for user data validation
+ * Defines the structure of user data in the Xibo CMS system
+ */
+const userSchema = z.object({
+  userId: z.number(),
+  userName: z.string(),
+  userTypeId: z.number(),
+  loggedIn: z.string().nullable(),
+  email: z.string().nullable(),
+  homePageId: z.enum([
+    HomePageId.STATUS_DASHBOARD,
+    HomePageId.ICON_DASHBOARD,
+    HomePageId.MEDIA_MANAGER,
+    HomePageId.PLAYLIST_DASHBOARD
+  ]),
+  homeFolderId: z.number(),
+  lastAccessed: z.string().nullable(),
+  newUserWizard: z.number(),
+  retired: z.number().nullable(),
+  isPasswordChangeRequired: z.number(),
+  groupId: z.number(),
+  group: z.string(),
+  libraryQuota: z.number(),
+  firstName: z.string().nullable(),
+  lastName: z.string().nullable(),
+  phone: z.string().nullable(),
+  ref1: z.string().nullable(),
+  ref2: z.string().nullable(),
+  ref3: z.string().nullable(),
+  ref4: z.string().nullable(),
+  ref5: z.string().nullable(),
+  groups: z.array(z.any()),
+  campaigns: z.array(z.any()),
+  layouts: z.array(z.any()),
+  media: z.array(z.any()),
+  events: z.array(z.any()),
+  playlists: z.array(z.any()),
+  displayGroups: z.array(z.any()),
+  dayParts: z.array(z.any()),
+  isSystemNotification: z.number(),
+  isDisplayNotification: z.number(),
+  isDataSetNotification: z.number(),
+  isLayoutNotification: z.number(),
+  isLibraryNotification: z.number(),
+  isReportNotification: z.number(),
+  isScheduleNotification: z.number(),
+  isCustomNotification: z.number(),
+  twoFactorTypeId: z.number().nullable(),
+});
 
 /**
  * Tool for creating new users in Xibo CMS
@@ -55,7 +118,19 @@ export const addUser = createTool({
     email: z.string().optional().describe("Email address for the user (optional)"),
     userTypeId: z.number().default(3).describe("User type ID (default: 3 for standard user)"),
     homeFolderId: z.number().default(1).describe("Home folder ID for the user (default: 1)"),
-    homePageId: z.string().default("icondashboard.view").describe("Default home page for the user (default: icondashboard.view)"),
+    homePageId: z.enum([
+      HomePageId.STATUS_DASHBOARD,
+      HomePageId.ICON_DASHBOARD,
+      HomePageId.MEDIA_MANAGER,
+      HomePageId.PLAYLIST_DASHBOARD
+    ]).default(HomePageId.ICON_DASHBOARD).describe(
+      "Default home page for the user (default: icondashboard.view)\n" +
+      "Available options:\n" +
+      "- statusdashboard.view: Status Dashboard\n" +
+      "- icondashboard.view: Icon Dashboard\n" +
+      "- mediamanager.view: Media Manager\n" +
+      "- playlistdashboard.view: Playlist Dashboard"
+    ),
     password: z.string().describe("Password for the user account"),
     groupId: z.number().default(1).describe("Group ID for the user (default: 1)"),
     newUserWizard: z.number().default(0).describe("Whether to show new user wizard (0: no, 1: yes)"),
@@ -72,7 +147,7 @@ export const addUser = createTool({
     ref5: z.string().optional().describe("Reference 5 for the user (optional)"),
     isPasswordChangeReuest: z.number().default(0).describe("Whether to change password on first login (0: no, 1: yes)"),
   }),
-  outputSchema: z.object({}),  // Returns an empty object
+  outputSchema: userSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
       throw new Error("CMS URL is not configured");
@@ -146,20 +221,8 @@ export const addUser = createTool({
         body: formData.toString(),
       });
 
-      // Log the complete response
+      // Get response text
       const responseText = await response.text();
-      
-      // Decode response message
-      let decodedResponse = responseText;
-      try {
-        const responseObj = JSON.parse(responseText);
-        if (responseObj.message) {
-          responseObj.message = decodeURIComponent(responseObj.message);
-          decodedResponse = JSON.stringify(responseObj);
-        }
-      } catch (e) {
-        // Use original message if JSON parsing fails
-      }
       
       // Check if response is successful
       if (!response.ok) {
@@ -201,9 +264,24 @@ export const addUser = createTool({
         throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
       }
 
-      // Return empty object for successful response
-      logger.info(`User created successfully`);
-      return {};
+      // Parse and validate response data
+      try {
+        const userData = JSON.parse(responseText);
+        const validatedData = userSchema.parse(userData);
+        
+        logger.info(`User created successfully`, {
+          userId: validatedData.userId,
+          userName: validatedData.userName,
+          groupId: validatedData.groupId
+        });
+        
+        return validatedData;
+      } catch (error) {
+        logger.error('Failed to validate response data:', {
+          error: error instanceof Error ? error.message : "Unknown error"
+        });
+        throw error;
+      }
     } catch (error) {
       logger.error(`addUser: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
       
