@@ -24,6 +24,7 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
 import { base64Encode } from "../utility/encoding";
+import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Schema for user data validation
@@ -207,13 +208,14 @@ export const editUser = createTool({
 
     // Check if the request was successful
     if (!response.ok) {
-      logger.error(`Failed to edit user: ${decodedResponse}`, {
+      const errorText = await response.text();
+      const decodedError = decodeErrorMessage(errorText);
+      logger.error('Failed to edit user:', {
         status: response.status,
-        url: url.toString(),
-        userId: context.userId,
-        userName: context.userName
+        statusText: response.statusText,
+        error: decodedError
       });
-      throw new Error(`HTTP error! status: ${response.status}, message: ${decodedResponse}`);
+      throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
     }
 
     // Parse and validate response data

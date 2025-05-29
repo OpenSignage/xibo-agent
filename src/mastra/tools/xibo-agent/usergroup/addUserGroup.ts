@@ -23,6 +23,7 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
+import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Schema for user group data validation
@@ -114,12 +115,13 @@ export const addUserGroup = createTool({
 
     if (!response.ok) {
       const errorText = await response.text();
+      const decodedError = decodeErrorMessage(errorText);
       logger.error('Failed to create user group:', {
         status: response.status,
         statusText: response.statusText,
-        error: errorText
+        error: decodedError
       });
-      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
     }
 
     const rawData = await response.json();

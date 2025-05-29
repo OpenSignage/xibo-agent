@@ -24,6 +24,7 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
 import { base64Encode } from "../utility/encoding";
+import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Available home page options for users
@@ -226,42 +227,13 @@ export const addUser = createTool({
       
       // Check if response is successful
       if (!response.ok) {
-        // Try to get detailed error information
-        try {
-          const errorData = JSON.parse(responseText);
-          
-          // Decode error message
-          if (errorData.message) {
-            errorData.message = decodeURIComponent(errorData.message);
-          }
-          
-          // Log detailed information for validation errors (422)
-          if (response.status === 422 && errorData.error) {
-            logger.error(`Validation error: ${errorData.error.message}`, {
-              status: response.status,
-              url: url.toString(),
-              userName: context.userName,
-              errorDetails: errorData.error
-            });
-          } else {
-            logger.error(`Failed to create user: ${JSON.stringify(errorData)}`, { 
-              status: response.status,
-              url: url.toString(),
-              userName: context.userName,
-              email: context.email
-            });
-          }
-        } catch (parseError) {
-          // Log original error message if JSON parsing fails
-          logger.error(`Failed to create user: ${responseText}`, { 
-            status: response.status,
-            url: url.toString(),
-            userName: context.userName,
-            email: context.email
-          });
-        }
-        
-        throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
+        const decodedError = decodeErrorMessage(responseText);
+        logger.error('Failed to add user:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: decodedError
+        });
+        throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
       }
 
       // Parse and validate response data
