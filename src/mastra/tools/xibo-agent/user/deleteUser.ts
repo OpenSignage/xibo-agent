@@ -23,6 +23,7 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Schema for API response validation
@@ -93,12 +94,14 @@ export const deleteUser = createTool({
 
     // Check if the request was successful
     if (!response.ok) {
-      logger.error(`Failed to delete user: ${decodedResponse}`, {
+      const errorText = await response.text();
+      const decodedError = decodeErrorMessage(errorText);
+      logger.error('Failed to delete user:', {
         status: response.status,
-        url: url.toString(),
-        userId: context.userId
+        statusText: response.statusText,
+        error: decodedError
       });
-      throw new Error(`HTTP error! status: ${response.status}, message: ${decodedResponse}`);
+      throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
     }
 
     // Return success response
