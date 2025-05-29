@@ -17,11 +17,9 @@
  * API specification: https://developers.google.com/fonts/docs/developer_api
  */
 
-import { createLogger } from '@mastra/core/logger';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-
-const logger = createLogger({ name: 'xibo-agent:etc:getGoogleFonts' });
+import { logger } from '../../../index';
 
 // Valid sort options for Google Fonts API
 const SORT_OPTIONS = ['alpha', 'date', 'popularity', 'style', 'trending'] as const;

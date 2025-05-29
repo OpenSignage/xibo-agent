@@ -11,28 +11,29 @@
  */
 
 /**
- * ツリービュー生成ユーティリティ
+ * Tree View Generation Utility
  * 
- * このモジュールは、階層構造のデータを視覚的に表示するためのツリー構造を生成する
- * 汎用的な関数を提供します。レイアウト、フォルダなど様々な種類の階層データで利用できます。
+ * This module provides generic functions for generating tree structures
+ * to visually display hierarchical data. It can be used with various types
+ * of hierarchical data such as layouts, folders, etc.
  */
 
 import { z } from 'zod';
 
 /**
- * ツリーノードの基本インターフェース
- * すべてのツリーノードはこのインターフェースを実装する必要がある
+ * Basic interface for tree nodes
+ * All tree nodes must implement this interface
  */
 export interface TreeNode {
   id: number;
   name: string;
   type: string;
   children?: TreeNode[];
-  [key: string]: any; // その他の追加プロパティを許可
+  [key: string]: any; // Allow additional properties
 }
 
 /**
- * フラット化されたツリーノードの型定義
+ * Type definition for flattened tree nodes
  */
 export interface FlatTreeNode {
   id: number;
@@ -41,11 +42,11 @@ export interface FlatTreeNode {
   depth: number;
   isLast: boolean;
   path: string;
-  [key: string]: any; // その他の追加プロパティを許可
+  [key: string]: any; // Allow additional properties
 }
 
 /**
- * ツリービュー用のレスポンススキーマ
+ * Response schema for tree view
  */
 export const treeResponseSchema = z.object({
   success: z.boolean(),
@@ -62,12 +63,12 @@ export const treeResponseSchema = z.object({
 });
 
 /**
- * ツリービューのテキスト表現を生成する
+ * Generates a text representation of the tree view
  * 
- * @param tree 階層構造のツリー
- * @param indent 現在のインデント文字列
- * @param nodeFormatter ノードの表示形式をカスタマイズするオプションの関数
- * @returns フォーマットされたツリービューの文字列
+ * @param tree Hierarchical tree structure
+ * @param indent Current indentation string
+ * @param nodeFormatter Optional function to customize node display format
+ * @returns Formatted tree view string
  */
 export function generateTreeView(
   tree: TreeNode[], 
@@ -80,16 +81,16 @@ export function generateTreeView(
     const isLast = index === array.length - 1;
     const linePrefix = isLast ? '└─ ' : '├─ ';
     
-    // ノードの表示形式をフォーマット
+    // Format node display
     let nodeDisplay: string;
     if (nodeFormatter) {
-      // カスタムフォーマッタがある場合はそれを使用
+      // Use custom formatter if provided
       nodeDisplay = nodeFormatter(node);
     } else {
-      // デフォルトの表示形式
+      // Default display format
       nodeDisplay = `${node.type}: ${node.name}`;
       
-      // 特定のノード型に特別な表示を適用
+      // Apply special display for specific node types
       if (node.type === 'widget' && node.duration !== undefined) {
         nodeDisplay += ` (${node.duration}s)`;
       }
@@ -97,7 +98,7 @@ export function generateTreeView(
     
     output += `${indent}${linePrefix}${nodeDisplay}\n`;
     
-    // 子ノードを処理
+    // Process child nodes
     if (node.children && node.children.length > 0) {
       const childIndent = indent + (isLast ? '   ' : '│  ');
       output += generateTreeView(node.children, childIndent, nodeFormatter);
@@ -108,14 +109,14 @@ export function generateTreeView(
 }
 
 /**
- * ツリーを平坦化して、深さとパス情報を含む配列にする
+ * Flattens a tree into an array with depth and path information
  * 
- * @param tree 階層構造のツリー
- * @param depth 現在の深さ
- * @param path 現在のパス
- * @param result 平坦化した結果を集める配列
- * @param nodePathFormatter ノードのパス表示をカスタマイズするオプションの関数
- * @returns 深さとパス情報を含むノードの配列
+ * @param tree Hierarchical tree structure
+ * @param depth Current depth
+ * @param path Current path
+ * @param result Array to collect flattened results
+ * @param nodePathFormatter Optional function to customize node path display
+ * @returns Array of nodes with depth and path information
  */
 export function flattenTree(
   tree: TreeNode[],
@@ -127,7 +128,7 @@ export function flattenTree(
   tree.forEach((node, index, array) => {
     const isLast = index === array.length - 1;
     
-    // ノードのパス表示をフォーマット
+    // Format node path display
     let nodePath: string;
     if (nodePathFormatter) {
       nodePath = nodePathFormatter(node);
@@ -137,7 +138,7 @@ export function flattenTree(
     
     const currentPath = path ? `${path} > ${nodePath}` : nodePath;
     
-    // 基本プロパティをコピー
+    // Copy basic properties
     const flatNode: FlatTreeNode = {
       id: node.id,
       name: node.name,
@@ -147,14 +148,14 @@ export function flattenTree(
       path: currentPath
     };
     
-    // 特別な処理が必要なプロパティをコピー
+    // Copy properties that need special handling
     if (node.duration !== undefined) {
       flatNode.duration = node.duration;
     }
     
     result.push(flatNode);
     
-    // 子ノードを処理
+    // Process child nodes
     if (node.children && node.children.length > 0) {
       flattenTree(node.children, depth + 1, currentPath, result, nodePathFormatter);
     }
@@ -164,12 +165,12 @@ export function flattenTree(
 }
 
 /**
- * ツリー表示用の結果オブジェクトを生成する
+ * Creates a response object for tree view display
  * 
- * @param data 元のデータ（配列またはオブジェクト）
- * @param tree 構築済みのツリー構造
- * @param nodeFormatter オプションのノード表示フォーマッタ
- * @returns ツリー表示を含む結果オブジェクト
+ * @param data Original data (array or object)
+ * @param tree Constructed tree structure
+ * @param nodeFormatter Optional node display formatter
+ * @returns Response object containing tree view
  */
 export function createTreeViewResponse(
   data: any[] | object,
@@ -177,7 +178,7 @@ export function createTreeViewResponse(
   nodeFormatter?: (node: TreeNode) => string
 ): any {
   const treeViewString = generateTreeView(tree, '', nodeFormatter);
-  // マークダウンコードブロックとしてフォーマット
+  // Format as markdown code block
   const formattedTreeView = "```text\n" + treeViewString + "```";
   const flattenedTree = flattenTree(tree);
   

@@ -24,8 +24,7 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { createLogger } from '@mastra/core/logger';
 import { decodeErrorMessage } from "../utility/error";
-
-const logger = createLogger({ name: 'xibo-agent:misc:getAbout' });
+import { logger } from '../../../index';
 
 /**
  * Schema for the about response from Xibo API

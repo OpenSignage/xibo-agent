@@ -31,8 +31,7 @@ import {
   treeResponseSchema, 
   createTreeViewResponse 
 } from "../utility/treeView";
-
-const logger = createLogger({ name: 'xibo-agent:user:getUser' });
+import { logger } from '../../../index';
 
 /**
  * Schema for user group data
