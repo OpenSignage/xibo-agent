@@ -79,7 +79,7 @@ src/mastra/tools/xibo-agent/
 │   ├── deleteUserGroup.ts (1.1KB, 44 lines)
 │   ├── editUserGroup.ts (2.9KB, 78 lines)
 │   ├── addUserGroup.ts (2.9KB, 77 lines)
-│   └── getUserGroups.ts (1.8KB, 61 lines)
+│   └── getUserGroups.ts (1.8KB, 61 lines)                      ;Reviewed 2025/5/28
 ├── user/
 │   ├── getUsers.ts (3.6KB, 115 lines)                          ;Reviewd 2025/5/9
 │   ├── index.ts (411B, 12 lines)
@@ -89,9 +89,9 @@ src/mastra/tools/xibo-agent/
 │   ├── getUserPreferences.ts (1.3KB, 49 lines)
 │   ├── setUserPermissions.ts (1.4KB, 55 lines)
 │   ├── getUserPermissions.ts (1.3KB, 52 lines)
-│   ├── deleteUser.ts (1.4KB, 52 lines)
+│   ├── deleteUser.ts (1.4KB, 52 lines)                         ;Reviewed 2025/5/28
 │   ├── editUser.ts (2.3KB, 76 lines)
-│   ├── addUser.ts (2.2KB, 75 lines)                            ;reviewed 2025/5/28
+│   ├── addUser.ts (2.2KB, 75 lines)                            ;Reviewed 2025/5/28
 │   ├── getUser.ts (4.8KB, 132 lines)                           ;Reviewed 2025/5/9
 │   └── getUserMe.ts (4.2KB, 119 lines)                         ;Reviewed 2025/5/8
 ├── statistics/
