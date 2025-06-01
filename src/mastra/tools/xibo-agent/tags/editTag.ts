@@ -63,7 +63,7 @@ export const editTag = createTool({
   description: "Edit an existing tag in Xibo CMS",
   inputSchema: z.object({
     tagId: z.number().describe("ID of the tag to edit"),
-    name: z.string().optional().describe("New name for the tag"),
+    tag: z.string().optional().describe("New tag name (1-50 characters)"),
     isRequired: z.number().optional().describe("Set tag as required (0: optional, 1: required)"),
     options: z.string().optional().describe("Tag options as a JSON string array"),
   }),
@@ -75,42 +75,43 @@ export const editTag = createTool({
 
     const url = new URL(`${config.cmsUrl}/api/tag/${context.tagId}`);
     
-    // Create form data
-    const formData = new FormData();
-    if (context.name) formData.append("name", context.name);
-    if (context.isRequired) formData.append("isRequired", context.isRequired.toString());
-    if (context.options) formData.append("options", context.options);
+    // Create URLSearchParams for form data
+    const params = new URLSearchParams();
+    if (context.tag) params.append("name", context.tag);
+    if (context.isRequired) params.append("isRequired", context.isRequired.toString());
+    if (context.options) params.append("options", context.options);
 
     const response = await fetch(url.toString(), {
       method: "PUT",
-      headers: await getAuthHeaders(),
-      body: formData,
+      headers: {
+        ...await getAuthHeaders(),
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: params
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      const decodedError = decodeErrorMessage(errorText);
-      logger.error('HTTP error occurred:', {
-        status: response.status,
-        error: decodedError
-      });
-      throw new Error(decodedError);
-    }
-
-    const rawData = await response.json();
-    
+    // Get response data
+    const responseText = await response.text();
+    let responseData;
     try {
-      // Validate the response data
-      const validatedData = apiResponseSchema.parse({
-        success: true,
-        data: rawData
-      });
-
-      return validatedData.data;
-    } catch (error) {
-      logger.error('Validation error:', { error: error instanceof Error ? error.message : String(error) });
-      throw error;
+      responseData = JSON.parse(responseText);
+    } catch {
+      // If response is not JSON, return as error object
+      responseData = {
+        success: false,
+        error: responseText
+      };
     }
+
+    // Log error if response is not ok
+    if (!response.ok) {
+      logger.error('Failed to edit tag:', {
+        status: response.status,
+        error: responseData
+      });
+    }
+
+    return responseData;
   },
 });
 

@@ -74,24 +74,30 @@ export * from './statistics';   // Statistics management
 export function getTools() {
   // Core tools (guaranteed to be available)
   const tools = {
+    // Misc
     'get-cms-time': getCmsTime,
     'get-about': getAbout,
+    // User
     'get-user': getUser,
     'get-users': getUsers,
     'get-user-me': getUserMe,
     'add-user': addUser,
+    // Modules
     'get-modules': getModules,
     'get-displays': getDisplays,
     'get-layouts': getLayouts,
     'add-layout': addLayout,
+    // Folder
     'get-folders': getFolders,
     'add-folder': addFolder,
     'edit-folder': editFolder,
     'delete-folder': deleteFolder,
+    // Resolution
     'get-resolutions': getResolutions,
     'add-resolution': addResolution,
     'edit-resolution': editResolution,
     'delete-resolution': deleteResolution,
+    // Layout
     'delete-layout': deleteLayout,
     'retire-layout': retireLayout,
     'unretire-layout': unretireLayout,
@@ -99,9 +105,11 @@ export function getTools() {
     'get-layout-status': getLayoutStatus,
     'checkout-layout': checkoutLayout,
     'discard-layout': discardLayout,
+    // News
     'get-news': getNews,
     'get-google-fonts': getGoogleFonts,
     'upload-google-fonts': uploadGoogleFonts,
+    
     'get-fonts': getFonts,
     'get-font-details': getFontDetails,
     'upload-font': uploadFont,
@@ -113,6 +121,7 @@ export function getTools() {
     'get-module-template-properties': getModuleTemplateProperties,
     'get-playlists': getPlaylists,
     'get-stats': getStats,
+    // Tags
     'get-tags': getTags,
     'add-tag': addTag,
     'edit-tag': editTag,
@@ -125,6 +134,7 @@ export function getTools() {
     'delete-folder',
     'delete-resolution',
     'delete-user',
+    'delete-tag', 
     // Add other destructive tools here
   ];
 

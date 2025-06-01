@@ -64,28 +64,37 @@ export const deleteTag = createTool({
       headers: await getAuthHeaders(),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      const decodedError = decodeErrorMessage(errorText);
-      logger.error('HTTP error occurred:', {
-        status: response.status,
-        error: decodedError
-      });
-      throw new Error(decodedError);
-    }
-
-    try {
-      // Validate the response data
-      const validatedData = apiResponseSchema.parse({
+    // Get response data
+    const responseText = await response.text();
+    let responseData;
+    
+    // Handle empty response as success
+    if (responseText === "") {
+      responseData = {
         success: true,
-        data: null
-      });
-
-      return null;
-    } catch (error) {
-      logger.error('Validation error:', { error: error instanceof Error ? error.message : String(error) });
-      throw error;
+        message: "Tag deleted successfully"
+      };
+    } else {
+      try {
+        responseData = JSON.parse(responseText);
+      } catch {
+        // If response is not JSON, return as error object
+        responseData = {
+          success: false,
+          error: responseText
+        };
+      }
     }
+
+    // Log error if response is not ok
+    if (!response.ok) {
+      logger.error('Failed to delete tag:', {
+        status: response.status,
+        error: responseData
+      });
+    }
+
+    return responseData;
   },
 });
 
