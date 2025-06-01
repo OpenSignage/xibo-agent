@@ -30,7 +30,10 @@ import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
 import { getNews, getGoogleFonts, uploadGoogleFonts } from './etc';
 import { getFonts, getFontDetails, uploadFont } from './font';
-import { getUserGroups } from './usergroup';
+import { getUserGroups, addUserGroup } from './usergroup';
+import { getPlaylists } from './playlist';
+import { getStats } from './statistics';
+import { getTags, addTag, editTag, deleteTag } from './tags';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -58,6 +61,7 @@ export * from './syncGroup';    // Synchronization group management
 export * from './usergroup';    // User group management
 export * from './tags';         // Tags management
 export * from './dayPart';      // Day part management
+export * from './statistics';   // Statistics management
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -104,8 +108,15 @@ export function getTools() {
     'delete-user': deleteUser,
     'edit-user': editUser,
     'get-user-groups': getUserGroups,
+    'add-user-group': addUserGroup,
     'get-module-properties': getModuleProperties,
-    'get-module-template-properties': getModuleTemplateProperties
+    'get-module-template-properties': getModuleTemplateProperties,
+    'get-playlists': getPlaylists,
+    'get-stats': getStats,
+    'get-tags': getTags,
+    'add-tag': addTag,
+    'edit-tag': editTag,
+    'delete-tag': deleteTag
   };
 
   // List of tools that require confirmation due to potentially dangerous operations
