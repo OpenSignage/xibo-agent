@@ -124,15 +124,15 @@ const layoutResponseSchema = z.array(z.object({
         displayOrder: z.union([z.number(), z.string().transform(Number)]),
         useDuration: z.union([z.number(), z.string().transform(Number)]),
         calculatedDuration: z.union([z.number(), z.string().transform(Number)]),
-        createdDt: z.string().nullable(),
-        modifiedDt: z.string().nullable(),
+        createdDt: z.union([z.string(), z.number()]).nullable(),
+        modifiedDt: z.union([z.string(), z.number()]).nullable(),
         fromDt: z.union([z.number(), z.string().transform(Number)]),
         toDt: z.union([z.number(), z.string().transform(Number)]),
         schemaVersion: z.union([z.number(), z.string().transform(Number)]),
-        transitionIn: z.union([z.number(), z.string().transform(Number)]),
-        transitionOut: z.union([z.number(), z.string().transform(Number)]),
-        transitionDurationIn: z.union([z.number(), z.string().transform(Number)]),
-        transitionDurationOut: z.union([z.number(), z.string().transform(Number)]),
+        transitionIn: z.union([z.number(), z.string().transform(Number)]).nullable(),
+        transitionOut: z.union([z.number(), z.string().transform(Number)]).nullable(),
+        transitionDurationIn: z.union([z.number(), z.string().transform(Number)]).nullable(),
+        transitionDurationOut: z.union([z.number(), z.string().transform(Number)]).nullable(),
         widgetOptions: z.array(z.object({
           widgetId: z.union([z.number(), z.string().transform(Number)]),
           type: z.string().nullable(),
@@ -330,7 +330,6 @@ export const getLayouts = createTool({
     ]).optional(),
     campaignId: z.number().optional().describe('Get layouts belonging to campaign ID'),
     folderId: z.number().optional().describe('Filter by folder ID'),
-    skipValidation: z.boolean().optional().describe('Skip schema validation (for debugging)'),
     treeView: z.boolean().optional().describe('Set to true to return layouts in tree structure')
   }),
   outputSchema: z.union([
@@ -342,8 +341,6 @@ export const getLayouts = createTool({
     try {
       // Log the request with relevant filter criteria
       const logContext = { ...context };
-      delete logContext.skipValidation; // Don't log internal parameters
-      
       logger.info(`Retrieving layouts with filters`, logContext);
       
       if (!config.cmsUrl) {
@@ -358,7 +355,7 @@ export const getLayouts = createTool({
       Object.entries(context).forEach(([key, value]) => {
         if (value !== undefined) {
           // Skip internal processing parameters from API request
-          if (key === 'skipValidation' || key === 'treeView') {
+          if (key === 'treeView') {
             return;
           }
           
@@ -393,66 +390,81 @@ export const getLayouts = createTool({
       
       try {
         const response = await fetch(url, { headers });
-        logger.debug(`Response status: ${response.status}`);
         
         if (!response.ok) {
           const errorText = await response.text();
-          const decodedError = decodeErrorMessage(errorText);
-          logger.error(`Failed to retrieve layouts: ${decodedError}`, {
+          logger.error(`Failed to retrieve layouts: ${errorText}`, {
             status: response.status,
             filters: logContext
           });
-          throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
+          return errorText;
         }
 
+        // Parse CMS response data
         const data = await response.json();
-        logger.debug(`Received ${Array.isArray(data) ? data.length : 'unknown'} layout records`);
         
-        // Generate tree view if requested
+        // Handle empty response (layout not found)
+        // When CMS returns an empty array, it means the requested layout does not exist
+        if (Array.isArray(data) && data.length === 0) {
+          const errorResponse = {
+            success: false,
+            error: 'Layout not found'
+          };
+          return errorResponse;
+        }
+        
+        // Generate hierarchical tree view if requested
+        // This transforms the flat layout data into a nested structure
         if (context.treeView) {
-          logger.info(`Generating tree view for ${Array.isArray(data) ? data.length : 0} layouts`);
           const layoutTree = buildLayoutTree(data);
           return createTreeViewResponse(data, layoutTree, layoutNodeFormatter);
         }
         
-        // Skip validation if requested
-        if (context.skipValidation) {
-          logger.debug('Skipping validation as requested');
-          return JSON.stringify(data, null, 2);
-        }
-        
         try {
-          // Validate response based on format
+          // Validate and return the response data
+          // For array responses (list of layouts)
           if (Array.isArray(data)) {
-            const validatedData = layoutResponseSchema.parse(data);
-            logger.info(`Successfully retrieved ${validatedData.length} layouts`);
-            return JSON.stringify(validatedData, null, 2);
+            layoutResponseSchema.parse(data);
+            return data;
           } else {
-            // For tree view response
-            const validatedData = treeResponseSchema.parse(data);
-            return JSON.stringify(validatedData, null, 2);
+            // For tree view response structure
+            treeResponseSchema.parse(data);
+            return data;
           }
         } catch (validationError) {
+          // Handle validation errors
+          // This occurs when the CMS response doesn't match our expected schema
+          const errorResponse = {
+            success: false,
+            error: validationError instanceof Error ? validationError.message : 'Validation error'
+          };
           logger.warn(`Layout data validation failed`, {
             error: validationError,
             dataSize: Array.isArray(data) ? data.length : 'unknown',
             dataPreview: Array.isArray(data) && data.length > 0 ? 
               { layoutId: data[0].layoutId, type: typeof data[0] } : 'No data'
           });
-          
-          // Return unvalidated data for debugging
-          logger.warn('Returning unvalidated data due to validation failure');
-          return JSON.stringify(data, null, 2);
+          return errorResponse;
         }
       } catch (error) {
+        // Handle network or parsing errors
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        const errorResponse = {
+          success: false,
+          error: errorMessage
+        };
         logger.error(`Error fetching layouts: ${errorMessage}`, { error, url });
-        return `Error occurred: ${errorMessage}`;
+        return errorResponse;
       }
     } catch (error) {
+      // Handle any other unexpected errors
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      const errorResponse = {
+        success: false,
+        error: errorMessage
+      };
       logger.error(`Error in getLayouts: ${errorMessage}`, { error });
-      return `Error occurred: ${errorMessage}`;
+      return errorResponse;
     }
   },
 });
