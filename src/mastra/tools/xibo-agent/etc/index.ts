@@ -21,3 +21,5 @@
 export { getGoogleFonts } from './getGoogleFonts';
 export { getNews } from './getNews';
 export { uploadGoogleFonts } from './uploadGoogleFonts';
+export { getUploadFiles } from './getUploadFiles';
+export { deleteUploadFiles } from './deleteUploadFiles';    
