@@ -28,12 +28,13 @@ import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
   clearLayout, getLayoutStatus, checkoutLayout, discardLayout } from './layout';
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
-import { getNews, getGoogleFonts, uploadGoogleFonts } from './etc';
+import { getNews, getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles } from './etc';
 import { getFonts, getFontDetails, uploadFont } from './font';
 import { getUserGroups, addUserGroup } from './usergroup';
 import { getPlaylists } from './playlist';
 import { getStats } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
+import { getLibrary, searchAllLibrary, addMedia } from './library';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -82,8 +83,11 @@ export function getTools() {
     'get-users': getUsers,
     'get-user-me': getUserMe,
     'add-user': addUser,
+    'delete-user': deleteUser,
+    'edit-user': editUser,
     // Modules
     'get-modules': getModules,
+    // Display
     'get-displays': getDisplays,
     'get-layouts': getLayouts,
     'add-layout': addLayout,
@@ -105,27 +109,32 @@ export function getTools() {
     'get-layout-status': getLayoutStatus,
     'checkout-layout': checkoutLayout,
     'discard-layout': discardLayout,
-    // News
+    // Etc
     'get-news': getNews,
     'get-google-fonts': getGoogleFonts,
     'upload-google-fonts': uploadGoogleFonts,
-    
+    'get-upload-files': getUploadFiles,
+    'delete-upload-files': deleteUploadFiles,
+    // Font
     'get-fonts': getFonts,
     'get-font-details': getFontDetails,
     'upload-font': uploadFont,
-    'delete-user': deleteUser,
-    'edit-user': editUser,
+    // User group
     'get-user-groups': getUserGroups,
     'add-user-group': addUserGroup,
-    'get-module-properties': getModuleProperties,
-    'get-module-template-properties': getModuleTemplateProperties,
+    // Playlist
     'get-playlists': getPlaylists,
+    // Statistics
     'get-stats': getStats,
     // Tags
     'get-tags': getTags,
     'add-tag': addTag,
     'edit-tag': editTag,
-    'delete-tag': deleteTag
+    'delete-tag': deleteTag,
+    // Library
+    'get-library': getLibrary,
+    'search-all-library': searchAllLibrary,
+    'add-media': addMedia,
   };
 
   // List of tools that require confirmation due to potentially dangerous operations
@@ -135,6 +144,7 @@ export function getTools() {
     'delete-resolution',
     'delete-user',
     'delete-tag', 
+    'delete-upload-files',
     // Add other destructive tools here
   ];
 

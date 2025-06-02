@@ -4,8 +4,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "mastra dev",
-    "build": "mastra build"
+    "dev": "npm run copy-upload && mastra dev",
+    "build": "mastra build && npm run copy-upload",
+    "copy-upload": "cp -r upload .mastra/output/upload"
   },
   "keywords": [],
   "author": "",
