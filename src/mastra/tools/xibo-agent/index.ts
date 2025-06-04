@@ -18,6 +18,7 @@
  */
 
 import { logger } from '../../index';
+import 'dotenv/config';
 
 // Import core tools individually to ensure they're always available for getTools()
 import { getCmsTime, getAbout } from './misc';
@@ -34,7 +35,8 @@ import { getUserGroups, addUserGroup } from './usergroup';
 import { getPlaylists } from './playlist';
 import { getStats } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
-import { getLibrary, searchAllLibrary, addMedia } from './library';
+import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
+import { generateImage } from './generation';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -63,6 +65,7 @@ export * from './usergroup';    // User group management
 export * from './tags';         // Tags management
 export * from './dayPart';      // Day part management
 export * from './statistics';   // Statistics management
+export * from './generation';   // Image generation
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -135,6 +138,9 @@ export function getTools() {
     'get-library': getLibrary,
     'search-all-library': searchAllLibrary,
     'add-media': addMedia,
+    'upload-media-from-url': uploadMediaFromURL,
+    // Generation
+    'generate-image': generateImage,
   };
 
   // List of tools that require confirmation due to potentially dangerous operations

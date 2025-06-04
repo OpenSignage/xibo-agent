@@ -14,7 +14,7 @@
  * Delete Upload Files Tool
  * 
  * This module provides functionality to delete files from the upload directory.
- * It supports deleting single files or multiple files at once.
+ * It supports deleting files by pattern or specific paths.
  */
 
 import { z } from "zod";
@@ -49,7 +49,8 @@ export const deleteUploadFiles = createTool({
   id: "delete-upload-files",
   description: "Delete files from the upload directory",
   inputSchema: z.object({
-    paths: z.array(z.string()).describe("Array of file paths to delete (relative to upload directory)"),
+    pattern: z.string().optional().describe("Pattern to match files (e.g., *.png, image-*.jpg)"),
+    paths: z.array(z.string()).optional().describe("Array of specific file paths to delete"),
     force: z.boolean().optional().describe("Force deletion without checking if file exists")
   }),
   outputSchema: apiResponseSchema,
@@ -79,7 +80,21 @@ export const deleteUploadFiles = createTool({
         }
       }
 
-      for (const filePath of context.paths) {
+      // Get files to delete
+      const filesToDelete = context.paths || [];
+      
+      // If pattern is provided, add matching files
+      if (context.pattern) {
+        const items = await fs.promises.readdir(config.uploadDir, { withFileTypes: true });
+        for (const item of items) {
+          if (item.isFile() && matchPattern(item.name, context.pattern)) {
+            filesToDelete.push(item.name);
+          }
+        }
+      }
+
+      // Delete files
+      for (const filePath of filesToDelete) {
         const fullPath = path.join(config.uploadDir, filePath);
 
         // Check if file exists unless force is true
@@ -124,4 +139,18 @@ export const deleteUploadFiles = createTool({
       };
     }
   },
-}); 
+});
+
+/**
+ * Helper function to match file pattern
+ */
+function matchPattern(filename: string, pattern: string): boolean {
+  // Convert glob pattern to regex
+  const regexPattern = pattern
+    .replace(/\./g, '\\.')  // Escape dots
+    .replace(/\*/g, '.*')   // Convert * to .*
+    .replace(/\?/g, '.');   // Convert ? to .
+  
+  const regex = new RegExp(`^${regexPattern}$`);
+  return regex.test(filename);
+} 

@@ -22,6 +22,7 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
+import { parseJsonStrings } from '../utility/jsonParser';
 import { 
   TreeNode, 
   treeResponseSchema, 
@@ -137,7 +138,7 @@ const layoutResponseSchema = z.array(z.object({
           widgetId: z.union([z.number(), z.string().transform(Number)]),
           type: z.string().nullable(),
           option: z.string().nullable(),
-          value: z.string().nullable()
+          value: z.union([z.string(), z.array(z.any()), z.record(z.any())]).nullable()
         })),
         mediaIds: z.array(z.union([z.number(), z.string().transform(Number)])),
         audio: z.array(z.object({
@@ -200,7 +201,7 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
     logger.warn('buildLayoutTree received non-array data:', { type: typeof layouts });
     return [];
   }
-
+  
   return layouts.map(layout => {
     // Create layout node
     const layoutNode: TreeNode = {
@@ -404,7 +405,6 @@ export const getLayouts = createTool({
         const data = await response.json();
         
         // Handle empty response (layout not found)
-        // When CMS returns an empty array, it means the requested layout does not exist
         if (Array.isArray(data) && data.length === 0) {
           const errorResponse = {
             success: false,
@@ -412,24 +412,24 @@ export const getLayouts = createTool({
           };
           return errorResponse;
         }
+
+        // JSON文字列をパース
+        const parsedData = parseJsonStrings(data);
         
         // Generate hierarchical tree view if requested
-        // This transforms the flat layout data into a nested structure
         if (context.treeView) {
-          const layoutTree = buildLayoutTree(data);
-          return createTreeViewResponse(data, layoutTree, layoutNodeFormatter);
+          const layoutTree = buildLayoutTree(parsedData);
+          return createTreeViewResponse(parsedData, layoutTree, layoutNodeFormatter);
         }
         
         try {
           // Validate and return the response data
-          // For array responses (list of layouts)
-          if (Array.isArray(data)) {
-            layoutResponseSchema.parse(data);
-            return data;
+          if (Array.isArray(parsedData)) {
+            layoutResponseSchema.parse(parsedData);
+            return parsedData;
           } else {
-            // For tree view response structure
-            treeResponseSchema.parse(data);
-            return data;
+            treeResponseSchema.parse(parsedData);
+            return parsedData;
           }
         } catch (validationError) {
           // Handle validation errors
@@ -440,9 +440,9 @@ export const getLayouts = createTool({
           };
           logger.warn(`Layout data validation failed`, {
             error: validationError,
-            dataSize: Array.isArray(data) ? data.length : 'unknown',
-            dataPreview: Array.isArray(data) && data.length > 0 ? 
-              { layoutId: data[0].layoutId, type: typeof data[0] } : 'No data'
+            dataSize: Array.isArray(parsedData) ? parsedData.length : 'unknown',
+            dataPreview: Array.isArray(parsedData) && parsedData.length > 0 ? 
+              { layoutId: parsedData[0].layoutId, type: typeof parsedData[0] } : 'No data'
           });
           return errorResponse;
         }
