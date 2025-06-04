@@ -28,11 +28,19 @@ export const setLayoutEnableStat = createTool({
     layoutId: z.number().describe('ID of the layout to change statistics setting for'),
     enableStat: z.number().min(0).max(1).describe('Enable statistics collection (0: disabled, 1: enabled)')
   }),
-  outputSchema: z.string(),
+  outputSchema: z.object({
+    success: z.boolean(),
+    message: z.string(),
+    error: z.string().optional()
+  }),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
-        throw new Error("CMS URL is not configured");
+        return {
+          success: false,
+          message: "Failed to update layout statistics setting",
+          error: "CMS URL is not configured"
+        };
       }
 
       const headers = await getAuthHeaders();
@@ -42,7 +50,7 @@ export const setLayoutEnableStat = createTool({
       formData.append('enableStat', context.enableStat.toString());
 
       const response = await fetch(url, {
-        method: 'POST',
+        method: 'PUT',
         headers,
         body: formData
       });
@@ -50,12 +58,23 @@ export const setLayoutEnableStat = createTool({
       if (!response.ok) {
         const responseText = await response.text();
         const errorMessage = decodeErrorMessage(responseText);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
+        return {
+          success: false,
+          message: "Failed to update layout statistics setting",
+          error: `HTTP error! status: ${response.status}, message: ${errorMessage}`
+        };
       }
 
-      return "Layout statistics setting updated successfully";
+      return {
+        success: true,
+        message: "Layout statistics setting updated successfully"
+      };
     } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+      return {
+        success: false,
+        message: "Failed to update layout statistics setting",
+        error: error instanceof Error ? error.message : "Unknown error"
+      };
     }
   },
 }); 

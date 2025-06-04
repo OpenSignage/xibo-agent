@@ -43,9 +43,9 @@ import { LibSQLVector } from '@mastra/libsql';
  */
 export const xiboAgent = new Agent({
   name: 'Xibo Agent',
-  instructions: xiboAgentInstructions, // Custom instructions for Xibo operations
-  model: google('gemini-1.5-pro'),     // Using Google's Gemini 1.5 Pro model
-  tools: getTools(),                   // All Xibo CMS API tools
+  instructions: xiboAgentInstructions,
+  model: google('gemini-1.5-pro'),
+  tools: getTools(),
   memory: new Memory({
     options: {
       lastMessages: 40,

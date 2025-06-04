@@ -26,7 +26,8 @@ import { getUser, getUsers, getUserMe, addUser, deleteUser, editUser } from './u
 import { getModules, getModuleProperties, getModuleTemplateProperties } from './modules';
 import { getDisplays } from './display';
 import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
-  clearLayout, getLayoutStatus, checkoutLayout, discardLayout } from './layout';
+  clearLayout, getLayoutStatus, checkoutLayout, discardLayout,
+  setLayoutEnableStat } from './layout';
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
 import { getNews, getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles } from './etc';
@@ -76,223 +77,57 @@ export * from './generation';   // Image generation
  * @returns Object containing all tool instances with their IDs as keys
  */
 export function getTools() {
-  // Core tools (guaranteed to be available)
-  const tools = {
-    // Misc
-    'get-cms-time': getCmsTime,
-    'get-about': getAbout,
-    // User
-    'get-user': getUser,
-    'get-users': getUsers,
-    'get-user-me': getUserMe,
-    'add-user': addUser,
-    'delete-user': deleteUser,
-    'edit-user': editUser,
-    // Modules
-    'get-modules': getModules,
-    // Display
-    'get-displays': getDisplays,
-    'get-layouts': getLayouts,
-    'add-layout': addLayout,
-    // Folder
-    'get-folders': getFolders,
-    'add-folder': addFolder,
-    'edit-folder': editFolder,
-    'delete-folder': deleteFolder,
-    // Resolution
-    'get-resolutions': getResolutions,
-    'add-resolution': addResolution,
-    'edit-resolution': editResolution,
-    'delete-resolution': deleteResolution,
-    // Layout
-    'delete-layout': deleteLayout,
-    'retire-layout': retireLayout,
-    'unretire-layout': unretireLayout,
-    'clear-layout': clearLayout,
-    'get-layout-status': getLayoutStatus,
-    'checkout-layout': checkoutLayout,
-    'discard-layout': discardLayout,
-    // Etc
-    'get-news': getNews,
-    'get-google-fonts': getGoogleFonts,
-    'upload-google-fonts': uploadGoogleFonts,
-    'get-upload-files': getUploadFiles,
-    'delete-upload-files': deleteUploadFiles,
-    // Font
-    'get-fonts': getFonts,
-    'get-font-details': getFontDetails,
-    'upload-font': uploadFont,
-    // User group
-    'get-user-groups': getUserGroups,
-    'add-user-group': addUserGroup,
-    // Playlist
-    'get-playlists': getPlaylists,
-    // Statistics
-    'get-stats': getStats,
-    // Tags
-    'get-tags': getTags,
-    'add-tag': addTag,
-    'edit-tag': editTag,
-    'delete-tag': deleteTag,
-    // Library
-    'get-library': getLibrary,
-    'search-all-library': searchAllLibrary,
-    'add-media': addMedia,
-    'upload-media-from-url': uploadMediaFromURL,
-    // Generation
-    'generate-image': generateImage,
+  return {
+    getCmsTime,
+    getAbout,
+    getUser,
+    getUsers,
+    getUserMe,
+    addUser,
+    deleteUser,
+    editUser,
+    getModules,
+    getModuleProperties,
+    getModuleTemplateProperties,
+    getDisplays,
+    getLayouts,
+    addLayout,
+    deleteLayout,
+    retireLayout,
+    unretireLayout,
+    clearLayout,
+    getLayoutStatus,
+    checkoutLayout,
+    discardLayout,
+    setLayoutEnableStat,
+    getFolders,
+    addFolder,
+    editFolder,
+    deleteFolder,
+    getResolutions,
+    addResolution,
+    editResolution,
+    deleteResolution,
+    getNews,
+    getGoogleFonts,
+    uploadGoogleFonts,
+    getUploadFiles,
+    deleteUploadFiles,
+    getFonts,
+    getFontDetails,
+    uploadFont,
+    getUserGroups,
+    addUserGroup,
+    getPlaylists,
+    getStats,
+    getTags,
+    addTag,
+    editTag,
+    deleteTag,
+    getLibrary,
+    searchAllLibrary,
+    addMedia,
+    uploadMediaFromURL,
+    generateImage
   };
-
-  // List of tools that require confirmation due to potentially dangerous operations
-  const dangerousTools = [
-    'delete-layout',
-    'delete-folder',
-    'delete-resolution',
-    'delete-user',
-    'delete-tag', 
-    'delete-upload-files',
-    // Add other destructive tools here
-  ];
-
-  /* Temporarily disabled (commented out)
-  // Function to request user confirmation
-  const confirmDangerousOperation = async (toolId: string, context: any): Promise<boolean> => {
-    // Log context for debugging
-    logger.debug(`Confirmation process called. Tool ID: ${toolId}`);
-    logger.debug(`Context:`, context);
-
-    // If confirmed flag is true, bypass confirmation
-    if (context && context.confirmed === true) {
-      logger.info("Confirmation flag found. Proceeding with operation.");
-      return true;
-    }
-
-    // Customize confirmation message based on tool ID
-    let confirmMessage = "This operation cannot be undone. Do you want to continue?";
-    
-    // Tool-specific messages
-    switch (toolId) {
-      case 'delete-layout':
-        confirmMessage = `You are about to delete layout (ID: ${context.layoutId}). This operation cannot be undone. Continue?`;
-        break;
-      case 'delete-folder':
-        confirmMessage = `You are about to delete folder (ID: ${context.folderId}). This operation cannot be undone. Continue?`;
-        break;
-      case 'delete-resolution':
-        confirmMessage = `You are about to delete resolution (ID: ${context.resolutionId}). This operation cannot be undone. Continue?`;
-        break;
-      // Add other cases here
-    }
-    
-    // Display confirmation dialog (implementation depends on environment)
-    logger.warn(`Warning: ${confirmMessage}`);
-    
-    // Auto-confirm mode via environment variable
-    // If AUTO_CONFIRM=true, proceed without confirmation
-    const autoConfirm = process.env.AUTO_CONFIRM === 'false';
-    
-    if (autoConfirm) {
-      logger.info("Auto-confirm mode enabled. Proceeding without user confirmation.");
-      return true;
-    }
-    
-    // Special error to prompt confirmation in browser in Mastra environment
-    throw {
-      requiresConfirmation: true,
-      message: confirmMessage,
-      toolId: toolId,
-      context: context
-    };
-  };
-  */
-
-  // Function to create tool wrappers
-  const wrapWithConfirmation = (tool: any) => {
-    // Save the original execute function
-    const originalExecute = tool.execute;
-    
-    // Override the execute function
-    tool.execute = async (params: any) => {
-      // Confirmation for dangerous operations temporarily disabled (commented out)
-      /* 
-      logger.debug(`${tool.id} executed with parameters:`, JSON.stringify(params, null, 2));
-      
-      // Detect special "execute" command as confirmation
-      const isConfirmedByCommand = 
-        params?.context?.command === '実行する' || 
-        params?.context?.message === '実行する';
-      
-      if (isConfirmedByCommand) {
-        logger.info(`"Execute" command detected. Proceeding as confirmed.`);
-        // Execute even if it's a dangerous command
-        return await originalExecute(params);
-      }
-      
-      try {
-        // Check for confirmation flags (check multiple locations)
-        const isConfirmed = 
-          params?.context?.confirmed === true || 
-          params?.confirmed === true || 
-          params?.context?.context?.confirmed === true;
-        
-        logger.debug(`Confirmation flag status: ${isConfirmed}`);
-        
-        // If tool ID is in dangerous list and not confirmed
-        if (dangerousTools.includes(tool.id) && !isConfirmed) {
-          
-          logger.info(`${tool.id} requires confirmation.`);
-          
-          try {
-            // Request user confirmation
-            await confirmDangerousOperation(tool.id, params.context);
-            // Should not reach here (confirmation process throws exception)
-          } catch (confirmError: any) {
-            // If it's a confirmation required error
-            if (confirmError && confirmError.requiresConfirmation) {
-              logger.info(`Confirmation required error occurred: ${confirmError.message}`);
-              
-              // Response to client indicating confirmation is required
-              return {
-                success: false,
-                requiresConfirmation: true,
-                message: confirmError.message,
-                toolId: confirmError.toolId,
-                // Add confirmation flag to original context
-                context: {
-                  ...confirmError.context,
-                  confirmed: true
-                }
-              };
-            }
-            // Re-throw other errors
-            throw confirmError;
-          }
-        }
-      } catch (error) {
-        // Other error handling
-        logger.error(`Tool execution error in ${tool.id}:`, error);
-        return {
-          success: false,
-          message: error instanceof Error ? error.message : "An unknown error occurred."
-        };
-      }
-      */
-      
-      // Skip confirmation and execute directly
-      logger.info(`Executing ${tool.id} (confirmation dialog temporarily disabled)`);
-      return await originalExecute(params);
-    };
-    
-    return tool;
-  };
-
-  // Wrap all tools
-  Object.keys(tools).forEach(key => {
-    // @ts-ignore
-    tools[key] = wrapWithConfirmation(tools[key]);
-  });
-  
-  // Additional tools could be added here conditionally if needed
-  
-  return tools;
 }
