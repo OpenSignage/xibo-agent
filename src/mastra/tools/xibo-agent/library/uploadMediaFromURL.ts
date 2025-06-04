@@ -64,7 +64,7 @@ export const uploadMediaFromURL = createTool({
   id: "upload-media-from-url",
   description: "Upload media to Xibo CMS library from external URL",
   inputSchema: z.object({
-    url: z.string().url().describe("The URL to the media"),
+    url: z.string().describe("The URL to the media"),
     type: z.enum(['image', 'video', 'font', 'document']).describe("The type of the media"),
     extension: z.string().optional().describe("Optional extension of the media (jpg, png etc.)"),
     enableStat: z.enum(['On', 'Off', 'Inherit']).optional().describe("Enable Media Proof of Play statistics"),

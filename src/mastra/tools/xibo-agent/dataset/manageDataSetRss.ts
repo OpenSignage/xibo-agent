@@ -10,7 +10,7 @@ const apiResponseSchema = z.object({
 
 const rssSchema = z.object({
   title: z.string(),
-  url: z.string().url(),
+  url: z.string().url().describe("The URL to the RSS feed"),
   cacheTimeout: z.number().optional(),
   lastSync: z.string().optional(),
   lastSyncStatus: z.number().optional(),
