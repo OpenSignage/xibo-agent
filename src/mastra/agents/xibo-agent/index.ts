@@ -63,5 +63,5 @@ export const xiboAgent = new Agent({
     vector: new LibSQLVector({
       connectionUrl: 'file:../memory.db'
     })
-  })
+  }) as any
 }); 

@@ -1,4 +1,5 @@
 import path from 'path';
+import { z } from "zod";
 
 export const config = {
   cmsUrl: process.env.CMS_URL || "",
