@@ -6,3 +6,4 @@ export { searchAllLibrary } from './searchAllLibrary';
 export { downloadMedia } from './downloadMedia';
 export { downloadThumbnail } from './downloadThumbnail';
 export { tagMedia } from './tagMedia'; 
+export { uploadMediaFromURL } from './uploadMediaFromURL';

@@ -19,6 +19,7 @@ import { resolve } from 'path';
 import { Mastra } from '@mastra/core';
 import { LibSQLStore } from '@mastra/libsql';
 import { createLogger } from '@mastra/core/logger';
+import { apiRoutes } from './api';
 
 // Import workflows and agents
 import { weatherWorkflow } from './workflows';
@@ -32,7 +33,7 @@ const envPath = resolve(process.cwd(), '.env.development');
 config({ path: envPath });
 
 // Create shared logger instance for centralized logging
-export const logger = createLogger({
+const logger = createLogger({
   name: 'Xibo-System',
   level: 'info',  // Set to info level to exclude debug logs
 });
@@ -56,9 +57,16 @@ export const mastra = new Mastra({
   storage: new LibSQLStore({
     url: 'file:../mastra.db',  // Path to SQLite database file
   }),
+  // カスタムAPIルートを追加
+  server: {
+    apiRoutes,
+  },
 });
 
 // Export workflows list for external use
 export const workflows = [
   // ... existing workflows ...
 ];
+
+// Export logger for use in other modules
+export { logger };
