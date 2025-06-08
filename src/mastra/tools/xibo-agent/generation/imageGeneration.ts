@@ -40,6 +40,7 @@ const apiResponseSchema = z.object({
     prompt: z.string(),
     width: z.number(),
     height: z.number(),
+    textResponse: z.string().optional(),
   }).optional(),
   message: z.string().optional(),
 });
@@ -48,7 +49,7 @@ const apiResponseSchema = z.object({
  * Predefined aspect ratio options with their target dimensions
  * The longer side is always 1024 pixels
  */
-const aspectRatioOptions = {
+export const aspectRatioOptions = {
   '1:1': { width: 1024, height: 1024 },
   '3:4': { width: 768, height: 1024 },
   '4:3': { width: 1024, height: 768 },
@@ -138,6 +139,7 @@ export const generateImage = createTool({
   execute: async ({ context }) => {
     let generatorId = '';
     let hasError = false;
+    let textResponse = '';
     try {
       const geminiApiKey = process.env.GEMINI_API_KEY;
       if (!geminiApiKey) {
@@ -175,7 +177,10 @@ export const generateImage = createTool({
 
       logger.info(`Processing ${response.candidates[0].content.parts.length} parts from response`);
       for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData?.data) {
+        if (part.text) {
+          textResponse = part.text;
+          logger.info(`Received text response: ${textResponse}`);
+        } else if (part.inlineData?.data) {
           logger.info('Found image data in response');
           const imageData = part.inlineData.data;
           if (typeof imageData !== 'string') {
@@ -250,6 +255,7 @@ export const generateImage = createTool({
           prompt: enhancedPrompt,
           width,
           height,
+          textResponse,
         },
       };
 

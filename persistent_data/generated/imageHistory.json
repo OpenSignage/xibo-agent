@@ -3,38 +3,155 @@
     "images": [
       {
         "id": 1,
-        "filename": "image-9f43341a-ef3d-4b9d-9d7a-36af84702a71.png",
-        "prompt": "コーラの宣伝をするデジタルサイネージの背景画面、爽やかで、コーラを飲みたくなるような背景 (Aspect ratio: 9:16, Dimensions: 576x1024)",
-        "aspectRatio": "9:16",
-        "width": 576,
-        "height": 1024,
-        "createdAt": "2025-06-07T17:02:17.889Z"
+        "filename": "image-4ebbb397-91be-4a5c-a679-c6c43a212bec.png",
+        "prompt": "餃子の美味しそうな画像を生成し、そのレシピも教えてください。 (Aspect ratio: 16:9, Dimensions: 1024x576)",
+        "aspectRatio": "16:9",
+        "width": 1024,
+        "height": 576,
+        "createdAt": "2025-06-08T13:16:15.032Z"
+      },
+      {
+        "id": 2,
+        "filename": "image-b2c7863d-79c0-42c1-a4e6-3b56285e514e.png",
+        "prompt": "餃子の皿も含めた全体が見えるようにしてください。 (Aspect ratio: 16:9, Dimensions: 1024x576)",
+        "aspectRatio": "16:9",
+        "width": 1024,
+        "height": 576,
+        "createdAt": "2025-06-08T14:19:29.434Z"
       }
     ]
   },
-  "2": {
+  "creator": {
     "images": [
       {
         "id": 1,
-        "filename": "image-451b5c32-905f-4134-a542-d9b67780e72b.png",
-        "prompt": "Hi, can you create a 3d rendered image of a pig with wings and a top hat flying over a happy futuristic scifi city with lots of greenery? (Aspect ratio: 9:16, Dimensions: 576x1024)",
-        "aspectRatio": "9:16",
-        "width": 576,
-        "height": 1024,
-        "createdAt": "2025-06-07T13:45:23.763Z"
-      }
-    ]
-  },
-  "3": {
-    "images": [
-      {
-        "id": 1,
-        "filename": "image-c0b39d0a-5aea-4638-acbf-f76758efdf1e.png",
+        "filename": "image-9ce96678-9970-495a-ac88-60167bfae72c.png",
         "prompt": "Hi, can you create a 3d rendered image of a pig with wings and a top hat flying over a happy futuristic scifi city with lots of greenery? (Aspect ratio: 16:9, Dimensions: 1024x576)",
         "aspectRatio": "16:9",
         "width": 1024,
         "height": 576,
-        "createdAt": "2025-06-07T13:40:07.620Z"
+        "createdAt": "2025-06-08T12:45:36.107Z"
+      }
+    ]
+  },
+  "Designer": {
+    "images": [
+      {
+        "id": 1,
+        "filename": "image-f0397e63-4191-408c-99d1-9cff403b7e9a.png",
+        "prompt": "Hi, can you create a 3d rendered image of a pig with wings and a top hat flying over a happy futuristic scifi city with lots of greenery? (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T12:57:13.055Z"
+      },
+      {
+        "id": 2,
+        "filename": "image-1f4f149b-372b-46ac-83ca-ddf88043602f.png",
+        "prompt": "豚さんの翼をもっと大きくし、帽子を野球帽に健康してください。 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T14:26:36.720Z"
+      },
+      {
+        "id": 3,
+        "filename": "image-4f2ab767-dddb-4a8c-8175-e0cc842b0ff5.png",
+        "prompt": "3dのイメージはそのまま、帽子を野球帽に変更してください。 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T14:28:27.073Z"
+      },
+      {
+        "id": 4,
+        "filename": "image-06f2f894-ea6f-4192-9afc-fd1550cce565.png",
+        "prompt": "帽子を野球帽に変更してください。 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T14:38:11.798Z"
+      },
+      {
+        "id": 5,
+        "filename": "image-acf1de73-629c-4ca0-ab02-b9c2956573e8.png",
+        "prompt": "豚さんの大きさを多少小さくしてください。 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T14:40:31.420Z"
+      },
+      {
+        "id": 6,
+        "filename": "image-7c7b8b1c-adcb-4975-931b-3e5eff0c683c.png",
+        "prompt": "豚を牛に変えてください。 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T14:43:21.674Z"
+      },
+      {
+        "id": 7,
+        "filename": "image-4c3785c3-f98f-4796-89d3-9718c234de8e.png",
+        "prompt": "豚を牛に変えてください。 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T14:43:49.487Z"
+      },
+      {
+        "id": 8,
+        "filename": "image-d322e7d1-0279-404f-8317-7a10bb6d50af.png",
+        "prompt": "帽子を野球帽にしてください。 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T14:45:02.171Z"
+      },
+      {
+        "id": 9,
+        "filename": "image-b7a9cdbb-7f34-4b4f-b52d-cfd80e0efafb.png",
+        "prompt": "サングラスかけてください。 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T14:53:52.427Z"
+      },
+      {
+        "id": 10,
+        "filename": "image-9905e48f-1854-416c-8371-da758222affd.png",
+        "prompt": "髭を追加してください。 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T14:55:08.836Z"
+      },
+      {
+        "id": 11,
+        "filename": "image-e88d7231-0855-4a18-acbe-3f4e76b7e196.png",
+        "prompt": "牙をはやしてください (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T14:56:50.122Z"
+      },
+      {
+        "id": 12,
+        "filename": "image-bb7b893a-8429-413d-8d73-7e033cc79b47.png",
+        "prompt": "ロングヘアーにしてください。 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T14:58:31.435Z"
+      },
+      {
+        "id": 13,
+        "filename": "image-6a8b0998-d228-4d86-b2bb-1509d6f11656.png",
+        "prompt": "耳をもっと大きくしてください。 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-08T15:01:17.156Z"
       }
     ]
   }
