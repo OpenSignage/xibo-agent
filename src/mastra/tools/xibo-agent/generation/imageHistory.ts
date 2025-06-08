@@ -23,7 +23,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../../../index';
 
-// 画像履歴のスキーマ定義
+// Schema definition for image history
 const imageHistorySchema = z.object({
   id: z.number(),
   filename: z.string(),
@@ -34,27 +34,27 @@ const imageHistorySchema = z.object({
   createdAt: z.string(),
 });
 
-// 生成プロセスのスキーマ定義
+// Schema definition for generation process
 const generatorSchema = z.object({
   images: z.array(imageHistorySchema),
 });
 
-// 履歴データのスキーマ定義
+// Schema definition for history data
 const historySchema = z.record(z.string(), generatorSchema);
 
 type ImageHistory = z.infer<typeof imageHistorySchema>;
 type Generator = z.infer<typeof generatorSchema>;
 type History = z.infer<typeof historySchema>;
 
-// 履歴ファイルのパス
+// Path to history file
 const HISTORY_FILE = path.join(process.cwd(), '..', '..', 'persistent_data', 'generated', 'imageHistory.json');
 
-// 履歴データの初期化
+// Initialize history data
 let history: History = loadHistory();
 
 /**
- * 履歴データの読み込み
- * @returns 履歴データ
+ * Load history data
+ * @returns History data
  */
 function loadHistory(): History {
   try {
@@ -63,7 +63,7 @@ function loadHistory(): History {
       const parsed = JSON.parse(data) as Record<string, any>;
       const history = historySchema.parse(parsed);
       
-      // 空の生成プロセスを削除
+      // Remove empty generation processes
       Object.keys(history).forEach(generatorId => {
         if (history[generatorId].images.length === 0) {
           delete history[generatorId];
@@ -79,8 +79,8 @@ function loadHistory(): History {
 }
 
 /**
- * 履歴データの保存
- * @param history 保存する履歴データ
+ * Save history data
+ * @param history History data to save
  */
 function saveHistory(history: History): void {
   try {
@@ -95,14 +95,14 @@ function saveHistory(history: History): void {
 }
 
 /**
- * 新しい生成プロセスを開始
- * @param generatorId 生成プロセスID
- * @returns 生成プロセスID
+ * Start a new generation process
+ * @param generatorId Generation process ID
+ * @returns Generation process ID
  */
 export function startNewGeneration(generatorId: string): string {
   logger.info(`Starting new generation process for generatorId: ${generatorId}`);
   
-  // 既存の履歴と画像を削除
+  // Delete existing history and images
   if (history[generatorId]) {
     logger.info(`Found existing history for generatorId: ${generatorId}, cleaning up...`);
     const generator = history[generatorId];
@@ -121,7 +121,7 @@ export function startNewGeneration(generatorId: string): string {
     logger.info(`No existing history found for generatorId: ${generatorId}`);
   }
 
-  // 新しい履歴を作成
+  // Create new history
   logger.info(`Creating new history for generatorId: ${generatorId}`);
   history[generatorId] = { images: [] };
   saveHistory(history);
@@ -130,9 +130,9 @@ export function startNewGeneration(generatorId: string): string {
 }
 
 /**
- * 画像を履歴に追加
- * @param generatorId 生成プロセスID
- * @param image 画像情報
+ * Add image to history
+ * @param generatorId Generation process ID
+ * @param image Image information
  */
 export function addImage(generatorId: string, image: Omit<ImageHistory, 'id'>): void {
   logger.info(`Adding image to history for generatorId: ${generatorId}`);
@@ -144,7 +144,7 @@ export function addImage(generatorId: string, image: Omit<ImageHistory, 'id'>): 
 
   const generator = history[generatorId];
   const newImage: ImageHistory = {
-    id: generator.images.length + 1,  // 配列の長さ + 1 をIDとして使用
+    id: generator.images.length + 1,  // Use array length + 1 as ID
     ...image,
   };
 
@@ -155,9 +155,9 @@ export function addImage(generatorId: string, image: Omit<ImageHistory, 'id'>): 
 }
 
 /**
- * 生成プロセスの履歴を取得
- * @param generatorId 生成プロセスID
- * @returns 生成プロセスの履歴
+ * Get history for a generation process
+ * @param generatorId Generation process ID
+ * @returns Generation process history
  */
 export function getHistory(generatorId: string): Generator {
   if (!history[generatorId]) {
@@ -167,9 +167,9 @@ export function getHistory(generatorId: string): Generator {
 }
 
 /**
- * 生成プロセスを終了
- * @param generatorId 生成プロセスID
- * @param isSuccess 生成が成功したかどうか
+ * End generation process
+ * @param generatorId Generation process ID
+ * @param isSuccess Whether generation was successful
  */
 export function endGeneration(generatorId: string, isSuccess: boolean = false): void {
   if (!history[generatorId]) {
@@ -177,38 +177,29 @@ export function endGeneration(generatorId: string, isSuccess: boolean = false): 
   }
 
   if (isSuccess) {
-    // 成功時のみ、古い画像をクリーンアップ
+    // Clean up only the current generator's old images
     const outputDir = path.join(process.cwd(), '..', '..', 'persistent_data', 'generated');
+    const generator = history[generatorId];
     
-    // 全生成プロセスをループ
-    Object.keys(history).forEach(id => {
-      const generator = history[id];
-      generator.images.forEach(image => {
-        const imagePath = path.join(outputDir, image.filename);
-        try {
-          if (fs.existsSync(imagePath)) {
-            fs.unlinkSync(imagePath);
-            logger.debug(`Deleted old image file: ${imagePath}`);
-          }
-        } catch (error) {
-          logger.error(`Failed to delete image file: ${imagePath}`, { error: error instanceof Error ? error.message : String(error) });
+    generator.images.forEach(image => {
+      const imagePath = path.join(outputDir, image.filename);
+      try {
+        if (fs.existsSync(imagePath)) {
+          fs.unlinkSync(imagePath);
+          logger.debug(`Deleted old image file: ${imagePath}`);
         }
-      });
+      } catch (error) {
+        logger.error(`Failed to delete image file: ${imagePath}`, { error: error instanceof Error ? error.message : String(error) });
+      }
     });
-
-    // 履歴をリセットし、現在の生成プロセスのみを保持
-    const currentGenerator = history[generatorId];
-    history = {
-      [generatorId]: currentGenerator
-    };
   }
 
   saveHistory(history);
 }
 
 /**
- * 全生成プロセスの履歴を取得
- * @returns 全生成プロセスの履歴
+ * Get history for all generation processes
+ * @returns History for all generation processes
  */
 export function getAllHistory(): History {
   return history;

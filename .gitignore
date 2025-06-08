@@ -9,3 +9,5 @@ dist
 .mcp/config.json
 doc/*.md
 upload
+persistent_data/*
+public/*

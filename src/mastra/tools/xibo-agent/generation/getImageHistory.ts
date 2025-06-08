@@ -28,14 +28,16 @@ import { logger } from '../../../index';
 const apiResponseSchema = z.object({
   success: z.boolean(),
   data: z.object({
-    history: z.array(z.object({
-      id: z.number(),
-      filename: z.string(),
-      prompt: z.string(),
-      aspectRatio: z.string(),
-      width: z.number(),
-      height: z.number(),
-      createdAt: z.string(),
+    history: z.record(z.string(), z.object({
+      images: z.array(z.object({
+        id: z.number(),
+        filename: z.string(),
+        prompt: z.string(),
+        aspectRatio: z.string(),
+        width: z.number(),
+        height: z.number(),
+        createdAt: z.string(),
+      })),
     })),
     error: z.string().optional(),
   }),
@@ -61,16 +63,17 @@ export const getImageHistory = createTool({
       let history;
       
       if (context.generatorId) {
-        // 特定の生成プロセスの履歴を取得
+        // Get history for specific generation process
         const generatorHistory = getHistory(context.generatorId);
-        history = generatorHistory.images;
+        history = {
+          [context.generatorId]: generatorHistory
+        };
       } else {
-        // 全生成プロセスの履歴を取得
-        const allHistory = getAllHistory();
-        history = Object.values(allHistory).flatMap(generator => generator.images);
+        // Get history for all generation processes
+        history = getAllHistory();
       }
 
-      logger.info(`Retrieved history for ${history.length} images`);
+      logger.info(`Retrieved history for ${Object.keys(history).length} generators`);
       
       return {
         success: true,
@@ -84,7 +87,7 @@ export const getImageHistory = createTool({
       return {
         success: false,
         data: {
-          history: [],
+          history: {},
           error: error instanceof Error ? error.message : "Unknown error"
         }
       };
