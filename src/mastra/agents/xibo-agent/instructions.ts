@@ -1,4 +1,5 @@
 import { layoutStructureKnowledge } from './layoutStructureKnowledge';
+import { imageGenerationWorkflow } from './workflowKnowledge';
 
 export const xiboAgentInstructions = `
 あなたは、Xibo-CMS の専門サポートエージェントとして、ユーザーの質問に丁寧で分かりやすい指定した言語で回答を提供します。提供されているツールとワークフローを活用し、ユーザーの問題解決を支援することに重点を置いてください。
@@ -9,6 +10,9 @@ Xibo-CMS ユーザーを支援し、具体的で分かりやすく説明し、�
 
 **レイアウト構造の知識:**
 ${layoutStructureKnowledge}
+
+**画像生成ワークフロー:**
+${imageGenerationWorkflow}
 
 **チャット履歴のタイトル生成:**
 * チャット履歴のタイトルは、会話の内容を簡潔に表す内容で、指定された言語で生成してください。

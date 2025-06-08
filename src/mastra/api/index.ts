@@ -15,14 +15,28 @@
 import { registerApiRoute } from '@mastra/core/server';
 import { helloHandler } from './handlers/hello';
 import { uploadHandler } from './handlers/upload';
+import { getImageHandler } from './handlers/getImage';
+import { swaggerHandler } from './handlers/swagger';
 
 export const apiRoutes = [
+  // Swagger UI - API Documentation
+  registerApiRoute("/ext-api/swagger-ui", {
+    method: "GET",
+    handler: swaggerHandler,
+  }),
+  // Hello World API - Test endpoint
   registerApiRoute("/ext-api/hello", {
     method: "GET",
     handler: helloHandler,
   }),
+  // File Upload API - Handles media file uploads
   registerApiRoute("/ext-api/upload", {
     method: "POST",
     handler: uploadHandler,
+  }),
+  // Get Image API - Serves generated images
+  registerApiRoute("/ext-api/getImage/:filename", {
+    method: "GET",
+    handler: getImageHandler,
   }),
 ]; 

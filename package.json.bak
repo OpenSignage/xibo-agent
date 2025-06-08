@@ -4,9 +4,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "DATA_STORAGE_PATH=./persistent_data mastra dev",
-    "build": "mastra build && cp -r public/. .mastra/output/public/",
-    "copy-upload": "cp -r upload persistent_data/uploads"
+    "dev": "npm run copy-upload && mastra dev",
+    "build": "mastra build && npm run copy-upload",
+    "copy-upload": "cp -r upload .mastra/output/upload"
   },
   "keywords": [],
   "author": "",
@@ -20,7 +20,6 @@
     "@google/generative-ai": "^0.24.0",
     "@langchain/core": "^0.3.49",
     "@mastra/core": "^0.9.1",
-    "@mastra/fastembed": "^0.10.0",
     "@mastra/libsql": "^0.0.1",
     "@mastra/mcp": "^0.4.1",
     "@mastra/memory": "^0.3.1",
@@ -35,7 +34,6 @@
     "zod": "^3.24.3"
   },
   "devDependencies": {
-    "@rollup/plugin-json": "^6.1.0",
     "@types/node": "^22.15.2",
     "mastra": "^0.6.0",
     "typescript": "^5.8.3"

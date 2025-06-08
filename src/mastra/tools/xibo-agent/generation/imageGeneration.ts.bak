@@ -27,7 +27,6 @@ import * as fs from "node:fs";
 import * as path from "path";
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
-import { startNewGeneration, addImage, endGeneration } from './imageHistory';
 
 /**
  * Schema for API response validation
@@ -40,8 +39,8 @@ const apiResponseSchema = z.object({
     prompt: z.string(),
     width: z.number(),
     height: z.number(),
-  }).optional(),
-  message: z.string().optional(),
+    error: z.string().optional(),
+  }),
 });
 
 /**
@@ -78,41 +77,38 @@ async function cropToAspectRatio(
 
   const targetRatio = aspectRatioOptions[aspectRatio];
   const targetAspect = targetRatio.width / targetRatio.height;
-  const sourceAspect = metadata.width / metadata.height;
 
   let width = metadata.width;
   let height = metadata.height;
   let left = 0;
   let top = 0;
 
-  // Calculate crop dimensions to match target aspect ratio
-  if (sourceAspect > targetAspect) {
-    // Source is wider than target
-    width = Math.round(metadata.height * targetAspect);
-    left = Math.round((metadata.width - width) / 2);
-  } else {
-    // Source is taller than target
-    height = Math.round(metadata.width / targetAspect);
+  // Fix the longer side to 1024 pixels
+  if (metadata.width > metadata.height) {
+    // For landscape images
+    width = 1024;
+    height = Math.round(width / targetAspect);
     top = Math.round((metadata.height - height) / 2);
+  } else {
+    // For portrait images
+    height = 1024;
+    width = Math.round(height * targetAspect);
+    left = Math.round((metadata.width - width) / 2);
   }
-
-  // Ensure we don't exceed the original image dimensions
-  width = Math.min(width, metadata.width);
-  height = Math.min(height, metadata.height);
 
   // Crop and resize the image
   const croppedBuffer = await sharp(buffer)
     .extract({ left, top, width, height })
-    .resize(targetRatio.width, targetRatio.height, {
-      fit: 'fill',
+    .resize(1024, 1024, {
+      fit: 'contain',
       background: { r: 0, g: 0, b: 0, alpha: 0 }
     })
     .toBuffer();
 
   return {
     buffer: croppedBuffer,
-    width: targetRatio.width,
-    height: targetRatio.height
+    width,
+    height
   };
 }
 
@@ -124,7 +120,6 @@ async function cropToAspectRatio(
  * - Support for various aspect ratios
  * - Automatic image cropping and resizing
  * - Error handling and logging
- * - Image generation history management
  */
 export const generateImage = createTool({
   id: "generate-image",
@@ -132,12 +127,10 @@ export const generateImage = createTool({
   inputSchema: z.object({
     prompt: z.string().describe("Text prompt for image generation"),
     aspectRatio: z.enum(['1:1', '3:4', '4:3', '16:9', '9:16']).describe("Aspect ratio of the generated image"),
-    generatorId: z.string().optional().describe("Generator ID for image history (default: '1')"),
+    outputDir: z.string().optional().describe("Directory to save the generated image"),
   }),
   outputSchema: apiResponseSchema,
   execute: async ({ context }) => {
-    let generatorId = '';
-    let hasError = false;
     try {
       const geminiApiKey = process.env.GEMINI_API_KEY;
       if (!geminiApiKey) {
@@ -147,12 +140,10 @@ export const generateImage = createTool({
       // Enhance prompt with aspect ratio information
       const dimensions = aspectRatioOptions[context.aspectRatio];
       const enhancedPrompt = `${context.prompt} (Aspect ratio: ${context.aspectRatio}, Dimensions: ${dimensions.width}x${dimensions.height})`;
-      logger.info(`Enhanced prompt: ${enhancedPrompt}`);
 
       const ai = new GoogleGenAI({ apiKey: geminiApiKey });
 
       // Generate image using Gemini API
-      logger.info('Calling Gemini API for image generation...');
       const response = await ai.models.generateContent({
         model: "gemini-2.0-flash-preview-image-generation",
         contents: enhancedPrompt,
@@ -160,92 +151,63 @@ export const generateImage = createTool({
           responseModalities: [Modality.TEXT, Modality.IMAGE],
         },
       });
-      logger.info('Received response from Gemini API');
 
       // Process the response
+      let imagePath = '';
       let imageUrl = '';
       let width = 0;
       let height = 0;
-      let savedFilename = '';
       
       if (!response.candidates?.[0]?.content?.parts) {
-        logger.error('Invalid response structure from Gemini API', { response });
         throw new Error("Invalid response from Gemini API");
       }
 
-      logger.info(`Processing ${response.candidates[0].content.parts.length} parts from response`);
       for (const part of response.candidates[0].content.parts) {
         if (part.inlineData?.data) {
-          logger.info('Found image data in response');
           const imageData = part.inlineData.data;
           if (typeof imageData !== 'string') {
-            logger.error('Invalid image data format', { type: typeof imageData });
             throw new Error("Invalid image data format");
           }
           
           const buffer = Buffer.from(imageData, "base64");
-          logger.info('Successfully decoded base64 image data');
           
           // Crop and resize the image to match the target aspect ratio
-          logger.info('Cropping and resizing image...');
           const { buffer: croppedBuffer, width: croppedWidth, height: croppedHeight } = 
             await cropToAspectRatio(buffer, context.aspectRatio);
-          logger.info(`Image cropped and resized to ${croppedWidth}x${croppedHeight}`);
-          
-          // 画像生成が成功したら、新しい生成プロセスを開始
-          generatorId = context.generatorId || '1';
-          logger.info(`Starting new generation with generatorId: ${generatorId}`);
-          startNewGeneration(generatorId);
           
           // Determine output directory
-          const outputDir = path.join(process.cwd(), '..', '..', 'persistent_data', 'generated');
-          logger.info(`Output directory: ${outputDir}`);
+          const outputDir = context.outputDir || path.join(process.cwd(), 'generated');
           
           // Create output directory if it doesn't exist
           if (!fs.existsSync(outputDir)) {
-            logger.info('Creating output directory');
             fs.mkdirSync(outputDir, { recursive: true });
           }
           
           // Save the processed image
           const filename = `image-${uuidv4()}.png`;
-          savedFilename = filename;
-          const fullPath = path.join(outputDir, filename);
-          logger.info(`Saving image to: ${fullPath}`);
-          fs.writeFileSync(fullPath, croppedBuffer);
+          imagePath = path.join(outputDir, filename);
+          fs.writeFileSync(imagePath, croppedBuffer);
           
-          // Create image URL for ext-api
-          imageUrl = `http://localhost:4111/ext-api/getImage/${filename}`;
+          // Create image URL for localhost server
+          const relativePath = path.relative(process.cwd(), imagePath);
+          imageUrl = `http://localhost:4111/${relativePath.replace(/\\/g, '/')}`;
           
           width = croppedWidth;
           height = croppedHeight;
           
-          logger.info(`Image generated and saved to: ${fullPath} (${width}x${height})`);
+          logger.info(`Image generated and saved to: ${imagePath} (${width}x${height})`);
           logger.debug(`Image URL: ${imageUrl}`);
-
-          // 画像を履歴に追加
-          logger.info(`Adding image to history for generatorId: ${generatorId}`);
-          await addImage(generatorId, {
-            filename,
-            prompt: enhancedPrompt,
-            aspectRatio: context.aspectRatio,
-            width,
-            height,
-            createdAt: new Date().toISOString(),
-          });
-          logger.info('Image added to history successfully');
         }
       }
 
-      if (!savedFilename) {
-        logger.error('No image was generated from the response');
+      if (!imagePath) {
         throw new Error("No image was generated");
       }
 
       return {
         success: true,
         data: {
-          imagePath: `generated/${savedFilename}`,
+          imagePath,
           imageUrl,
           prompt: enhancedPrompt,
           width,
@@ -254,17 +216,17 @@ export const generateImage = createTool({
       };
 
     } catch (error) {
-      logger.error(`generateImage: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { 
-        error,
-        generatorId,
-        context: {
-          prompt: context.prompt,
-          aspectRatio: context.aspectRatio,
-        }
-      });
+      logger.error(`generateImage: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
       return {
         success: false,
-        message: error instanceof Error ? error.message : "Unknown error"
+        data: {
+          imagePath: '',
+          imageUrl: '',
+          prompt: context.prompt,
+          width: 0,
+          height: 0,
+          error: error instanceof Error ? error.message : "Unknown error"
+        }
       };
     }
   },

@@ -1,65 +1,147 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Notification Deletion Tool for Xibo CMS
+ * 
+ * This module provides functionality to delete notifications from the Xibo CMS.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { logger } from '../../../index';
 
-// APIレスポンスのスキーマ
-const responseSchema = z.object({
-  success: z.boolean(),
+/**
+ * Schema for success response
+ */
+const successResponseSchema = z.object({
+  success: z.literal(true),
   message: z.string()
 });
 
+/**
+ * Schema for error response
+ */
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  error: z.object({
+    code: z.number(),
+    message: z.string(),
+    details: z.any().optional()
+  })
+});
+
+/**
+ * Combined response schema
+ */
+const responseSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+type SuccessResponse = z.infer<typeof successResponseSchema>;
+type ErrorResponse = z.infer<typeof errorResponseSchema>;
+type Response = SuccessResponse | ErrorResponse;
+
+/**
+ * Tool for deleting notifications from Xibo CMS
+ */
 export const deleteNotification = createTool({
   id: 'delete-notification',
-  description: '通知を削除します',
+  description: 'Delete a notification from Xibo CMS',
   inputSchema: z.object({
-    notificationId: z.number().describe('削除する通知のID')
+    notificationId: z.number().describe('ID of the notification to delete')
   }),
 
-  outputSchema: z.string(),
-  execute: async ({ context }) => {
+  outputSchema: responseSchema,
+  execute: async ({ context }): Promise<Response> => {
     try {
-      console.log("[DEBUG] deleteNotification: 開始");
-      console.log("[DEBUG] deleteNotification: config =", config);
-      
+      logger.info('Deleting notification from CMS');
+
       if (!config.cmsUrl) {
-        console.error("[DEBUG] deleteNotification: CMSのURLが設定されていません");
-        throw new Error("CMSのURLが設定されていません");
+        const errorResponse: ErrorResponse = {
+          success: false,
+          error: {
+            code: 500,
+            message: "CMS URL is not configured"
+          }
+        };
+        return errorResponse;
       }
-      console.log(`[DEBUG] deleteNotification: CMS URL = ${config.cmsUrl}`);
 
       const headers = await getAuthHeaders();
-      console.log("[DEBUG] deleteNotification: 認証ヘッダーを取得しました");
-      console.log("[DEBUG] deleteNotification: 認証ヘッダー =", headers);
+      logger.debug('Auth headers obtained');
 
-      console.log("[DEBUG] deleteNotification: 通知ID =", context.notificationId);
+      const url = `${config.cmsUrl}/api/notification/${context.notificationId}`;
+      logger.debug(`Request URL: ${url}`);
 
-      const response = await fetch(`${config.cmsUrl}/api/notification/${context.notificationId}`, {
+      const response = await fetch(url, {
         method: 'DELETE',
         headers
       });
 
-      console.log(`[DEBUG] deleteNotification: レスポンスステータス = ${response.status}`);
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        console.error(`[DEBUG] deleteNotification: HTTPエラーが発生しました: ${response.status}`, errorData);
-        throw new Error(`HTTP error! status: ${response.status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`);
+        logger.error(`HTTP error occurred: ${response.status}`, { errorData });
+        const errorResponse: ErrorResponse = {
+          success: false,
+          error: {
+            code: response.status,
+            message: errorData?.message || `HTTP error occurred: ${response.status}`,
+            details: errorData
+          }
+        };
+        return errorResponse;
       }
 
-      const data = await response.json();
-      console.log("[DEBUG] deleteNotification: レスポンスデータを取得しました");
-      console.log("[DEBUG] deleteNotification: レスポンスデータの構造:");
-      console.log("生データ:", JSON.stringify(data, null, 2));
-      console.log("データ型:", typeof data);
-      console.log("キー一覧:", Object.keys(data));
+      // Check if response is empty
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        // Return success response for empty or non-JSON response
+        const successResponse: SuccessResponse = {
+          success: true,
+          message: "Notification deleted successfully"
+        };
+        logger.info('Notification deleted successfully (empty response)');
+        return successResponse;
+      }
 
-      const validatedData = responseSchema.parse(data);
-      console.log("[DEBUG] deleteNotification: データの検証が成功しました");
-
-      return JSON.stringify(validatedData, null, 2);
+      // Try to parse JSON response
+      try {
+        const data = await response.json();
+        logger.debug('Raw API response:', { data });
+        
+        const validatedData = successResponseSchema.parse(data);
+        logger.info('Notification deleted successfully');
+        return validatedData;
+      } catch (parseError) {
+        // If JSON parsing fails, return success response
+        const successResponse: SuccessResponse = {
+          success: true,
+          message: "Notification deleted successfully (invalid JSON response)"
+        };
+        logger.info('Notification deleted successfully (invalid JSON response)');
+        return successResponse;
+      }
     } catch (error) {
-      console.error("[DEBUG] deleteNotification: エラーが発生しました", error);
-      return `エラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`;
+      logger.error('Error occurred while deleting notification', { error });
+      const errorResponse: ErrorResponse = {
+        success: false,
+        error: {
+          code: 500,
+          message: error instanceof Error ? error.message : "Unknown error occurred",
+          details: error
+        }
+      };
+      return errorResponse;
     }
   },
 }); 
