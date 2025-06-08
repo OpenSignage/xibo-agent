@@ -27,7 +27,8 @@ import { google } from '@ai-sdk/google';
 import { getTools } from '../../tools/xibo-agent/';
 import { xiboAgentInstructions } from './instructions';
 import { Memory } from '@mastra/memory';
-import { LibSQLVector } from '@mastra/libsql';
+import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
+import { fastembed } from '@mastra/fastembed';
 
 /**
  * Xibo Agent instance
@@ -44,7 +45,7 @@ import { LibSQLVector } from '@mastra/libsql';
 export const xiboAgent = new Agent({
   name: 'Xibo Agent',
   instructions: xiboAgentInstructions,
-  model: google('gemini-1.5-pro'),
+  model: google('gemini-1.5-pro-latest'),
   tools: getTools(),
   memory: new Memory({
     options: {
@@ -60,8 +61,12 @@ export const xiboAgent = new Agent({
         generateTitle: true
       }
     },
+    storage: new LibSQLStore({
+      url: 'file:../../memory.db'
+    }),
     vector: new LibSQLVector({
-      connectionUrl: 'file:../memory.db'
-    })
-  }) as any
+      connectionUrl: 'file:../../memory.db'
+    }),
+    embedder: fastembed
+  })
 }); 

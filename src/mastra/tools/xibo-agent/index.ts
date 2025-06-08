@@ -37,7 +37,8 @@ import { getPlaylists } from './playlist';
 import { getStats } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
-import { generateImage } from './generation';
+import { generateImage, updateImage, getImageHistory } from './generation';
+import { getNotifications, deleteNotification } from './notification';  
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -128,6 +129,10 @@ export function getTools() {
     searchAllLibrary,
     addMedia,
     uploadMediaFromURL,
-    generateImage
+    generateImage,
+    updateImage,
+    getImageHistory,
+    getNotifications,
+    deleteNotification
   };
 }

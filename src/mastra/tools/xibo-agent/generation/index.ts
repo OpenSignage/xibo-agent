@@ -18,3 +18,5 @@
  */
 
 export { generateImage } from './imageGeneration';
+export { updateImage } from './imageUpdate';
+export { getImageHistory } from './getImageHistory';    

@@ -45,19 +45,10 @@
  */
 
 import { Context } from 'hono';
-import { createLogger } from '@mastra/core/logger';
+import { logger } from '../logger';
 import { config } from '../config';
 import path from 'path';
 import fs from 'fs/promises';
-
-// TODO: 本来はindex.tsからloggerをインポートすべきだが、
-// 現在モジュール解決の問題が発生しているため、一時的に独自のloggerインスタンスを作成
-// 問題解決後は以下のように変更する予定：
-// import { logger } from '../../index';
-const logger = createLogger({
-  name: 'Upload-Handler',
-  level: 'info',
-});
 
 /**
  * Validates if the file type is allowed
@@ -131,7 +122,7 @@ export const uploadHandler = async (c: Context) => {
     }
 
     // Create upload directory if it doesn't exist
-    const uploadDir = path.join(process.cwd(), 'upload');
+    const uploadDir = path.join(process.cwd(), 'persistent_data', 'uploads');
     await fs.mkdir(uploadDir, { recursive: true });
 
     // Save the file
