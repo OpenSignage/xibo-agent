@@ -38,7 +38,7 @@ import { getStats } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
 import { generateImage, updateImage, getImageHistory } from './generation';
-import { getNotifications, deleteNotification } from './notification';
+import { getNotifications, deleteNotification, postNotification, putNotification } from './notification';
 import { getDisplayGroups } from './displayGroup';
 
 // Basic functionality - module exports
@@ -106,7 +106,7 @@ export function getTools() {
     checkoutLayout,
     discardLayout,
     setLayoutEnableStat,
-
+    // Folder
     getFolders,
     addFolder,
     editFolder,
@@ -150,6 +150,8 @@ export function getTools() {
     // Notification
     getNotifications,
     deleteNotification,
+    postNotification,
+    putNotification,
     // Display group
     getDisplayGroups
   };

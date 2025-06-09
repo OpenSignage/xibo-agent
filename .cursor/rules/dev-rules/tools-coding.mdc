@@ -1,0 +1,221 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Xibo Agent Tools コーディングルール
+
+## ファイル構造
+
+### コピーライトヘッダー
+すべてのファイルの先頭に以下のコピーライトヘッダーを含める必要があります：
+```typescript
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+```
+
+### モジュールドキュメント
+各ファイルにはモジュールレベルのドキュメントブロックを含める必要があります：
+```typescript
+/**
+ * [Module Name]
+ * 
+ * This module provides functionality to [describe functionality].
+ * It implements the [API endpoint] and handles the necessary validation
+ * and data transformation for [purpose].
+ */
+```
+
+## コード構成
+
+### スキーマ定義
+1. スキーマは以下の順序で定義します：
+   - 基本スキーマ（例：タグ、ユーザー）
+   - 複合スキーマ（例：ユーザーグループ、ディスプレイグループ）
+   - メインデータスキーマ（例：通知）
+   - レスポンススキーマ
+
+2. 各スキーマには説明的なコメントを含めます：
+```typescript
+// Schema for [purpose]
+const schemaName = z.object({
+  // fields
+});
+```
+
+### ツール定義
+1. ツールのドキュメントを含めます：
+```typescript
+/**
+ * Tool for [purpose]
+ * 
+ * This tool [describe functionality]
+ * in the Xibo CMS system.
+ */
+```
+
+2. ツールの構造：
+```typescript
+export const toolName = createTool({
+  id: 'tool-id',
+  description: 'Tool description',
+  inputSchema: z.object({
+    // input fields
+  }),
+  outputSchema: responseSchema,
+  execute: async ({ context }) => {
+    // implementation
+  }
+});
+```
+
+3. inputSchemaのフィールド説明：
+- すべてのフィールドに`.describe()`を使用して説明を追加します
+- 説明は具体的で明確な英語で記述します
+- 必須フィールドとオプションフィールドを明示します
+- データ型や制約条件も含めます
+
+例：
+```typescript
+inputSchema: z.object({
+  notificationId: z.number().describe('ID of the notification to update'),
+  subject: z.string().describe('Notification subject (required)'),
+  body: z.string().optional().describe('Notification body content (optional)'),
+  releaseDt: z.string().describe('Notification release date and time in ISO 8601 format (required)'),
+  isInterrupt: z.number().describe('Flag to interrupt web portal navigation/login (0-1)'),
+  displayGroupIds: z.array(z.number()).describe('Array of display group IDs to assign the notification to'),
+  userGroupIds: z.array(z.number()).describe('Array of user group IDs to assign the notification to')
+})
+```
+
+## エラーハンドリング
+
+### レスポンスフォーマット
+すべてのレスポンスは以下のフォーマットに従う必要があります：
+```typescript
+// Success response
+{
+  success: true,
+  data: validatedData
+}
+
+// Error response
+{
+  success: false,
+  message: "Error message",
+  error?: errorDetails  // Optional detailed error information
+}
+```
+
+### エラータイプ
+1. HTTPエラー：
+```typescript
+{
+  success: false,
+  message: `HTTP error! status: ${status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`
+}
+```
+
+2. バリデーションエラー：
+```typescript
+{
+  success: false,
+  message: "Validation error occurred",
+  error: errorDetails  // Parsed validation error details
+}
+```
+
+3. 予期せぬエラー：
+```typescript
+{
+  success: false,
+  message: error instanceof Error ? error.message : "Unknown error"
+}
+```
+
+## ロギング
+
+### ロガーの使用方法
+1. console.logの代わりにロガーを使用します：
+```typescript
+import { logger } from "../../../index";
+```
+
+2. ログレベル：
+- `logger.info()`: 通常の操作イベント用
+- `logger.debug()`: 詳細なデバッグ情報用
+- `logger.error()`: エラー条件用
+
+3. ログフォーマット：
+```typescript
+logger.info("Operation message");
+logger.debug("Debug message", { contextData });
+logger.error("Error message", { error: errorDetails });
+```
+
+## データバリデーション
+
+### スキーマ定義
+1. Zodを使用してスキーマバリデーションを行います
+2. 適切な場合はフィールドをnullableにします：
+```typescript
+field: z.string().nullable()
+```
+
+3. 説明的なフィールド名と説明を使用します：
+```typescript
+field: z.string().describe('Field description')
+```
+
+### レスポンスバリデーション
+1. APIレスポンスは常にバリデーションを行います
+2. バリデーションにはtry-catchブロックを使用します
+3. バリデーション失敗時は構造化されたエラーレスポンスを返します
+
+## 日付処理
+
+### 日付フォーマット
+1. 日付にはISO 8601フォーマットを使用します
+2. APIに送信する前に日付をISOフォーマットに変換します：
+```typescript
+releaseDt: new Date(context.releaseDt).toISOString()
+```
+
+## API通信
+
+### ヘッダー
+1. 認証ヘッダーを常に含めます
+2. リクエストのContent-Typeを設定します：
+```typescript
+headers: {
+  ...headers,
+  'Content-Type': 'application/json'
+}
+```
+
+### リクエストボディ
+1. 送信前にリクエストボディをフォーマットします
+2. デバッグのためにリクエストボディをログに記録します
+3. オプションフィールドを適切に処理します
+
+## ベストプラクティス
+
+1. TypeScriptの型とインターフェースを使用します
+2. 適切なエラーハンドリングを実装します
+3. 非同期処理にはasync/awaitを使用します
+4. 関数は単一の目的に集中させます
+5. 意味のある変数名と関数名を使用します
+6. 複雑なロジックには適切なコメントを追加します
+7. 一貫したコードフォーマットに従います
+8. エッジケースとnull値を処理します
+9. デバッグのための適切なロギングを実装します
+10. トラブルシューティングのための適切なエラーメッセージを使用します
