@@ -31,7 +31,7 @@ const imageHistorySchema = z.object({
   aspectRatio: z.string(),
   width: z.number(),
   height: z.number(),
-  createdAt: z.string(),
+  createdAt: z.string()
 });
 
 // Schema definition for generation process
@@ -61,6 +61,16 @@ function loadHistory(): History {
     if (fs.existsSync(HISTORY_FILE)) {
       const data = fs.readFileSync(HISTORY_FILE, 'utf-8');
       const parsed = JSON.parse(data) as Record<string, any>;
+      
+      // Add imageUrl to each image in the history
+      Object.values(parsed).forEach(generator => {
+        if (generator.images) {
+          generator.images.forEach((image: any) => {
+            image.imageUrl = `http://localhost:4111/ext-api/getImage/${image.filename}`;
+          });
+        }
+      });
+
       const history = historySchema.parse(parsed);
       
       // Remove empty generation processes
@@ -163,7 +173,15 @@ export function getHistory(generatorId: string): Generator {
   if (!history[generatorId]) {
     throw new Error(`Generator ${generatorId} not found`);
   }
-  return history[generatorId];
+  
+  // Add imageUrl to each image
+  const generator = { ...history[generatorId] };
+  generator.images = generator.images.map(image => ({
+    ...image,
+    imageUrl: `http://localhost:4111/ext-api/getImage/${image.filename}`
+  }));
+  
+  return generator;
 }
 
 /**
@@ -202,5 +220,15 @@ export function endGeneration(generatorId: string, isSuccess: boolean = false): 
  * @returns History for all generation processes
  */
 export function getAllHistory(): History {
-  return history;
+  // Add imageUrl to each image in all generators
+  const result: History = {};
+  Object.entries(history).forEach(([generatorId, generator]) => {
+    result[generatorId] = {
+      images: generator.images.map(image => ({
+        ...image,
+        imageUrl: `http://localhost:4111/ext-api/getImage/${image.filename}`
+      }))
+    };
+  });
+  return result;
 } 
