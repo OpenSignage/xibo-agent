@@ -38,7 +38,8 @@ import { getStats } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
 import { generateImage, updateImage, getImageHistory } from './generation';
-import { getNotifications, deleteNotification } from './notification';  
+import { getNotifications, deleteNotification } from './notification';
+import { getDisplayGroups } from './displayGroup';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -79,8 +80,10 @@ export * from './generation';   // Image generation
  */
 export function getTools() {
   return {
+    // Misc
     getCmsTime,
     getAbout,
+    // User
     getUser,
     getUsers,
     getUserMe,
@@ -90,7 +93,9 @@ export function getTools() {
     getModules,
     getModuleProperties,
     getModuleTemplateProperties,
+    // Display
     getDisplays,
+    // Layout    
     getLayouts,
     addLayout,
     deleteLayout,
@@ -101,38 +106,51 @@ export function getTools() {
     checkoutLayout,
     discardLayout,
     setLayoutEnableStat,
+
     getFolders,
     addFolder,
     editFolder,
     deleteFolder,
+    // Resolution
     getResolutions,
     addResolution,
     editResolution,
     deleteResolution,
+    // Etc
     getNews,
     getGoogleFonts,
     uploadGoogleFonts,
     getUploadFiles,
     deleteUploadFiles,
+    // Font
     getFonts,
     getFontDetails,
     uploadFont,
+    // User group
     getUserGroups,
     addUserGroup,
+    // Playlist
     getPlaylists,
+    // Statistics
     getStats,
+    // Tags
     getTags,
     addTag,
     editTag,
     deleteTag,
+    // Library
     getLibrary,
     searchAllLibrary,
     addMedia,
     uploadMediaFromURL,
+    // Generation
     generateImage,
     updateImage,
     getImageHistory,
+    // Notification
     getNotifications,
-    deleteNotification
+    deleteNotification,
+    // Display group
+    getDisplayGroups
   };
 }

@@ -55,7 +55,8 @@ const userGroupSchema = z.object({
  */
 const apiResponseSchema = z.object({
   success: z.boolean(),
-  data: z.array(userGroupSchema),
+  message: z.string().optional(),
+  data: z.array(userGroupSchema).optional()
 });
 
 /**
@@ -100,20 +101,41 @@ export const getUserGroups = createTool({
       const rawData = JSON.parse(responseText);
       
       // Handle array response
-      const validatedData = {
-        success: true,
-        data: Array.isArray(rawData) ? rawData : [rawData]
-      };
+      const userGroups = Array.isArray(rawData) ? rawData : [rawData];
+
+      // Check if data is empty
+      if (userGroups.length === 0) {
+        const searchCriteria = [];
+        if (context.userGroupId) searchCriteria.push(`ID: ${context.userGroupId}`);
+        if (context.userGroup) searchCriteria.push(`Name: ${context.userGroup}`);
+
+        const criteriaMessage = searchCriteria.length > 0 
+          ? ` with criteria: ${searchCriteria.join(', ')}`
+          : '';
+
+        logger.info(`No user groups found${criteriaMessage}`);
+        return {
+          success: false,
+          message: `No user groups found${criteriaMessage}`
+        };
+      }
 
       // Validate the transformed data
-      const validatedResult = apiResponseSchema.parse(validatedData);
-      return validatedResult;
+      const validatedData = {
+        success: true,
+        data: userGroups
+      };
+
+      return apiResponseSchema.parse(validatedData);
     } catch (error) {
       logger.error(`Failed to parse response: ${error instanceof Error ? error.message : "Unknown error"}`, { 
         error,
         responseText
       });
-      throw error;
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Invalid response format from CMS API"
+      };
     }
   },
 });
