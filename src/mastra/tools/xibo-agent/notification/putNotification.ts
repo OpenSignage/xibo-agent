@@ -1,67 +1,152 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Xibo CMS Notification Update Tool
+ * 
+ * This module provides functionality to update existing notifications in the Xibo CMS system.
+ * It implements the notification update API endpoint and handles the necessary validation
+ * and data transformation for updating notification information.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { logger } from "../../../index";
 
+// Schema for tag information in display groups
+const tagSchema = z.object({
+  tag: z.string(),
+  tagId: z.number(),
+  value: z.string()
+});
+
+// Schema for user group information
+const userGroupSchema = z.object({
+  groupId: z.number(),
+  group: z.string(),
+  isUserSpecific: z.number(),
+  isEveryone: z.number(),
+  description: z.string().nullable(),
+  libraryQuota: z.number().nullable(),
+  isSystemNotification: z.number().nullable(),
+  isDisplayNotification: z.number().nullable(),
+  isDataSetNotification: z.number().nullable(),
+  isLayoutNotification: z.number().nullable(),
+  isLibraryNotification: z.number().nullable(),
+  isReportNotification: z.number().nullable(),
+  isScheduleNotification: z.number().nullable(),
+  isCustomNotification: z.number().nullable(),
+  isShownForAddUser: z.number().nullable(),
+  defaultHomepageId: z.string().nullable(),
+  features: z.array(z.string()).nullable()
+});
+
+// Schema for display group information
+const displayGroupSchema = z.object({
+  displayGroupId: z.number(),
+  displayGroup: z.string(),
+  description: z.string().nullable(),
+  isDisplaySpecific: z.number(),
+  isDynamic: z.number(),
+  dynamicCriteria: z.string().nullable(),
+  dynamicCriteriaLogicalOperator: z.string().nullable(),
+  dynamicCriteriaTags: z.string().nullable(),
+  dynamicCriteriaExactTags: z.number(),
+  dynamicCriteriaTagsLogicalOperator: z.string().nullable(),
+  userId: z.number(),
+  tags: z.array(tagSchema).nullable(),
+  bandwidthLimit: z.number().nullable(),
+  groupsWithPermissions: z.string().nullable(),
+  createdDt: z.string().nullable(),
+  modifiedDt: z.string().nullable(),
+  folderId: z.number().nullable(),
+  permissionsFolderId: z.number().nullable(),
+  ref1: z.string().nullable(),
+  ref2: z.string().nullable(),
+  ref3: z.string().nullable(),
+  ref4: z.string().nullable(),
+  ref5: z.string().nullable()
+});
+
+// Schema for notification data validation
 const notificationSchema = z.object({
   notificationId: z.number(),
-  subject: z.string(),
-  body: z.string(),
-  createdDt: z.string(),
+  createDt: z.string(),
   releaseDt: z.string(),
-  isEmail: z.number(),
+  subject: z.string(),
+  type: z.string(),
+  body: z.string(),
   isInterrupt: z.number(),
   isSystem: z.number(),
   userId: z.number(),
-  displayGroupIds: z.array(z.number()),
-  displayGroupNames: z.array(z.string()),
-  read: z.number(),
-  readDt: z.string().nullable(),
-  readBy: z.string().nullable()
+  filename: z.string().nullable(),
+  originalFileName: z.string().nullable(),
+  nonusers: z.string().nullable(),
+  userGroups: z.array(userGroupSchema).nullable(),
+  displayGroups: z.array(displayGroupSchema).nullable()
 });
 
-// APIレスポンスのスキーマ
-const responseSchema = notificationSchema;
+// Schema for API response validation
+const responseSchema = z.object({
+  success: z.boolean(),
+  message: z.string().optional(),
+  data: notificationSchema.optional()
+});
 
+/**
+ * Tool for updating notifications in Xibo CMS
+ * 
+ * This tool accepts notification details and updates an existing notification
+ * in the Xibo CMS system.
+ */
 export const putNotification = createTool({
   id: 'put-notification',
-  description: '既存の通知を更新します',
+  description: 'Update an existing notification',
   inputSchema: z.object({
-    notificationId: z.number().describe('更新する通知のID'),
-    subject: z.string().describe('通知の件名'),
-    body: z.string().optional().describe('通知の本文'),
-    releaseDt: z.string().describe('通知の公開日時（ISO 8601形式）'),
-    isInterrupt: z.number().describe('ウェブポータルのナビゲーション/ログインを中断するかどうかのフラグ（0-1）'),
-    displayGroupIds: z.array(z.number()).describe('通知を割り当てる表示グループIDの配列'),
-    userGroupIds: z.array(z.number()).describe('通知を割り当てるユーザーグループIDの配列')
+    notificationId: z.number().describe('ID of the notification to update'),
+    subject: z.string().describe('Notification subject'),
+    body: z.string().optional().describe('Notification body'),
+    releaseDt: z.string().describe('Notification release date and time (ISO 8601 format)'),
+    isInterrupt: z.number().describe('Flag to interrupt web portal navigation/login (0-1)'),
+    displayGroupIds: z.array(z.number()).describe('Array of display group IDs to assign the notification to'),
+    userGroupIds: z.array(z.number()).describe('Array of user group IDs to assign the notification to')
   }),
 
-  outputSchema: z.string(),
+  outputSchema: responseSchema,
+
   execute: async ({ context }) => {
     try {
-      console.log("[DEBUG] putNotification: 開始");
-      console.log("[DEBUG] putNotification: config =", config);
+      logger.info("Starting notification update");
       
+      // Validate CMS URL configuration
       if (!config.cmsUrl) {
-        console.error("[DEBUG] putNotification: CMSのURLが設定されていません");
-        throw new Error("CMSのURLが設定されていません");
+        throw new Error("CMS URL is not set");
       }
-      console.log(`[DEBUG] putNotification: CMS URL = ${config.cmsUrl}`);
 
+      // Get authentication headers for API request
       const headers = await getAuthHeaders();
-      console.log("[DEBUG] putNotification: 認証ヘッダーを取得しました");
-      console.log("[DEBUG] putNotification: 認証ヘッダー =", headers);
+      logger.debug("Authentication headers obtained");
 
-      console.log("[DEBUG] putNotification: 通知データ =", context);
-
-      // 日付文字列をISO 8601形式に変換
+      // Prepare request body with ISO 8601 formatted date
       const requestBody = {
         ...context,
         releaseDt: new Date(context.releaseDt).toISOString()
       };
 
-      console.log("[DEBUG] putNotification: リクエストボディ =", requestBody);
+      logger.debug("Sending notification update request", { requestBody });
 
+      // Send PUT request to update notification
       const response = await fetch(`${config.cmsUrl}/api/notification/${context.notificationId}`, {
         method: 'PUT',
         headers: {
@@ -71,27 +156,56 @@ export const putNotification = createTool({
         body: JSON.stringify(requestBody)
       });
 
-      console.log(`[DEBUG] putNotification: レスポンスステータス = ${response.status}`);
+      // Handle HTTP error responses
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        console.error(`[DEBUG] putNotification: HTTPエラーが発生しました: ${response.status}`, errorData);
-        throw new Error(`HTTP error! status: ${response.status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`);
+        logger.error("HTTP error occurred", { 
+          status: response.status, 
+          errorData 
+        });
+        return {
+          success: false,
+          message: `HTTP error! status: ${response.status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`
+        };
       }
 
+      // Parse and validate response data
       const data = await response.json();
-      console.log("[DEBUG] putNotification: レスポンスデータを取得しました");
-      console.log("[DEBUG] putNotification: レスポンスデータの構造:");
-      console.log("生データ:", JSON.stringify(data, null, 2));
-      console.log("データ型:", typeof data);
-      console.log("キー一覧:", Object.keys(data));
+      logger.debug("Response data received", { data });
 
-      const validatedData = responseSchema.parse(data);
-      console.log("[DEBUG] putNotification: データの検証が成功しました");
+      try {
+        const validatedData = notificationSchema.parse(data);
+        logger.info("Notification updated successfully");
 
-      return JSON.stringify(validatedData, null, 2);
+        return {
+          success: true,
+          data: validatedData
+        };
+      } catch (validationError) {
+        // Handle validation errors
+        const errorDetails = validationError instanceof Error 
+          ? JSON.parse(validationError.message)
+          : "Unknown validation error";
+
+        logger.error("Validation error occurred", { 
+          error: errorDetails
+        });
+
+        return {
+          success: false,
+          message: "Validation error occurred",
+          error: errorDetails
+        };
+      }
     } catch (error) {
-      console.error("[DEBUG] putNotification: エラーが発生しました", error);
-      return `エラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`;
+      // Handle unexpected errors
+      logger.error("Error occurred during notification update", { 
+        error: error instanceof Error ? error.message : "Unknown error" 
+      });
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Unknown error"
+      };
     }
   },
 }); 
