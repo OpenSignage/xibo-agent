@@ -6,48 +6,48 @@
  */
 
 export const apiKnowledge = `
-API Knowledge for AI:
+AI向けAPI知識：
 
-1. Widget Management Process:
-   Adding Widgets:
-   1. First, locate the Module and Template
-   2. Then, call "Add Widget" API
-   3. Next, discover the module's properties
-   4. Finally, call "Edit Widget" with the properties
+1. ウィジェット管理プロセス：
+   ウィジェットの追加：
+   1. まず、モジュールとテンプレートを特定
+   2. 次に、「Add Widget」APIを呼び出し
+   3. その後、モジュールのプロパティを確認
+   4. 最後に、プロパティを指定して「Edit Widget」を呼び出し
 
-   Important Rules:
-   - When adding widgets to a layout:
-     * First, ensure the region exists
-     * Then, add the widget to the region's playlist
-   - When adding widgets to a playlist:
-     * Add directly to the playlist
-     * No region handling needed
+   重要なルール：
+   - レイアウトにウィジェットを追加する場合：
+     * まず、リージョンが存在することを確認
+     * その後、リージョンのプレイリストにウィジェットを追加
+   - プレイリストにウィジェットを追加する場合：
+     * プレイリストに直接追加
+     * リージョンの処理は不要
 
-   Region Types and Limitations:
-   - frame: Can hold only one widget
-     * Automatically converts to playlist when adding second widget
-   - playlist: Can hold multiple widgets
-     * Widgets play in sequence
-   - zone: Used in templates
-     * Automatically converts to frame/playlist when widget is added
-   - canvas: For elements (not available via API)
+   リージョンの種類と制限：
+   - frame: 1つのウィジェットのみ保持可能
+     * 2つ目のウィジェットを追加すると自動的にプレイリストに変換
+   - playlist: 複数のウィジェットを保持可能
+     * ウィジェットは順番に再生
+   - zone: テンプレートで使用
+     * ウィジェットが追加されると自動的にframe/playlistに変換
+   - canvas: エレメント用（APIでは使用不可）
 
-   Widget Types:
-   - Regular widgets: Can be added via API
-   - Data widgets with static templates: Can be added via API
-   - Elements: Cannot be added via API
+   ウィジェットの種類：
+   - 通常のウィジェット: APIで追加可能
+   - 静的テンプレートを持つデータウィジェット: APIで追加可能
+   - エレメント: APIでは追加不可
 
-2. Error Handling:
-   Common Error Scenarios:
-   - 404: Resource not found
-   - 409: Conflict with existing entity
-   - 422: Invalid entity provided
+2. エラー処理：
+   一般的なエラーシナリオ：
+   - 404: リソースが見つからない
+   - 409: 既存のエンティティとの競合
+   - 422: 無効なエンティティが提供された
 
-   Error Response Format:
+   エラーレスポンス形式：
    \`\`\`json
    {
        "error": {
-           "message": "Human readable error message",
+           "message": "人間が読めるエラーメッセージ",
            "code": 422,
            "data": {
                "property": "name"
@@ -56,9 +56,9 @@ API Knowledge for AI:
    }
    \`\`\`
 
-3. Important Notes:
-   - When editing widgets, all properties must be provided
-   - Frame regions automatically convert to playlist when adding second widget
-   - Regions are not applicable for standalone playlists
-   - Elements cannot be added via API
+3. 重要な注意事項：
+   - ウィジェットを編集する場合、すべてのプロパティを指定する必要がある
+   - フレームリージョンは2つ目のウィジェットを追加すると自動的にプレイリストに変換
+   - リージョンはスタンドアロンのプレイリストには適用されない
+   - エレメントはAPIで追加できない
 `; 

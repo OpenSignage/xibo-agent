@@ -33,7 +33,7 @@ const envPath = resolve(process.cwd(), '.env.development');
 config({ path: envPath });
 
 // Create shared logger instance for centralized logging
-const logger = createLogger({
+export const logger = createLogger({
   name: 'Xibo-System',
   level: 'info',  // Set to info level to exclude debug logs
 });
@@ -67,6 +67,3 @@ export const mastra = new Mastra({
 export const workflows = [
   // ... existing workflows ...
 ];
-
-// Export logger for use in other modules
-export { logger };
