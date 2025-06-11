@@ -6,46 +6,47 @@
  */
 
 export const layoutStructureKnowledge = `
-Layout Structure Knowledge:
-1. Basic Layout Components:
-   - Layout: Root element with width, height, and background
-   - Regions: Areas within the layout that can contain media
-   - Media: Content items (widgets) that are displayed in regions
-   - Drawer: Hidden container for media used in interactive actions
+レイアウト構造の知識：
 
-2. Layout Creation Process:
-   - First, create a layout with basic properties
-   - Then, add regions to the layout
-   - Finally, add media items to the regions
+1. 基本的なレイアウトコンポーネント：
+   - レイアウト：幅、高さ、背景を持つルート要素
+   - リージョン：メディアを含むことができるレイアウト内の領域
+   - メディア：リージョン内に表示されるコンテンツ項目（ウィジェット）
+   - ドロワー：インタラクティブなアクションで使用されるメディアの隠しコンテナ
 
-3. Media Types and Properties:
-   - Text: For displaying text content
-   - Image: For displaying images
-   - Video: For playing video content
-   - Webpage: For displaying web content
-   - Dataset: For displaying data from datasets
+2. レイアウト作成プロセス：
+   - まず、基本プロパティを持つレイアウトを作成
+   - 次に、レイアウトにリージョンを追加
+   - 最後に、リージョンにメディア項目を追加
 
-4. Interactive Features:
-   - Actions: Can be attached to layout, region, or media
-   - Triggers: Can be touch or webhook based
-   - Targets: Can be region or screen
+3. メディアの種類とプロパティ：
+   - テキスト：テキストコンテンツの表示用
+   - 画像：画像の表示用
+   - ビデオ：ビデオコンテンツの再生用
+   - ウェブページ：ウェブコンテンツの表示用
+   - データセット：データセットからのデータ表示用
 
-5. Content Distribution Flow:
-   1. Create layout structure
-   2. Add regions
-   3. Add media items
-   4. Configure transitions
-   5. Set up scheduling
-   6. Assign to displays
+4. インタラクティブ機能：
+   - アクション：レイアウト、リージョン、またはメディアに付加可能
+   - トリガー：タッチまたはウェブフックベース
+   - ターゲット：リージョンまたは画面
 
-When handling layout-related requests:
-1. Always verify layout structure requirements
-2. Check region compatibility
-3. Validate media type support
-4. Consider interactive features if needed
-5. Ensure proper scheduling setup
+5. コンテンツ配信フロー：
+   1. レイアウト構造の作成
+   2. リージョンの追加
+   3. メディア項目の追加
+   4. トランジションの設定
+   5. スケジュールの設定
+   6. ディスプレイへの割り当て
 
-Layout XML Structure:
+レイアウト関連のリクエストを処理する際：
+1. 常にレイアウト構造の要件を確認
+2. リージョンの互換性を確認
+3. メディアタイプのサポートを検証
+4. 必要に応じてインタラクティブ機能を考慮
+5. 適切なスケジュール設定を確保
+
+レイアウトXML構造：
 \`\`\`xml
 <layout schemaVersion="3" width="1920" height="1080" background="126.jpg" bgcolor="#FF3399">
     <action layoutCode="" widgetId="" triggerCode="" targetId="" target="" sourceId="" source="layout" actionType="" triggerType="" id=""/>
@@ -68,33 +69,33 @@ Layout XML Structure:
 </layout>
 \`\`\`
 
-Region Properties:
-- id: Unique identifier for the region
-- width: Width of the region
-- height: Height of the region
-- top: Position from the top of the layout
-- left: Position from the left of the layout
-- zindex: Drawing order (0 first, with each new region on top)
+リージョンのプロパティ：
+- id: リージョンの一意の識別子
+- width: リージョンの幅
+- height: リージョンの高さ
+- top: レイアウトの上端からの位置
+- left: レイアウトの左端からの位置
+- zindex: 描画順序（0が最初、新しいリージョンが上に重なる）
 
-Media Properties:
-- id: Unique identifier for the media
-- duration: Playback duration in seconds
-- type: Type of media (text, image, video, etc.)
-- render: Render type (native or html)
-- enableStat: Whether to record proof of play
+メディアのプロパティ：
+- id: メディアの一意の識別子
+- duration: 再生時間（秒）
+- type: メディアの種類（テキスト、画像、ビデオなど）
+- render: レンダリングタイプ（ネイティブまたはHTML）
+- enableStat: 再生証明の記録有無
 
-Transition Properties:
-- Type: Fade In, Fade Out, Fly
-- Duration: Duration in milliseconds
-- Direction: Compass point (N, NE, E, SE, S, SW, W, NW)
+トランジションのプロパティ：
+- Type: フェードイン、フェードアウト、フライ
+- Duration: 持続時間（ミリ秒）
+- Direction: 方位（N, NE, E, SE, S, SW, W, NW）
 
-Interactive Action Properties:
-- id: Action identifier
-- actionType: Type of action
-- triggerType: touch or webhook
-- source: layout, region, or widget
-- sourceId: ID of the source
-- target: region or screen
-- targetId: ID of the target region
-- widgetId: ID of the media node in the drawer
+インタラクティブアクションのプロパティ：
+- id: アクション識別子
+- actionType: アクションの種類
+- triggerType: タッチまたはウェブフック
+- source: レイアウト、リージョン、またはウィジェット
+- sourceId: ソースのID
+- target: リージョンまたは画面
+- targetId: ターゲットリージョンのID
+- widgetId: ドロワー内のメディアノードのID
 `; 
