@@ -48,8 +48,8 @@ export const mastra = new Mastra({
   },
   // Register available workflows
   workflows: {
-    weather: weatherWorkflow,      // Weather information processing workflow
-    illustration: svgWorkflow,     // SVG illustration generation workflow
+  //  weather: weatherWorkflow,      // Weather information processing workflow
+  //  illustration: svgWorkflow,     // SVG illustration generation workflow
   },
   // Set shared logger
   logger: logger,
