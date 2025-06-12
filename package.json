@@ -5,7 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "DATA_STORAGE_PATH=./persistent_data mastra dev",
-    "build": "mastra build && cp -r public/. .mastra/output/public/",
+    "build": "NODE_ENV=production mastra build && cp -r public/. .mastra/output/public/",
     "copy-upload": "cp -r upload persistent_data/uploads"
   },
   "keywords": [],
@@ -30,6 +30,9 @@
     "@smithery/sdk": "^1.2.2",
     "@wonderwhy-er/desktop-commander": "^0.1.38",
     "dotenv": "^16.5.0",
+    "pino": "^9.7.0",
+    "pino-pretty": "^13.0.0",
+    "pino-roll": "^3.1.0",
     "sharp": "^0.34.2",
     "uuid": "^11.1.0",
     "zod": "^3.24.3"

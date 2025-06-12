@@ -45,8 +45,7 @@
  */
 
 import { Context } from 'hono';
-//import { logger } from '../logger';
-import { logger } from '../../index';
+import { logger } from './logger';
 import { config } from '../config';
 import path from 'path';
 import fs from 'fs/promises';
