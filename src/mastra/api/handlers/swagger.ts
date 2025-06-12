@@ -21,8 +21,7 @@
 import { Context } from 'hono';
 import * as fs from 'fs';
 import * as path from 'path';
-//import { logger } from '../logger';
-import { logger } from '../../index';
+import { logger } from './logger';
 
 export const swaggerHandler = async (c: Context) => {
   try {
