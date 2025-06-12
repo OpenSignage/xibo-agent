@@ -81,77 +81,38 @@ export * from './generation';   // Image generation
 export function getTools() {
   return {
     // Misc
-    getCmsTime,
-    getAbout,
+    getCmsTime,getAbout,
     // User
-    getUser,
-    getUsers,
-    getUserMe,
-    addUser,
-    deleteUser,
-    editUser,
-    getModules,
-    getModuleProperties,
-    getModuleTemplateProperties,
+    getUser,getUsers,getUserMe,addUser,deleteUser,editUser,
+    // Module 
+    getModules,getModuleProperties,getModuleTemplateProperties,
     // Display
     getDisplays,
     // Layout    
-    getLayouts,
-    addLayout,
-    deleteLayout,
-    retireLayout,
-    unretireLayout,
-    clearLayout,
-    getLayoutStatus,
-    checkoutLayout,
-    discardLayout,
-    setLayoutEnableStat,
+    getLayouts,addLayout,deleteLayout,retireLayout,unretireLayout,clearLayout,
+    getLayoutStatus,checkoutLayout,discardLayout,setLayoutEnableStat,
     // Folder
-    getFolders,
-    addFolder,
-    editFolder,
-    deleteFolder,
+    getFolders,addFolder,editFolder,deleteFolder,
     // Resolution
-    getResolutions,
-    addResolution,
-    editResolution,
-    deleteResolution,
+    getResolutions,addResolution,editResolution,deleteResolution,
     // Etc
-    getNews,
-    getGoogleFonts,
-    uploadGoogleFonts,
-    getUploadFiles,
-    deleteUploadFiles,
+    getNews,getGoogleFonts,uploadGoogleFonts,getUploadFiles,deleteUploadFiles,
     // Font
-    getFonts,
-    getFontDetails,
-    uploadFont,
+    getFonts,getFontDetails,uploadFont,
     // User group
-    getUserGroups,
-    addUserGroup,
+    getUserGroups,addUserGroup,
     // Playlist
     getPlaylists,
     // Statistics
     getStats,
     // Tags
-    getTags,
-    addTag,
-    editTag,
-    deleteTag,
+    getTags,addTag,editTag,deleteTag,
     // Library
-    getLibrary,
-    searchAllLibrary,
-    addMedia,
-    uploadMediaFromURL,
+    getLibrary,searchAllLibrary,addMedia,uploadMediaFromURL,
     // Generation
-    generateImage,
-    updateImage,
-    getImageHistory,
+    generateImage,updateImage,getImageHistory,
     // Notification
-    getNotifications,
-    deleteNotification,
-    postNotification,
-    putNotification,
+    getNotifications,deleteNotification,postNotification,putNotification,
     // Display group
     getDisplayGroups
   };
