@@ -59,7 +59,12 @@ const layoutResponseSchema = z.array(z.object({
   enableStat: z.union([z.number(), z.string().transform(Number)]),
   autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
   code: z.string().nullable(),
-  isLocked: z.union([z.boolean(), z.array(z.any())]).transform(val => Array.isArray(val) ? false : val),
+  isLocked: z.any().transform(val => {
+    if (typeof val === 'boolean') return val;
+    if (Array.isArray(val)) return false;
+    if (typeof val === 'object') return false;
+    return false;
+  }),
   regions: z.array(z.object({
     regionId: z.union([z.number(), z.string().transform(Number)]),
     layoutId: z.union([z.number(), z.string().transform(Number)]),

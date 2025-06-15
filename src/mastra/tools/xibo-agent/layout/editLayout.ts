@@ -200,7 +200,7 @@ const layoutResponseSchema = z.object({
   enableStat: z.union([z.number(), z.string().transform(Number)]),
   autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
   code: z.string().nullable(),
-  isLocked: z.union([z.boolean(), z.array(z.any())]).transform(val => Array.isArray(val) ? false : val),
+  isLocked: z.any().transform(v => v === true),
   regions: z.array(regionSchema).optional(),
   tags: z.array(tagSchema).optional(),
   folderId: z.union([z.number(), z.string().transform(Number)]).nullable(),
@@ -270,8 +270,8 @@ export function layoutToTree(layout: any): TreeNode[] {
  * Implements the layout/{id} PUT endpoint from Xibo API
  * Allows updating various properties of a layout and supports tree view visualization
  */
-export const putLayout = createTool({
-  id: 'put-layout',
+export const editLayout = createTool({
+  id: 'edit-layout',
   description: 'Update an existing layout',
   inputSchema: z.object({
     layoutId: z.number().describe('ID of the layout to update'),
@@ -285,7 +285,7 @@ export const putLayout = createTool({
     includeTree: z.boolean().optional().default(false).describe('Include the layout structure as a tree view')
   }),
 
-  outputSchema: z.string(),
+  outputSchema: z.any(),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
@@ -365,7 +365,7 @@ export const putLayout = createTool({
             response: responseText
           });
           // Return basic layout data without tree view
-          return JSON.stringify(validatedData, null, 2);
+          return validatedData;
         }
 
         const detailData = await detailResponse.json();
@@ -398,15 +398,15 @@ export const putLayout = createTool({
         });
         
         logger.info(`Successfully generated tree view for layout ${context.layoutId}`);
-        return JSON.stringify(treeResponse, null, 2);
+        return treeResponse;
       }
 
       // Return basic layout data without tree view
-      return JSON.stringify(validatedData, null, 2);
+      return validatedData;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       logger.error(`putLayout: An error occurred: ${errorMessage}`, { error });
-      return `Error: ${errorMessage}`;
+      throw error;
     }
   },
 }); 

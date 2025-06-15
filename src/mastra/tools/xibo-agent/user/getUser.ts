@@ -583,14 +583,14 @@ export const getUser = createTool({
   id: 'get-user',
   description: 'Get user information from Xibo CMS',
   inputSchema: z.object({
-    userId: z.number().optional().describe('Filter by User Id'),
+    userId: z.number().optional().describe('Filter by user ID, if not specified all users will be returned'),
     userName: z.string().optional().describe('Filter by User Name'),
     userTypeId: z.number().optional().describe('Filter by UserType Id'),
     retired: z.number().optional().describe('Filter by Retired'),
     treeView: z.boolean().optional().describe('Set to true to return users in tree structure')
   }),
   outputSchema: z.union([
-    z.string(),
+    userResponseSchema,
     treeResponseSchema
   ]),
   execute: async ({ context }) => {
@@ -624,17 +624,18 @@ export const getUser = createTool({
       const data = await response.json();
       const validatedData = userResponseSchema.parse(data);
 
-      // ツリービューが要求された場合
+      // If tree view is requested
       if (context.treeView) {
         logger.info(`Generating tree view for ${validatedData.length} users`);
         const userTree = buildUserTree(validatedData);
         return createTreeViewResponse(validatedData, userTree, userNodeFormatter);
       }
 
-      return JSON.stringify(validatedData, null, 2);
+      // Return raw JSON data without serialization
+      return validatedData;
     } catch (error) {
       logger.error(`getUser: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+      throw error;  // Throw error for proper error handling
     }
   },
 });

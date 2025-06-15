@@ -699,9 +699,9 @@ export const getUserMe = createTool({
     _placeholder: z.string().optional().describe('This tool does not require input parameters'),
     treeView: z.boolean().optional().describe('Set to true to return user info in tree structure')
   }),
-  // Output is in string format (JSON string)
+  // Output schema for the tool
   outputSchema: z.union([
-    z.string(),
+    userResponseSchema,
     treeResponseSchema
   ]),
   
@@ -732,19 +732,19 @@ export const getUserMe = createTool({
       const data = await response.json();
       const validatedData = userResponseSchema.parse(data);
 
-      // ツリービューが要求された場合
+      // If tree view is requested
       if (context.treeView) {
         logger.info(`Generating tree view for current user`);
         const userTree = buildUserMeTree(validatedData);
         return createTreeViewResponse(validatedData, userTree, userMeNodeFormatter);
       }
 
-      // Return formatted JSON
-      return JSON.stringify(validatedData, null, 2);
+      // Return raw JSON data
+      return validatedData;
     } catch (error) {
       // Log and handle errors
       logger.error(`getUserMe: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      return `An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`;
+      throw error;  // Throw error for proper error handling
     }
   },
 });

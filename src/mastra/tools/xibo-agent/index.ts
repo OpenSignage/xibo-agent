@@ -17,17 +17,17 @@
  * Tools are organized by category and can be imported individually or as a complete set.
  */
 
-import { logger } from '../../index';
 import 'dotenv/config';
 
 // Import core tools individually to ensure they're always available for getTools()
 import { getCmsTime, getAbout } from './misc';
-import { getUser, getUsers, getUserMe, addUser, deleteUser, editUser } from './user';
+import { getUser, getUserMe, addUser, deleteUser, editUser } from './user';
 import { getModules, getModuleProperties, getModuleTemplateProperties } from './modules';
 import { getDisplays } from './display';
 import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
-  clearLayout, getLayoutStatus, checkoutLayout, discardLayout,
-  setLayoutEnableStat } from './layout';
+  clearLayout, getLayoutStatus, checkoutLayout, discardLayout,editLayout,
+  setLayoutEnableStat,editLayoutBackground,copyLayout,tagLayout,untagLayout,
+  publishLayout,applyLayoutTemplate } from './layout';
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
 import { getNews, getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles } from './etc';
@@ -83,14 +83,16 @@ export function getTools() {
     // Misc
     getCmsTime,getAbout,
     // User
-    getUser,getUsers,getUserMe,addUser,deleteUser,editUser,
+    getUser,getUserMe,addUser,deleteUser,editUser,
     // Module 
     getModules,getModuleProperties,getModuleTemplateProperties,
     // Display
     getDisplays,
     // Layout    
     getLayouts,addLayout,deleteLayout,retireLayout,unretireLayout,clearLayout,
-    getLayoutStatus,checkoutLayout,discardLayout,setLayoutEnableStat,
+    getLayoutStatus,checkoutLayout,discardLayout,setLayoutEnableStat,editLayout,
+    editLayoutBackground,copyLayout,tagLayout,untagLayout,publishLayout,
+    applyLayoutTemplate,
     // Folder
     getFolders,addFolder,editFolder,deleteFolder,
     // Resolution

@@ -11,11 +11,11 @@
  */
 
 /**
- * Xibo CMS Layout Clear Tool
+ * Xibo CMS Layout Background Update Tool
  * 
- * This module provides functionality to clear all regions and widgets from a layout
- * in the Xibo CMS system, resulting in an empty canvas while preserving layout settings.
- * It implements the layout/{id} POST endpoint from Xibo API.
+ * This module provides functionality to update the background of a layout
+ * in the Xibo CMS system. It implements the layout/background/{id} endpoint
+ * from Xibo API.
  */
 
 import { z } from "zod";
@@ -160,10 +160,10 @@ const regionSchema = z.object({
 });
 
 /**
- * Schema for layout clear response
- * Contains the complete layout information after clearing
+ * Schema for layout background update response
+ * Contains the complete layout information after updating background
  */
-const layoutClearResponseSchema = z.object({
+const layoutBackgroundResponseSchema = z.object({
   layoutId: z.number(),
   ownerId: z.number(),
   campaignId: z.number(),
@@ -198,20 +198,24 @@ const layoutClearResponseSchema = z.object({
 });
 
 /**
- * Tool to clear all regions and widgets from a layout
- * Implements the layout endpoint with POST method from Xibo API
- * This resets the layout to an empty canvas while preserving layout settings
+ * Tool to update the background of a layout
+ * Implements the layout/background/{id} endpoint from Xibo API
  */
-export const clearLayout = createTool({
-  id: 'clear-layout',
-  description: 'Clear all content from a layout canvas',
+export const editLayoutBackground = createTool({
+  id: 'edit-layout-background',
+  description: 'Update the background of a layout',
   inputSchema: z.object({
-    layoutId: z.number().describe('ID of the layout to clear')
+    layoutId: z.number().describe('ID of the layout to update'),
+    backgroundColor: z.string().describe('A HEX color to use as the background color of this Layout (e.g., #000000)'),
+    backgroundImageId: z.number().optional().describe('A media ID to use as the background image for this Layout'),
+    backgroundzIndex: z.number().describe('The Layer Number to use for the background'),
+    resolutionId: z.number().optional().describe('The Resolution ID to use on this Layout')
   }),
+
   outputSchema: z.object({
     success: z.boolean(),
     message: z.string().optional(),
-    data: layoutClearResponseSchema.optional(),
+    data: layoutBackgroundResponseSchema.optional(),
     error: z.object({
       status: z.number().optional(),
       message: z.string(),
@@ -219,33 +223,46 @@ export const clearLayout = createTool({
       help: z.string().optional()
     }).optional()
   }),
+
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
-        logger.error("clearLayout: CMS URL is not configured");
+        logger.error("editLayoutBackground: CMS URL is not configured");
         throw new Error("CMS URL is not configured");
       }
 
-      logger.info(`Clearing layout with ID: ${context.layoutId}`);
-      
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
+      logger.info(`Updating background for layout ${context.layoutId}`, {
+        backgroundColor: context.backgroundColor,
+        backgroundImageId: context.backgroundImageId
+      });
 
-      logger.info(`Sending POST request to ${url} to clear layout`);
+      const headers = await getAuthHeaders();
+      const url = `${config.cmsUrl}/api/layout/background/${context.layoutId}`;
+
+      // Build form data with required and optional parameters
+      const formData = new URLSearchParams();
+      formData.append('backgroundColor', context.backgroundColor);
+      formData.append('backgroundzIndex', context.backgroundzIndex.toString());
+      if (context.backgroundImageId) formData.append('backgroundImageId', context.backgroundImageId.toString());
+      if (context.resolutionId) formData.append('resolutionId', context.resolutionId.toString());
+
+      // Send PUT request to update layout background
       const response = await fetch(url, {
-        method: 'POST',
+        method: 'PUT',
         headers: {
           ...headers,
           'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        },
+        body: formData.toString()
       });
 
       // Parse response data
       const data = await response.json();
 
+      // Handle error response
       if (!response.ok) {
         const errorMessage = decodeErrorMessage(JSON.stringify(data));
-        logger.error(`Failed to clear layout ${context.layoutId}: ${errorMessage}`, {
+        logger.error(`Failed to update layout background ${context.layoutId}: ${errorMessage}`, {
           status: response.status,
           layoutId: context.layoutId
         });
@@ -262,8 +279,8 @@ export const clearLayout = createTool({
 
       // Validate response data
       try {
-        const validatedData = layoutClearResponseSchema.parse(data);
-        logger.info(`Successfully cleared layout ${context.layoutId}`);
+        const validatedData = layoutBackgroundResponseSchema.parse(data);
+        logger.info(`Successfully updated background for layout ${context.layoutId}`);
         return {
           success: true,
           data: validatedData
@@ -282,8 +299,9 @@ export const clearLayout = createTool({
         };
       }
     } catch (error) {
+      // Handle unexpected errors
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`clearLayout: An error occurred: ${errorMessage}`, { error });
+      logger.error(`editLayoutBackground: An error occurred: ${errorMessage}`, { error });
       return {
         success: false,
         error: {

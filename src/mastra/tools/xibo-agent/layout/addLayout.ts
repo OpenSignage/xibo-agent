@@ -33,25 +33,25 @@ const layoutResponseSchema = z.object({
   publishedStatus: z.string().nullable(),
   publishedDate: z.string().nullable(),
   backgroundImageId: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  schemaVersion: z.union([z.number(), z.string().transform(Number)]),
+  schemaVersion: z.union([z.number(), z.string().transform(Number)]).nullable(),
   layout: z.string().nullable(),
   description: z.string().nullable(),
   backgroundColor: z.string().nullable(),
   createdDt: z.string().nullable(),
   modifiedDt: z.string().nullable(),
   status: z.union([z.number(), z.string().transform(Number)]),
-  retired: z.union([z.number(), z.string().transform(Number)]),
+  retired: z.union([z.number(), z.string().transform(Number)]).nullable(),
   backgroundzIndex: z.union([z.number(), z.string().transform(Number)]),
   width: z.union([z.number(), z.string().transform(Number)]),
   height: z.union([z.number(), z.string().transform(Number)]),
   orientation: z.string().nullable(),
   displayOrder: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  duration: z.union([z.number(), z.string().transform(Number)]),
+  duration: z.union([z.number(), z.string().transform(Number)]).nullable(),
   statusMessage: z.string().nullable(),
   enableStat: z.union([z.number(), z.string().transform(Number)]),
   autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
   code: z.string().nullable(),
-  isLocked: z.union([z.boolean(), z.array(z.any())]).transform(val => Array.isArray(val) ? false : val)
+  isLocked: z.union([z.boolean(), z.array(z.any())]).transform(val => Array.isArray(val) ? false : val).nullable()
 });
 
 /**
@@ -70,7 +70,7 @@ export const addLayout = createTool({
     folderId: z.number().optional().describe('Folder ID to assign the layout to')
   }),
 
-  outputSchema: z.string(),
+  outputSchema: layoutResponseSchema,
   execute: async ({ context }) => {
     try {
       logger.info(`Creating new layout "${context.name}"`, {
@@ -124,19 +124,19 @@ export const addLayout = createTool({
           layoutId: validatedData.layoutId,
           name: validatedData.layout
         });
-        return JSON.stringify(validatedData, null, 2);
+        return validatedData;
       } catch (validationError) {
         logger.warn(`Response validation failed`, {
           error: validationError,
           responseData: data
         });
         // Return raw data even if validation fails
-        return JSON.stringify(data, null, 2);
+        return data;
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       logger.error(`Error in addLayout: ${errorMessage}`, { error });
-      return `Error occurred: ${errorMessage}`;
+      throw error;
     }
   },
 }); 

@@ -3,21 +3,12 @@
     "images": [
       {
         "id": 1,
-        "filename": "image-4ebbb397-91be-4a5c-a679-c6c43a212bec.png",
-        "prompt": "餃子の美味しそうな画像を生成し、そのレシピも教えてください。 (Aspect ratio: 16:9, Dimensions: 1024x576)",
-        "aspectRatio": "16:9",
-        "width": 1024,
-        "height": 576,
-        "createdAt": "2025-06-08T13:16:15.032Z"
-      },
-      {
-        "id": 2,
-        "filename": "image-b2c7863d-79c0-42c1-a4e6-3b56285e514e.png",
-        "prompt": "餃子の皿も含めた全体が見えるようにしてください。 (Aspect ratio: 16:9, Dimensions: 1024x576)",
-        "aspectRatio": "16:9",
-        "width": 1024,
-        "height": 576,
-        "createdAt": "2025-06-08T14:19:29.434Z"
+        "filename": "image-13335a7d-86d3-4ef5-9a9e-3f413baf34b1.png",
+        "prompt": "ワインの宣伝のためのデジタルサイネージの背景 (Aspect ratio: 9:16, Dimensions: 576x1024)",
+        "aspectRatio": "9:16",
+        "width": 576,
+        "height": 1024,
+        "createdAt": "2025-06-12T15:23:34.572Z"
       }
     ]
   },

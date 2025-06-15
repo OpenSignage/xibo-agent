@@ -10,11 +10,20 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
+/**
+ * Xibo CMS Layout Copy Tool
+ * 
+ * This module provides functionality to copy a layout in the Xibo CMS system.
+ * It implements the layout/copy/{id} endpoint from Xibo API.
+ * Copying a layout creates a new layout with the same content but a different name.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
+import { logger } from '../../../index';
 
 /**
  * Response schema for Layout objects
@@ -47,7 +56,15 @@ const layoutResponseSchema = z.object({
   enableStat: z.union([z.number(), z.string().transform(Number)]),
   autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
   code: z.string().nullable(),
-  isLocked: z.union([z.boolean(), z.array(z.any())]).transform(val => Array.isArray(val) ? false : val)
+  isLocked: z.union([
+    z.boolean(),
+    z.array(z.any()),
+    z.null()
+  ]).transform(val => {
+    if (val === null) return false;
+    if (Array.isArray(val)) return false;
+    return val;
+  })
 });
 
 /**
@@ -58,42 +75,111 @@ export const copyLayout = createTool({
   id: 'copy-layout',
   description: 'Copy a layout with a new name',
   inputSchema: z.object({
-    layoutId: z.number().describe('Source Layout ID to copy'),
-    name: z.string().describe('Name for the new layout copy'),
-    description: z.string().optional().describe('Description for the new layout copy'),
-    folderId: z.number().optional().describe('Folder ID to place the copied layout')
+    layoutId: z.number().describe('The Layout ID to Copy'),
+    name: z.string().describe('The name for the new Layout'),
+    description: z.string().optional().describe('The Description for the new Layout'),
+    folderId: z.number().optional().describe('Folder ID to place the copied layout'),
+    copyMediaFiles: z.number().describe('Flag indicating whether to make new Copies of all Media Files assigned to the Layout being Copied')
   }),
-  outputSchema: z.string(),
+  outputSchema: z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    data: layoutResponseSchema.optional(),
+    error: z.object({
+      status: z.number().optional(),
+      message: z.string(),
+      details: z.any().optional(),
+      help: z.string().optional()
+    }).optional()
+  }),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
+        logger.error("copyLayout: CMS URL is not configured");
         throw new Error("CMS URL is not configured");
       }
 
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/${context.layoutId}/copy`;
+      logger.info(`Copying layout with ID: ${context.layoutId}`, {
+        name: context.name,
+        description: context.description,
+        folderId: context.folderId,
+        copyMediaFiles: context.copyMediaFiles
+      });
 
-      const formData = new FormData();
+      const headers = await getAuthHeaders();
+      const url = `${config.cmsUrl}/api/layout/copy/${context.layoutId}`;
+
+      // Build form data with URLSearchParams
+      const formData = new URLSearchParams();
       formData.append('name', context.name);
       if (context.description) formData.append('description', context.description);
       if (context.folderId) formData.append('folderId', context.folderId.toString());
+      formData.append('copyMediaFiles', context.copyMediaFiles.toString());
 
+      // Send copy request to CMS
       const response = await fetch(url, {
         method: 'POST',
-        headers,
-        body: formData
+        headers: {
+          ...headers,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: formData.toString()
       });
 
+      // Handle error response
       if (!response.ok) {
         const responseText = await response.text();
         const errorMessage = decodeErrorMessage(responseText);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
+        logger.error(`Failed to copy layout: ${errorMessage}`, {
+          status: response.status,
+          layoutId: context.layoutId
+        });
+
+        let parsedError;
+        try {
+          parsedError = JSON.parse(errorMessage);
+          if (parsedError.message) {
+            parsedError.message = decodeURIComponent(parsedError.message);
+          }
+        } catch (e) {
+          parsedError = { message: errorMessage };
+        }
+
+        return {
+          success: false,
+          error: {
+            status: response.status,
+            message: parsedError.message || errorMessage,
+            details: parsedError,
+            help: parsedError.help
+          }
+        };
       }
 
+      // Parse and validate successful response
       const data = await response.json();
-      return JSON.stringify(data, null, 2);
+      const validatedData = layoutResponseSchema.parse(data);
+      logger.info(`Successfully copied layout ${context.layoutId}`);
+
+      return {
+        success: true,
+        message: "Layout copied successfully",
+        data: validatedData
+      };
     } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+      // Handle unexpected errors
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error(`Error in copyLayout: ${errorMessage}`, {
+        error,
+        layoutId: context.layoutId
+      });
+      return {
+        success: false,
+        error: {
+          message: errorMessage,
+          type: error instanceof Error ? error.constructor.name : 'Unknown'
+        }
+      };
     }
   },
 }); 

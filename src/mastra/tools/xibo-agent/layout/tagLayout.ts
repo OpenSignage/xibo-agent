@@ -10,11 +10,20 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
+/**
+ * Xibo CMS Layout Tagging Tool
+ * 
+ * This module provides functionality to add tags to a layout in the Xibo CMS system.
+ * It implements the layout/{id}/tag endpoint from Xibo API.
+ * Tags help with organization, filtering, and searching layouts.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
+import { logger } from '../../../index';
 
 /**
  * Tool to add tags to a layout
@@ -28,36 +37,100 @@ export const tagLayout = createTool({
     layoutId: z.number().describe('ID of the layout to add tags to'),
     tags: z.array(z.string()).describe('Array of tags to add')
   }),
-  outputSchema: z.string(),
+  outputSchema: z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    data: z.any().optional(),
+    error: z.object({
+      status: z.number().optional(),
+      message: z.string(),
+      details: z.any().optional(),
+      help: z.string().optional()
+    }).optional()
+  }),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
+        logger.error("tagLayout: CMS URL is not configured");
         throw new Error("CMS URL is not configured");
       }
+
+      logger.info(`Adding tags to layout ${context.layoutId}`, {
+        tags: context.tags
+      });
 
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/layout/${context.layoutId}/tag`;
 
-      const formData = new FormData();
+      // Build form data with URLSearchParams
+      const formData = new URLSearchParams();
       context.tags.forEach(tag => {
         formData.append('tag[]', tag);
       });
 
+      // Send tag request to CMS
       const response = await fetch(url, {
         method: 'POST',
-        headers,
-        body: formData
+        headers: {
+          ...headers,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: formData.toString()
       });
 
+      // Handle error response
       if (!response.ok) {
         const responseText = await response.text();
         const errorMessage = decodeErrorMessage(responseText);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
+        logger.error(`Failed to add tags to layout: ${errorMessage}`, {
+          status: response.status,
+          layoutId: context.layoutId
+        });
+
+        let parsedError;
+        try {
+          parsedError = JSON.parse(errorMessage);
+          if (parsedError.message) {
+            parsedError.message = decodeURIComponent(parsedError.message);
+          }
+        } catch (e) {
+          parsedError = { message: errorMessage };
+        }
+
+        return {
+          success: false,
+          error: {
+            status: response.status,
+            message: parsedError.message || errorMessage,
+            details: parsedError,
+            help: parsedError.help
+          }
+        };
       }
 
-      return "Tags added successfully";
+      // Parse and return successful response
+      const data = await response.json();
+      logger.info(`Successfully added tags to layout ${context.layoutId}`);
+
+      return {
+        success: true,
+        message: "Tags added successfully",
+        data: data
+      };
     } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+      // Handle unexpected errors
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error(`Error in tagLayout: ${errorMessage}`, {
+        error,
+        layoutId: context.layoutId
+      });
+      return {
+        success: false,
+        error: {
+          message: errorMessage,
+          type: error instanceof Error ? error.constructor.name : 'Unknown'
+        }
+      };
     }
   },
 }); 

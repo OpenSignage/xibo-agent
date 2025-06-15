@@ -10,11 +10,192 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
+/**
+ * Xibo CMS Layout Checkout Tool
+ * 
+ * This module provides functionality to checkout layouts in the Xibo CMS system.
+ * It implements the layout/checkout endpoint from Xibo API.
+ * Checking out a layout creates a draft version that can be modified.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
+import { logger } from '../../../index';
+
+/**
+ * Permission schema for layout, region, and widget permissions
+ */
+const permissionSchema = z.object({
+  permissionId: z.number(),
+  entityId: z.number(),
+  groupId: z.number(),
+  objectId: z.number(),
+  isUser: z.number(),
+  entity: z.string(),
+  objectIdString: z.string(),
+  group: z.string(),
+  view: z.number(),
+  edit: z.number(),
+  delete: z.number(),
+  modifyPermissions: z.number()
+});
+
+/**
+ * Tag schema for layout and playlist tags
+ */
+const tagSchema = z.object({
+  tag: z.string(),
+  tagId: z.number(),
+  value: z.string()
+});
+
+/**
+ * Region option schema
+ */
+const regionOptionSchema = z.object({
+  regionId: z.number(),
+  option: z.string(),
+  value: z.string()
+});
+
+/**
+ * Widget option schema
+ */
+const widgetOptionSchema = z.object({
+  widgetId: z.number(),
+  type: z.string(),
+  option: z.string(),
+  value: z.string()
+});
+
+/**
+ * Audio schema for widget audio settings
+ */
+const audioSchema = z.object({
+  widgetId: z.number(),
+  mediaId: z.number(),
+  volume: z.number(),
+  loop: z.number()
+});
+
+/**
+ * Widget schema for playlist widgets
+ */
+const widgetSchema = z.object({
+  widgetId: z.number(),
+  playlistId: z.number(),
+  ownerId: z.number(),
+  type: z.string(),
+  duration: z.number(),
+  displayOrder: z.number(),
+  useDuration: z.number(),
+  calculatedDuration: z.number().optional(),
+  createdDt: z.number(),
+  modifiedDt: z.number(),
+  fromDt: z.number().nullable(),
+  toDt: z.number().nullable(),
+  schemaVersion: z.number(),
+  transitionIn: z.number().nullable(),
+  transitionOut: z.number().nullable(),
+  transitionDurationIn: z.number().nullable(),
+  transitionDurationOut: z.number().nullable(),
+  widgetOptions: z.array(widgetOptionSchema).optional(),
+  mediaIds: z.array(z.number()).optional(),
+  audio: z.array(audioSchema).optional(),
+  permissions: z.array(permissionSchema).optional(),
+  playlist: z.string().optional()
+});
+
+/**
+ * Playlist schema for region playlists
+ */
+const playlistSchema = z.object({
+  playlistId: z.number(),
+  ownerId: z.number(),
+  name: z.string(),
+  regionId: z.number().optional(),
+  isDynamic: z.number(),
+  filterMediaName: z.string().nullable(),
+  filterMediaNameLogicalOperator: z.string().nullable(),
+  filterMediaTags: z.string().nullable(),
+  filterExactTags: z.number().nullable(),
+  filterMediaTagsLogicalOperator: z.string().nullable(),
+  filterFolderId: z.number().nullable(),
+  maxNumberOfItems: z.number().nullable(),
+  createdDt: z.string(),
+  modifiedDt: z.string(),
+  duration: z.number(),
+  requiresDurationUpdate: z.number(),
+  enableStat: z.string().nullable(),
+  tags: z.array(tagSchema).optional(),
+  widgets: z.array(widgetSchema).optional(),
+  permissions: z.array(permissionSchema).optional(),
+  folderId: z.number().nullable(),
+  permissionsFolderId: z.number().nullable()
+});
+
+/**
+ * Region schema for layout regions
+ */
+const regionSchema = z.object({
+  regionId: z.number(),
+  layoutId: z.number(),
+  ownerId: z.number(),
+  type: z.string().nullable(),
+  name: z.string(),
+  width: z.number(),
+  height: z.number(),
+  top: z.number(),
+  left: z.number(),
+  zIndex: z.number(),
+  syncKey: z.string().nullable(),
+  regionOptions: z.array(regionOptionSchema).optional(),
+  permissions: z.array(permissionSchema).optional(),
+  duration: z.number(),
+  isDrawer: z.number().optional(),
+  regionPlaylist: playlistSchema.optional()
+});
+
+/**
+ * Schema for layout checkout response
+ * Contains the complete layout information after checkout
+ */
+const layoutCheckoutResponseSchema = z.object({
+  layoutId: z.number(),
+  ownerId: z.number(),
+  campaignId: z.number(),
+  parentId: z.number().nullable(),
+  publishedStatusId: z.number(),
+  publishedStatus: z.string(),
+  publishedDate: z.string().nullable(),
+  backgroundImageId: z.number().nullable(),
+  schemaVersion: z.number(),
+  layout: z.string(),
+  description: z.string().nullable(),
+  backgroundColor: z.string(),
+  createdDt: z.string(),
+  modifiedDt: z.string(),
+  status: z.number(),
+  retired: z.number(),
+  backgroundzIndex: z.number(),
+  width: z.number(),
+  height: z.number(),
+  orientation: z.string(),
+  displayOrder: z.number().nullable(),
+  duration: z.number(),
+  statusMessage: z.string().nullable(),
+  enableStat: z.number(),
+  autoApplyTransitions: z.number(),
+  code: z.string().nullable(),
+  isLocked: z.boolean().nullable(),
+  regions: z.array(regionSchema),
+  tags: z.array(tagSchema),
+  folderId: z.number(),
+  permissionsFolderId: z.number()
+});
 
 /**
  * Tool to checkout a layout for editing
@@ -27,30 +208,94 @@ export const checkoutLayout = createTool({
   inputSchema: z.object({
     layoutId: z.number().describe('ID of the layout to checkout')
   }),
-  outputSchema: z.string(),
+  outputSchema: z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    data: layoutCheckoutResponseSchema.optional(),
+    error: z.object({
+      status: z.number().optional(),
+      message: z.string(),
+      details: z.any().optional(),
+      help: z.string().optional()
+    }).optional()
+  }),
   execute: async ({ context }) => {
     try {
+      // Check CMS URL configuration
       if (!config.cmsUrl) {
+        logger.error('checkoutLayout: CMS URL is not configured');
         throw new Error("CMS URL is not configured");
       }
 
+      // Log checkout operation start
+      logger.info(`Checking out layout ${context.layoutId}`);
+
+      // Prepare request
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/layout/checkout/${context.layoutId}`;
 
+      // Send checkout request to CMS
       const response = await fetch(url, {
-        method: 'POST',
+        method: 'PUT',
         headers
       });
 
+      // Parse response data
+      const data = await response.json();
+
+      // Handle error response
       if (!response.ok) {
-        const responseText = await response.text();
-        const errorMessage = decodeErrorMessage(responseText);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
+        const errorMessage = decodeErrorMessage(JSON.stringify(data));
+        logger.error(`Failed to checkout layout: ${errorMessage}`, {
+          status: response.status,
+          layoutId: context.layoutId
+        });
+
+        return {
+          success: false,
+          error: {
+            status: response.status,
+            message: errorMessage,
+            details: data
+          }
+        };
       }
 
-      return "Layout checked out successfully";
+      // Validate response data
+      try {
+        const validatedData = layoutCheckoutResponseSchema.parse(data);
+        logger.info(`Successfully checked out layout ${context.layoutId}`);
+        return {
+          success: true,
+          data: validatedData
+        };
+      } catch (validationError) {
+        logger.error(`Layout data validation failed`, {
+          error: validationError,
+          layoutId: context.layoutId
+        });
+        return {
+          success: false,
+          error: {
+            message: "Layout data validation failed",
+            details: validationError
+          }
+        };
+      }
     } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+      // Handle unexpected errors
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error(`Error in checkoutLayout: ${errorMessage}`, {
+        error,
+        layoutId: context.layoutId
+      });
+      return {
+        success: false,
+        error: {
+          message: errorMessage,
+          type: error instanceof Error ? error.constructor.name : 'Unknown'
+        }
+      };
     }
   },
 }); 

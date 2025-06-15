@@ -22,7 +22,6 @@
  */
 
 export { getUser } from './getUser';
-export { getUsers } from './getUsers';
 export { getUserMe } from './getUserMe';
 export { addUser } from './addUser';
 export { editUser } from './editUser';

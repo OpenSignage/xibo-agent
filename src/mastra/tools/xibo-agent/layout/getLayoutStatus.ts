@@ -10,6 +10,14 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
+/**
+ * Xibo CMS Layout Status Tool
+ * 
+ * This module provides functionality to retrieve the current status of a layout in the Xibo CMS system.
+ * It implements the layout/status endpoint from Xibo API.
+ * Provides detailed information about the layout's structure, publication state, and locking status.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
@@ -199,9 +207,10 @@ const layoutStatusSchema = z.object({
 
 /**
  * Convert layout information to tree structure
+ * Transforms the flat layout data into a hierarchical tree representation
  * 
- * @param layout Layout information
- * @returns Tree structure
+ * @param layout Layout information from CMS
+ * @returns Array of tree nodes representing the layout structure
  */
 function buildLayoutTree(layout: any): TreeNode[] {
   if (!layout) {
@@ -279,9 +288,10 @@ function buildLayoutTree(layout: any): TreeNode[] {
 
 /**
  * Custom formatter for layout nodes
+ * Formats each node type with appropriate display information
  * 
- * @param node Tree node
- * @returns Formatted display string
+ * @param node Tree node to format
+ * @returns Formatted display string for the node
  */
 function layoutNodeFormatter(node: TreeNode): string {
   switch (node.type) {
@@ -314,33 +324,37 @@ export const getLayoutStatus = createTool({
     layoutId: z.number().describe('ID of the layout to check status for'),
     treeView: z.boolean().optional().describe('Whether to display the layout structure as a tree view')
   }),
-  outputSchema: z.union([layoutStatusSchema, z.any()]),
+  outputSchema: z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    data: z.any().optional(),
+    error: z.object({
+      status: z.number().optional(),
+      message: z.string(),
+      details: z.any().optional(),
+      help: z.string().optional()
+    }).optional()
+  }),
   execute: async ({ context }) => {
     try {
-      logger.info(`Getting layout status for layoutId: ${context.layoutId}${context.treeView ? ' with tree view' : ''}`);
-      
       if (!config.cmsUrl) {
-        logger.error('CMS URL is not configured');
+        logger.error('getLayoutStatus: CMS URL is not configured');
         throw new Error("CMS URL is not configured");
       }
 
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/layout/status/${context.layoutId}`;
-      logger.debug(`Request URL: ${url}`);
 
       const response = await fetch(url, {
         headers,
       });
-      
-      logger.debug(`Response status: ${response.status}`);
 
       if (!response.ok) {
         const responseText = await response.text();
         const errorMessage = decodeErrorMessage(responseText);
         logger.error(`Failed to retrieve layout status: ${errorMessage}`, {
           status: response.status,
-          layoutId: context.layoutId,
-          url
+          layoutId: context.layoutId
         });
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
       }
@@ -352,27 +366,40 @@ export const getLayoutStatus = createTool({
         
         // Generate tree view if requested
         if (context.treeView) {
-          logger.info(`Generating tree view for layout: ${validatedData.layout} (ID: ${validatedData.layoutId})`);
           const layoutTree = buildLayoutTree(validatedData);
           return createTreeViewResponse(validatedData, layoutTree, layoutNodeFormatter);
         }
         
-        logger.info(`Successfully retrieved layout status for: ${validatedData.layout} (ID: ${validatedData.layoutId})`);
-        return validatedData;
+        return {
+          success: true,
+          data: data
+        };
       } catch (validationError) {
-        logger.warn(`Layout data validation failed`, {
+        logger.error(`Layout data validation failed`, {
           error: validationError,
-          layoutId: context.layoutId,
-          responseData: data
+          layoutId: context.layoutId
         });
-        throw validationError;
+        return {
+          success: false,
+          error: {
+            message: "Layout data validation failed",
+            details: validationError
+          }
+        };
       }
     } catch (error) {
-      logger.error(`Error in getLayoutStatus: ${error instanceof Error ? error.message : "Unknown error"}`, {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error(`Error in getLayoutStatus: ${errorMessage}`, {
         error,
         layoutId: context.layoutId
       });
-      throw new Error(`Error: ${error instanceof Error ? error.message : "Unknown error"}`);
+      return {
+        success: false,
+        error: {
+          status: 500,
+          message: errorMessage
+        }
+      };
     }
   },
 }); 
