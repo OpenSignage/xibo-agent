@@ -17,13 +17,12 @@
  * Includes operations for creating, modifying, displaying, publishing, and removing layouts.
  */
 
-// Basic layout operations
+
 export { getLayouts } from './getLayouts';
 export { addLayout } from './addLayout';
 export { deleteLayout } from './deleteLayout';
 export { copyLayout } from './copyLayout';
-
-// Layout status management
+export { editLayout } from './editLayout';
 export { publishLayout } from './publishLayout';
 export { retireLayout } from './retireLayout';
 export { unretireLayout } from './unretireLayout';
@@ -31,13 +30,9 @@ export { clearLayout } from './clearLayout';
 export { getLayoutStatus } from './getLayoutStatus';
 export { checkoutLayout } from './checkoutLayout';
 export { discardLayout } from './discardLayout';
-
-// Layout content management
 export { positionRegions } from './positionRegions';
-export { setLayoutBackground } from './setLayoutBackground';
+export { editLayoutBackground } from './editLayoutBackground';
 export { applyLayoutTemplate } from './applyLayoutTemplate';
 export { setLayoutEnableStat } from './setLayoutEnableStat';
-
-// Layout tagging
 export { tagLayout } from './tagLayout';
 export { untagLayout } from './untagLayout';

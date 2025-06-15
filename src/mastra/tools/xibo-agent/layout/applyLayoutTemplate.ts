@@ -35,7 +35,7 @@ export const applyLayoutTemplate = createTool({
   description: 'Apply a template to an existing layout',
   inputSchema: z.object({
     layoutId: z.number().describe('ID of the layout to apply template to'),
-    templateId: z.number().describe('ID of the template to apply')
+    templateId: z.number().optional().describe('ID of the template to apply')
   }),
   outputSchema: z.string(),
   execute: async ({ context }) => {
@@ -52,7 +52,9 @@ export const applyLayoutTemplate = createTool({
 
       // Prepare form data with required parameters
       const formData = new URLSearchParams();
-      formData.append('templateId', context.templateId.toString());
+      if (context.templateId !== undefined) {
+        formData.append('templateId', context.templateId.toString());
+      }
       
       logger.debug(`Sending PUT request to ${url}`);
       const response = await fetch(url, {

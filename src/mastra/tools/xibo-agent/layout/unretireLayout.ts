@@ -10,6 +10,14 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
+/**
+ * Xibo CMS Layout Unretirement Tool
+ * 
+ * This module provides functionality to unretire a previously retired layout
+ * in the Xibo CMS system. It implements the layout/{id}/unretire endpoint
+ * from Xibo API. Unretiring a layout makes it available for scheduling again.
+ */
+
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
@@ -31,22 +39,27 @@ export const unretireLayout = createTool({
   outputSchema: z.string(),
   execute: async ({ context }) => {
     try {
+      // Log the start of layout unretirement process
       logger.info(`Unretiring layout with ID: ${context.layoutId}`);
 
+      // Validate CMS URL configuration
       if (!config.cmsUrl) {
         logger.error("CMS URL is not configured");
         throw new Error("CMS URL is not configured");
       }
 
+      // Prepare API request
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/layout/unretire/${context.layoutId}`;
       logger.debug(`Sending PUT request to ${url}`);
 
+      // Send unretirement request to CMS
       const response = await fetch(url, {
         method: 'PUT',
         headers,
       });
 
+      // Handle error response
       if (!response.ok) {
         const responseText = await response.text();
         const errorMessage = decodeErrorMessage(responseText);
@@ -57,9 +70,11 @@ export const unretireLayout = createTool({
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
       }
 
+      // Log successful unretirement
       logger.info(`Layout ID ${context.layoutId} unretired successfully`);
       return "Layout unretired successfully";
     } catch (error) {
+      // Handle unexpected errors
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       logger.error(`Error in unretireLayout: ${errorMessage}`, {
         error,

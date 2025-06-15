@@ -44,7 +44,7 @@ export const mastra = new Mastra({
   agents: {
     xibo: xiboAgent,         // Xibo system operation agent
     manual: xiboManualAgent, // Xibo manual operation agent
-    mcp: mcpAgent            // MCP (Master Control Program) agent
+  //  mcp: mcpAgent            // MCP (Master Control Program) agent
   },
   // Register available workflows
   workflows: {
