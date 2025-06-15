@@ -40,6 +40,7 @@ import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './li
 import { generateImage, updateImage, getImageHistory } from './generation';
 import { getNotifications, deleteNotification, postNotification, putNotification } from './notification';
 import { getDisplayGroups } from './displayGroup';
+import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } from './template';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -116,6 +117,8 @@ export function getTools() {
     // Notification
     getNotifications,deleteNotification,postNotification,putNotification,
     // Display group
-    getDisplayGroups
+    getDisplayGroups,
+    // Template
+    getTemplate,searchAllTemplates,addTemplate,addTemplateFromLayout
   };
 }
