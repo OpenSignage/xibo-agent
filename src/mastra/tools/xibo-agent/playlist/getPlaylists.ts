@@ -23,6 +23,9 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { parseJsonStrings } from '../utility/jsonParser';
+import { TreeNode, createTreeViewResponse } from '../utility/treeView';
+import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Schema for playlist data validation
@@ -68,6 +71,149 @@ const playlistSchema = z.object({
 });
 
 /**
+ * Convert playlist data to a hierarchical tree structure.
+ * @param playlists - Array of playlist objects from the API.
+ * @returns An array of TreeNode objects representing the hierarchy.
+ */
+function buildPlaylistTree(playlists: any[]): TreeNode[] {
+  if (!Array.isArray(playlists)) return [];
+  return playlists.map(playlist => {
+    const playlistNode: TreeNode = {
+      type: 'playlist',
+      id: playlist.playlistId,
+      name: playlist.name || `Playlist ${playlist.playlistId}`,
+      children: []
+    };
+    
+    // Add basic information as children
+    const infoNode: TreeNode = {
+      type: 'info',
+      id: -playlist.playlistId,
+      name: 'Information',
+      children: [
+        {
+          type: 'duration',
+          id: -playlist.playlistId * 10 - 1,
+          name: `Duration: ${playlist.duration || 0} seconds`
+        },
+        {
+          type: 'owner',
+          id: -playlist.playlistId * 10 - 2,
+          name: `Owner ID: ${playlist.ownerId}`
+        }
+      ]
+    };
+
+    if (playlist.createdDt) {
+      infoNode.children!.push({
+        type: 'created',
+        id: -playlist.playlistId * 10 - 3,
+        name: `Created: ${playlist.createdDt}`
+      });
+    }
+
+    if (playlist.modifiedDt) {
+      infoNode.children!.push({
+        type: 'modified',
+        id: -playlist.playlistId * 10 - 4,
+        name: `Modified: ${playlist.modifiedDt}`
+      });
+    }
+
+    playlistNode.children!.push(infoNode);
+    
+    // Add widgets as children
+    if (playlist.widgets && Array.isArray(playlist.widgets) && playlist.widgets.length > 0) {
+      const widgetsNode: TreeNode = {
+        type: 'widgets',
+        id: -playlist.playlistId * 100,
+        name: 'Widgets',
+        children: playlist.widgets.map((widget: any, index: number) => ({
+          type: 'widget',
+          id: widget.widgetId,
+          name: `${widget.type || 'Widget'} (ID: ${widget.widgetId})`,
+          children: [
+            {
+              type: 'widget-info',
+              id: widget.widgetId * 10 + 1,
+              name: `Duration: ${widget.duration || 0}s, Order: ${widget.displayOrder || index + 1}`
+            }
+          ]
+        }))
+      };
+      playlistNode.children!.push(widgetsNode);
+    }
+
+    // Add tags as children
+    if (playlist.tags && Array.isArray(playlist.tags) && playlist.tags.length > 0) {
+      const tagsNode: TreeNode = {
+        type: 'tags',
+        id: -playlist.playlistId * 1000,
+        name: 'Tags',
+        children: playlist.tags.map((tag: any) => ({
+          type: 'tag',
+          id: tag.tagId,
+          name: tag.tag || `Tag ${tag.tagId}`
+        }))
+      };
+      playlistNode.children!.push(tagsNode);
+    }
+
+    // Add permissions if available
+    if (playlist.permissions && Array.isArray(playlist.permissions) && playlist.permissions.length > 0) {
+      const permissionsNode: TreeNode = {
+        type: 'permissions',
+        id: -playlist.playlistId * 10000,
+        name: 'Permissions',
+        children: playlist.permissions.map((perm: any) => ({
+          type: 'permission',
+          id: perm.groupId,
+          name: `Group ${perm.groupId}: View(${perm.view}) Edit(${perm.edit}) Delete(${perm.delete})`
+        }))
+      };
+      playlistNode.children!.push(permissionsNode);
+    }
+
+    return playlistNode;
+  });
+}
+
+/**
+ * Format node display based on node type
+ * @param node - The tree node to format
+ * @returns Formatted string representation of the node
+ */
+function playlistNodeFormatter(node: TreeNode): string {
+  switch (node.type) {
+    case 'playlist':
+      return `📋 Playlist: ${node.name}`;
+    case 'info':
+      return `ℹ️ ${node.name}`;
+    case 'widgets':
+      return `🔧 ${node.name}`;
+    case 'widget':
+      return `└─ ${node.name}`;
+    case 'widget-info':
+      return `   ${node.name}`;
+    case 'tags':
+      return `🏷️ ${node.name}`;
+    case 'tag':
+      return `└─ ${node.name}`;
+    case 'permissions':
+      return `🔒 ${node.name}`;
+    case 'permission':
+      return `└─ ${node.name}`;
+    case 'duration':
+    case 'owner':
+    case 'created':
+    case 'modified':
+      return `└─ ${node.name}`;
+    default:
+      return node.name;
+  }
+}
+
+/**
  * Tool for retrieving and searching playlists from Xibo CMS
  * 
  * This tool provides functionality to:
@@ -91,33 +237,55 @@ export const getPlaylists = createTool({
       z.string().describe('Include related data as comma-separated values (e.g. "regions,widgets,permissions,tags"). If not specified, these detailed information will not be included in the response.'),
       z.array(z.string()).describe('Include related data as array of values')
     ]).optional(),
-    folderId: z.number().optional().describe('Filter by folder ID')
+    folderId: z.number().optional().describe('Filter by folder ID'),
+    treeView: z.boolean().optional().describe('Set to true to return playlists in tree structure')
   }),
-  outputSchema: z.array(playlistSchema),
+  outputSchema: z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    error: z.string().optional(),
+    data: z.union([
+      z.array(playlistSchema),
+      z.string() // For markdown tree view
+    ]).optional()
+  }),
   execute: async ({ context }) => {
     try {
       // Validate CMS URL configuration
       if (!config.cmsUrl) {
-        throw new Error("CMS URL is not configured");
+        logger.error("getPlaylists: CMS URL is not configured");
+        return { success: false, message: "CMS URL is not configured" };
       }
 
       // Prepare request headers and parameters
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
       
-      // Add filter parameters if provided
-      if (context.playlistId) params.append('playlistId', context.playlistId.toString());
-      if (context.name) params.append('name', context.name);
-      if (context.userId) params.append('userId', context.userId.toString());
-      if (context.tags) params.append('tags', context.tags);
-      if (context.exactTags) params.append('exactTags', context.exactTags.toString());
-      if (context.logicalOperator) params.append('logicalOperator', context.logicalOperator);
-      if (context.ownerUserGroupId) params.append('ownerUserGroupId', context.ownerUserGroupId.toString());
-      if (context.embed) params.append('embed', context.embed.toString());
-      if (context.folderId) params.append('folderId', context.folderId.toString());
-
+      // Add filter parameters if provided, skipping treeView
+      Object.entries(context).forEach(([key, value]) => {
+        if (value !== undefined && key !== 'treeView') {
+          if (key === 'embed' && Array.isArray(value)) {
+            params.append(key, value.join(','));
+          } else {
+            params.append(key, value.toString());
+          }
+        }
+      });
+      
+      // If treeView is enabled, ensure all necessary data is embedded
+      if (context.treeView && !params.has('embed')) {
+        params.append('embed', 'regions,widgets,permissions,tags');
+      }
+      
       // Construct and execute API request
       const url = `${config.cmsUrl}/api/playlist?${params.toString()}`;
+
+      logger.debug("getPlaylists: Request details", {
+        url,
+        method: 'GET',
+        headers,
+        params: params.toString()
+      });
 
       const response = await fetch(url, {
         method: 'GET',
@@ -126,20 +294,46 @@ export const getPlaylists = createTool({
 
       // Handle error responses
       if (!response.ok) {
-        const errorText = await response.text();
-        logger.error('Failed to retrieve playlists', {
-          status: response.status,
-          error: errorText
+        const errorMessage = await decodeErrorMessage(await response.text());
+        logger.error("getPlaylists: API error response", {
+            status: response.status,
+            error: errorMessage
         });
-        return errorText;
+        return {
+          success: false,
+          message: `HTTP error! status: ${response.status}, message: ${errorMessage}`,
+          error: errorMessage
+        };
       }
 
       // Process successful response
       const data = await response.json();
-      return data;
+      
+      // Handle empty response
+      if (Array.isArray(data) && data.length === 0) {
+        return { success: true, data: [] };
+      }
+
+      const parsedData = parseJsonStrings(data);
+
+      if (context.treeView) {
+        logger.info(`Generating tree view for ${parsedData.length} playlists`);
+        const playlistTree = buildPlaylistTree(parsedData);
+        return createTreeViewResponse(parsedData, playlistTree, playlistNodeFormatter);
+      }
+
+      return {
+        success: true,
+        data: parsedData
+      };
     } catch (error) {
-      logger.error('Error in getPlaylists', { error });
-      return error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error in getPlaylists';
+      logger.error('Error in getPlaylists', { error: errorMessage });
+      return {
+        success: false,
+        message: errorMessage,
+        error: errorMessage
+      };
     }
   },
 }); 

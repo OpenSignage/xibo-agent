@@ -450,7 +450,6 @@ function buildUserTree(users: any[]): TreeNode[] {
         name: user.email
       });
     }
-    
     if (user.phone) {
       profileNode.children!.push({
         type: 'phone',
@@ -458,7 +457,6 @@ function buildUserTree(users: any[]): TreeNode[] {
         name: user.phone
       });
     }
-    
     // 参照フィールド
     const refs = [
       { field: 'ref1', value: user.ref1 },
@@ -467,7 +465,6 @@ function buildUserTree(users: any[]): TreeNode[] {
       { field: 'ref4', value: user.ref4 },
       { field: 'ref5', value: user.ref5 }
     ].filter(r => r.value);
-    
     if (refs.length > 0) {
       const refsNode: TreeNode = {
         type: 'refs',
@@ -481,12 +478,10 @@ function buildUserTree(users: any[]): TreeNode[] {
       };
       profileNode.children!.push(refsNode);
     }
-    
     // プロファイルノードに子ノードがある場合のみ追加
     if (profileNode.children!.length > 0) {
       userNode.children!.push(profileNode);
     }
-    
     // グループ情報を子ノードとして追加
     if (user.groups && user.groups.length > 0) {
       const groupsNode: TreeNode = {
@@ -496,25 +491,34 @@ function buildUserTree(users: any[]): TreeNode[] {
         children: user.groups.map((group: any, index: number) => ({
           type: 'group',
           id: 50 + index,
-          name: group.group
+          name: group.group,
+          children: [
+            {
+              type: 'description',
+              id: 500 + index,
+              name: group.description || ''
+            },
+            {
+              type: 'quota',
+              id: 510 + index,
+              name: `Library Quota: ${group.libraryQuota}`
+            }
+          ]
         }))
       };
       userNode.children!.push(groupsNode);
     }
-    
     // 関連アイテム情報を子ノードとして追加
-    const relatedItems: { type: string; items: any[] }[] = [
-      { type: 'campaigns', items: user.campaigns },
-      { type: 'layouts', items: user.layouts },
-      { type: 'media', items: user.media },
-      { type: 'events', items: user.events },
-      { type: 'playlists', items: user.playlists },
-      { type: 'displayGroups', items: user.displayGroups },
-      { type: 'dayParts', items: user.dayParts }
+    const relatedItems: { type: string; items: any[]; label: string; icon: string; detailFields?: string[] }[] = [
+      { type: 'campaigns', items: user.campaigns, label: 'Campaigns', icon: '📢', detailFields: ['campaignId','campaign','type','startDt','endDt','tags'] },
+      { type: 'layouts', items: user.layouts, label: 'Layouts', icon: '📄', detailFields: ['layoutId','layout','description','createdDt','modifiedDt','tags'] },
+      { type: 'media', items: user.media, label: 'Media', icon: '🎞️', detailFields: ['mediaId','name','mediaType','duration','createdDt','modifiedDt','tags'] },
+      { type: 'events', items: user.events, label: 'Events', icon: '📅', detailFields: ['eventId','eventTypeId','fromDt','toDt','campaign','command'] },
+      { type: 'playlists', items: user.playlists, label: 'Playlists', icon: '🎬', detailFields: ['playlistId','name','duration','createdDt','modifiedDt','tags'] },
+      { type: 'displayGroups', items: user.displayGroups, label: 'Display Groups', icon: '🖥️', detailFields: ['displayGroupId','displayGroup','description','createdDt','modifiedDt','tags'] },
+      { type: 'dayParts', items: user.dayParts, label: 'Day Parts', icon: '⏰', detailFields: ['dayPartId','isAlways','isCustom'] }
     ];
-    
     const itemsWithData = relatedItems.filter(item => item.items && item.items.length > 0);
-    
     if (itemsWithData.length > 0) {
       const relatedNode: TreeNode = {
         type: 'related',
@@ -522,32 +526,52 @@ function buildUserTree(users: any[]): TreeNode[] {
         name: 'Related Items',
         children: []
       };
-      
       itemsWithData.forEach((item, categoryIndex) => {
         const categoryNode: TreeNode = {
           type: item.type,
           id: 60 + categoryIndex,
-          name: item.type.charAt(0).toUpperCase() + item.type.slice(1),
+          name: `${item.icon} ${item.label}`,
           children: item.items.map((subItem: any, itemIndex: number) => {
-            // 各アイテムのプロパティはAPIレスポンスによって異なる
-            // ここでは汎用的な表示を使用
-            const itemId = subItem.id || subItem.campaignId || subItem.layoutId || subItem.mediaId || (600 + itemIndex);
-            const itemName = subItem.name || subItem.campaign || subItem.layout || subItem.media || `Item ${itemIndex + 1}`;
-            
+            // 各アイテムのプロパティを詳細に表示
+            const itemId = subItem.id || subItem.campaignId || subItem.layoutId || subItem.mediaId || subItem.eventId || subItem.playlistId || subItem.displayGroupId || subItem.dayPartId || (600 + itemIndex);
+            const itemName = subItem.name || subItem.campaign || subItem.layout || subItem.media || subItem.displayGroup || subItem.eventId || `Item ${itemIndex + 1}`;
+            const children: TreeNode[] = [];
+            if (item.detailFields) {
+              item.detailFields.forEach(field => {
+                if (subItem[field] !== undefined && subItem[field] !== null) {
+                  if (field === 'tags' && Array.isArray(subItem.tags) && subItem.tags.length > 0) {
+                    children.push({
+                      type: 'tags',
+                      id: itemId * 1000 + 1,
+                      name: 'Tags',
+                      children: subItem.tags.map((tag: any, tagIdx: number) => ({
+                        type: 'tag',
+                        id: itemId * 1000 + 10 + tagIdx,
+                        name: tag.tag || `Tag ${tag.tagId}`
+                      }))
+                    });
+                  } else {
+                    children.push({
+                      type: field,
+                      id: itemId * 100 + field.length,
+                      name: `${field}: ${subItem[field]}`
+                    });
+                  }
+                }
+              });
+            }
             return {
-              type: item.type.slice(0, -1), // 複数形から単数形に
+              type: item.type.slice(0, -1),
               id: itemId,
-              name: itemName
+              name: itemName,
+              children: children.length > 0 ? children : undefined
             };
           })
         };
-        
         relatedNode.children!.push(categoryNode);
       });
-      
       userNode.children!.push(relatedNode);
     }
-    
     return userNode;
   });
 }

@@ -215,60 +215,264 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
       name: layout.layout || `Layout ${layout.layoutId}`,
       children: []
     };
+
+    // Add basic information
+    const infoNode: TreeNode = {
+      type: 'info',
+      id: -layout.layoutId,
+      name: 'Information',
+      children: [
+        {
+          type: 'dimensions',
+          id: -layout.layoutId * 10 - 1,
+          name: `Size: ${layout.width}x${layout.height}`
+        },
+        {
+          type: 'status',
+          id: -layout.layoutId * 10 - 2,
+          name: `Status: ${layout.publishedStatus || 'Unknown'}`
+        }
+      ]
+    };
+
+    // Add dates if available
+    if (layout.createdDt) {
+      infoNode.children!.push({
+        type: 'created',
+        id: -layout.layoutId * 10 - 3,
+        name: `Created: ${layout.createdDt}`
+      });
+    }
+    if (layout.modifiedDt) {
+      infoNode.children!.push({
+        type: 'modified',
+        id: -layout.layoutId * 10 - 4,
+        name: `Modified: ${layout.modifiedDt}`
+      });
+    }
+    if (layout.publishedDate) {
+      infoNode.children!.push({
+        type: 'published',
+        id: -layout.layoutId * 10 - 5,
+        name: `Published: ${layout.publishedDate}`
+      });
+    }
+
+    // Add additional properties
+    const propertiesNode: TreeNode = {
+      type: 'properties',
+      id: -layout.layoutId * 100,
+      name: 'Properties',
+      children: [
+        {
+          type: 'owner',
+          id: -layout.layoutId * 100 - 1,
+          name: `Owner ID: ${layout.ownerId}`
+        },
+        {
+          type: 'background',
+          id: -layout.layoutId * 100 - 2,
+          name: `Background: ${layout.backgroundColor || 'None'}`
+        },
+        {
+          type: 'orientation',
+          id: -layout.layoutId * 100 - 3,
+          name: `Orientation: ${layout.orientation || 'Not specified'}`
+        },
+        {
+          type: 'duration',
+          id: -layout.layoutId * 100 - 4,
+          name: `Duration: ${layout.duration}s`
+        }
+      ]
+    };
+
+    layoutNode.children!.push(infoNode, propertiesNode);
     
     // Add regions
     if (layout.regions && Array.isArray(layout.regions)) {
-      layoutNode.children = layout.regions.map((region: any) => {
-        const regionNode: TreeNode = {
-          type: 'region',
-          id: region.regionId,
-          name: region.name || `Region ${region.regionId}`,
-          children: []
-        };
-        
-        // Add playlist
-        if (region.regionPlaylist) {
-          const playlist = region.regionPlaylist;
-          const playlistNode: TreeNode = {
-            type: 'playlist',
-            id: playlist.playlistId,
-            name: playlist.name || `Playlist ${playlist.playlistId}`,
+      const regionsNode: TreeNode = {
+        type: 'regions',
+        id: -layout.layoutId * 1000,
+        name: 'Regions',
+        children: layout.regions.map((region: any) => {
+          const regionNode: TreeNode = {
+            type: 'region',
+            id: region.regionId,
+            name: region.name || `Region ${region.regionId}`,
             children: []
           };
+
+          // Add region properties
+          const regionPropsNode: TreeNode = {
+            type: 'region-props',
+            id: region.regionId * 10,
+            name: 'Properties',
+            children: [
+              {
+                type: 'dimensions',
+                id: region.regionId * 10 + 1,
+                name: `Size: ${region.width}x${region.height}`
+              },
+              {
+                type: 'position',
+                id: region.regionId * 10 + 2,
+                name: `Position: (${region.left},${region.top})`
+              },
+              {
+                type: 'zindex',
+                id: region.regionId * 10 + 3,
+                name: `Z-Index: ${region.zIndex}`
+              }
+            ]
+          };
+
+          // Add region options if available
+          if (region.regionOptions && region.regionOptions.length > 0) {
+            const optionsNode: TreeNode = {
+              type: 'region-options',
+              id: region.regionId * 100,
+              name: 'Options',
+              children: region.regionOptions.map((opt: any, idx: number) => ({
+                type: 'option',
+                id: region.regionId * 100 + idx,
+                name: `${opt.option}: ${opt.value}`
+              }))
+            };
+            regionNode.children!.push(optionsNode);
+          }
+
+          regionNode.children!.push(regionPropsNode);
           
-          // Add widgets
-          if (playlist.widgets && Array.isArray(playlist.widgets)) {
-            playlistNode.children = playlist.widgets.map((widget: any) => {
-              return {
-                type: 'widget',
-                id: widget.widgetId,
-                name: `${widget.type || 'Widget'} (${widget.widgetId})`,
-                duration: widget.duration
+          // Add playlist
+          if (region.regionPlaylist) {
+            const playlist = region.regionPlaylist;
+            const playlistNode: TreeNode = {
+              type: 'playlist',
+              id: playlist.playlistId,
+              name: playlist.name || `Playlist ${playlist.playlistId}`,
+              children: []
+            };
+
+            // Add playlist properties
+            const playlistPropsNode: TreeNode = {
+              type: 'playlist-props',
+              id: playlist.playlistId * 10,
+              name: 'Properties',
+              children: [
+                {
+                  type: 'duration',
+                  id: playlist.playlistId * 10 + 1,
+                  name: `Duration: ${playlist.duration}s`
+                },
+                {
+                  type: 'dynamic',
+                  id: playlist.playlistId * 10 + 2,
+                  name: `Dynamic: ${playlist.isDynamic ? 'Yes' : 'No'}`
+                }
+              ]
+            };
+            playlistNode.children!.push(playlistPropsNode);
+            
+            // Add widgets
+            if (playlist.widgets && Array.isArray(playlist.widgets)) {
+              const widgetsNode: TreeNode = {
+                type: 'widgets',
+                id: playlist.playlistId * 100,
+                name: 'Widgets',
+                children: playlist.widgets.map((widget: any) => {
+                  const widgetNode: TreeNode = {
+                    type: 'widget',
+                    id: widget.widgetId,
+                    name: `${widget.type || 'Widget'} (${widget.widgetId})`,
+                    children: [
+                      {
+                        type: 'widget-props',
+                        id: widget.widgetId * 10,
+                        name: 'Properties',
+                        children: [
+                          {
+                            type: 'duration',
+                            id: widget.widgetId * 10 + 1,
+                            name: `Duration: ${widget.duration}s`
+                          },
+                          {
+                            type: 'order',
+                            id: widget.widgetId * 10 + 2,
+                            name: `Display Order: ${widget.displayOrder}`
+                          }
+                        ]
+                      }
+                    ]
+                  };
+
+                  // Add widget options if available
+                  if (widget.widgetOptions && widget.widgetOptions.length > 0) {
+                    const optionsNode: TreeNode = {
+                      type: 'widget-options',
+                      id: widget.widgetId * 100,
+                      name: 'Options',
+                      children: widget.widgetOptions.map((opt: any, idx: number) => ({
+                        type: 'option',
+                        id: widget.widgetId * 100 + idx,
+                        name: `${opt.option}: ${opt.value}`
+                      }))
+                    };
+                    widgetNode.children!.push(optionsNode);
+                  }
+
+                  // Add media IDs if available
+                  if (widget.mediaIds && widget.mediaIds.length > 0) {
+                    const mediaNode: TreeNode = {
+                      type: 'media',
+                      id: widget.widgetId * 1000,
+                      name: 'Media',
+                      children: widget.mediaIds.map((mediaId: number, idx: number) => ({
+                        type: 'media-id',
+                        id: widget.widgetId * 1000 + idx,
+                        name: `Media ID: ${mediaId}`
+                      }))
+                    };
+                    widgetNode.children!.push(mediaNode);
+                  }
+
+                  return widgetNode;
+                })
               };
-            });
+              playlistNode.children!.push(widgetsNode);
+            }
+            
+            regionNode.children!.push(playlistNode);
           }
           
-          regionNode.children = [playlistNode];
-        }
-        
-        return regionNode;
-      });
+          return regionNode;
+        })
+      };
+      
+      layoutNode.children!.push(regionsNode);
     }
     
     // Add tags
     if (layout.tags && Array.isArray(layout.tags) && layout.tags.length > 0) {
       const tagsNode: TreeNode = {
         type: 'tags',
-        id: 0,
+        id: -layout.layoutId * 10000,
         name: 'Tags',
         children: layout.tags.map((tag: any) => ({
           type: 'tag',
           id: tag.tagId,
-          name: tag.tag || `Tag ${tag.tagId}`
+          name: tag.tag || `Tag ${tag.tagId}`,
+          children: tag.value ? [
+            {
+              type: 'tag-value',
+              id: tag.tagId * 10,
+              name: `Value: ${tag.value}`
+            }
+          ] : undefined
         }))
       };
       
-      layoutNode.children?.push(tagsNode);
+      layoutNode.children!.push(tagsNode);
     }
     
     return layoutNode;
@@ -284,15 +488,51 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
 function layoutNodeFormatter(node: TreeNode): string {
   switch (node.type) {
     case 'layout':
-      return `Layout: ${node.name}`;
+      return `📄 Layout: ${node.name}`;
+    case 'info':
+      return `ℹ️ ${node.name}`;
+    case 'properties':
+      return `⚙️ ${node.name}`;
+    case 'regions':
+      return `🔲 ${node.name}`;
     case 'region':
-      return `Region: ${node.name}`;
+      return `└─ Region: ${node.name}`;
+    case 'region-props':
+    case 'region-options':
+      return `   ${node.name}`;
     case 'playlist':
-      return `Playlist: ${node.name}`;
+      return `🎬 Playlist: ${node.name}`;
+    case 'playlist-props':
+      return `   Properties`;
+    case 'widgets':
+      return `🔧 ${node.name}`;
     case 'widget':
-      return `${node.name}${node.duration ? ` (${node.duration}s)` : ''}`;
+      return `└─ ${node.name}`;
+    case 'widget-props':
+    case 'widget-options':
+    case 'media':
+      return `   ${node.name}`;
+    case 'tags':
+      return `🏷️ ${node.name}`;
+    case 'tag':
+      return `└─ ${node.name}`;
+    case 'dimensions':
+    case 'status':
+    case 'created':
+    case 'modified':
+    case 'published':
+    case 'owner':
+    case 'background':
+    case 'orientation':
+    case 'duration':
+    case 'position':
+    case 'zindex':
+    case 'option':
+    case 'media-id':
+    case 'tag-value':
+      return `└─ ${node.name}`;
     default:
-      return `${node.type}: ${node.name}`;
+      return node.name;
   }
 }
 
@@ -386,6 +626,13 @@ export const getLayouts = createTool({
         }
       });
 
+      // If treeView is enabled, ensure all necessary data is embedded
+      if (context.treeView && !queryParams.has('embed')) {
+        const embedValue = 'regions,playlists,widgets,tags,campaigns,permissions';
+        queryParams.append('embed', embedValue);
+        logger.debug(`Added default embed parameter for treeView: ${embedValue}`);
+      }
+      
       // Build URL
       let url = `${config.cmsUrl}/api/layout`;
       if (queryParams.toString()) {
