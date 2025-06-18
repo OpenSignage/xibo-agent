@@ -96,12 +96,30 @@ function convertFolderToTreeNode(folder: FolderData): TreeNode {
     type: 'folder',
     children: []
   };
-  
+
+  // Add detail nodes
+  const details: TreeNode[] = [
+    { type: 'folder-id', id: folder.id * 10 + 1, name: `ID: ${folder.id}` },
+    { type: 'type', id: folder.id * 10 + 2, name: `Type: ${folder.type ?? 'N/A'}` },
+    { type: 'parent-id', id: folder.id * 10 + 3, name: `Parent ID: ${folder.parentId ?? 'N/A'}` },
+    { type: 'is-root', id: folder.id * 10 + 4, name: `isRoot: ${folder.isRoot ?? 'N/A'}` }
+  ];
+  if (folder.permissionsFolderId !== undefined) {
+    details.push({ type: 'permissions-folder-id', id: folder.id * 10 + 5, name: `Permissions Folder ID: ${folder.permissionsFolderId}` });
+  }
+  if (folder.folderId !== undefined) {
+    details.push({ type: 'folder-id-alt', id: folder.id * 10 + 6, name: `Folder ID (alt): ${folder.folderId}` });
+  }
+  if (folder.folderName !== undefined) {
+    details.push({ type: 'folder-name', id: folder.id * 10 + 7, name: `Folder Name: ${folder.folderName}` });
+  }
+  node.children!.push(...details);
+
   // Process children if they exist
   if (folder.children && folder.children.length > 0) {
-    node.children = folder.children.map(child => convertFolderToTreeNode(child));
+    node.children!.push(...folder.children.map(child => convertFolderToTreeNode(child)));
   }
-  
+
   return node;
 }
 
@@ -120,7 +138,26 @@ function buildFolderTree(folders: FolderData[]): TreeNode[] {
  * Folder node custom formatter
  */
 function folderNodeFormatter(node: TreeNode): string {
-  return node.name;
+  switch (node.type) {
+    case 'folder':
+      return `📁 ${node.name}`;
+    case 'folder-id':
+      return `└─ ${node.name}`;
+    case 'type':
+      return `└─ ${node.name}`;
+    case 'parent-id':
+      return `└─ ${node.name}`;
+    case 'is-root':
+      return `└─ ${node.name}`;
+    case 'permissions-folder-id':
+      return `└─ ${node.name}`;
+    case 'folder-id-alt':
+      return `└─ ${node.name}`;
+    case 'folder-name':
+      return `└─ ${node.name}`;
+    default:
+      return node.name;
+  }
 }
 
 /**
