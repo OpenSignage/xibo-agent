@@ -245,7 +245,7 @@ export const editLayoutBackground = createTool({
       formData.append('backgroundzIndex', context.backgroundzIndex.toString());
       if (context.backgroundImageId) formData.append('backgroundImageId', context.backgroundImageId.toString());
       if (context.resolutionId) formData.append('resolutionId', context.resolutionId.toString());
-
+      console.log(formData.toString())
       // Send PUT request to update layout background
       const response = await fetch(url, {
         method: 'PUT',
