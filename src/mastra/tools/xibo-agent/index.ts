@@ -27,7 +27,7 @@ import { getDisplays } from './display';
 import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
   clearLayout, getLayoutStatus, checkoutLayout, discardLayout,editLayout,
   setLayoutEnableStat,editLayoutBackground,copyLayout,tagLayout,untagLayout,
-  publishLayout,applyLayoutTemplate } from './layout';
+  publishLayout,applyLayoutTemplate,addFullscreenLayout,addRegion } from './layout';
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
 import { getNews, getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles } from './etc';
@@ -93,7 +93,7 @@ export function getTools() {
     getLayouts,addLayout,deleteLayout,retireLayout,unretireLayout,clearLayout,
     getLayoutStatus,checkoutLayout,discardLayout,setLayoutEnableStat,editLayout,
     editLayoutBackground,copyLayout,tagLayout,untagLayout,publishLayout,
-    applyLayoutTemplate,
+    applyLayoutTemplate,addFullscreenLayout,addRegion,
     // Folder
     getFolders,addFolder,editFolder,deleteFolder,
     // Resolution

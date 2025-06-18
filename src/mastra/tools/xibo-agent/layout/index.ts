@@ -36,3 +36,6 @@ export { applyLayoutTemplate } from './applyLayoutTemplate';
 export { setLayoutEnableStat } from './setLayoutEnableStat';
 export { tagLayout } from './tagLayout';
 export { untagLayout } from './untagLayout';
+export { addFullscreenLayout } from './addFullscreenLayout';
+export { addRegion } from './addRegion';
+

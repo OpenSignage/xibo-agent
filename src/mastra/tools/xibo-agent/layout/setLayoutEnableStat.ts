@@ -15,6 +15,7 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
+import { logger } from '../../../index';
 
 /**
  * Tool to enable or disable statistics collection for a layout
@@ -31,49 +32,73 @@ export const setLayoutEnableStat = createTool({
   outputSchema: z.object({
     success: z.boolean(),
     message: z.string(),
-    error: z.string().optional()
+    error: z.string().optional(),
+    data: z.any().optional()
   }),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
-        return {
-          success: false,
-          message: "Failed to update layout statistics setting",
-          error: "CMS URL is not configured"
-        };
+        logger.error("setLayoutEnableStat: CMS URL is not configured");
+        throw new Error("CMS URL is not configured");
       }
+
+      logger.info(`Updating layout statistics setting for layout ${context.layoutId}`, {
+        enableStat: context.enableStat
+      });
 
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/layout/setenablestat/${context.layoutId}`;
 
-      const formData = new FormData();
+      // Prepare form data for statistics setting update
+      const formData = new URLSearchParams();
       formData.append('enableStat', context.enableStat.toString());
 
       const response = await fetch(url, {
         method: 'PUT',
-        headers,
+        headers: {
+          ...headers,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
         body: formData
       });
 
+      // Handle 204 No Content response first
+      if (response.status === 204) {
+        return {
+          success: true,
+          message: "Layout statistics setting updated successfully",
+          data: null
+        };
+      }
+
       if (!response.ok) {
         const responseText = await response.text();
+        logger.error("setLayoutEnableStat: API error response", {
+          status: response.status,
+          responseText
+        });
         const errorMessage = decodeErrorMessage(responseText);
         return {
           success: false,
           message: "Failed to update layout statistics setting",
-          error: `HTTP error! status: ${response.status}, message: ${errorMessage}`
+          error: `HTTP error! status: ${response.status}, message: ${errorMessage}`,
+          data: null
         };
       }
 
+      // For other successful responses, try to parse JSON
+      const data = await response.json();
       return {
         success: true,
-        message: "Layout statistics setting updated successfully"
+        message: "Layout statistics setting updated successfully",
+        data
       };
     } catch (error) {
       return {
         success: false,
         message: "Failed to update layout statistics setting",
-        error: error instanceof Error ? error.message : "Unknown error"
+        error: error instanceof Error ? error.message : "Unknown error",
+        data: null
       };
     }
   },

@@ -102,6 +102,8 @@ inputSchema: z.object({
 ### レスポンスフォーマット
 すべてのレスポンスは以下のフォーマットに従う必要があります：
 - **validatedDataはstringifyしてはいけません。**
+Errorの場合でも、CMSからのresponseデータを、可能な限りreturnして下さい。
+urlEncodeされているデータは、urlDecodeして下さい。
 ```typescript
 // Success response
 {
@@ -199,7 +201,7 @@ releaseDt: new Date(context.releaseDt).toISOString()
 ```typescript
 headers: {
   ...headers,
-  'Content-Type': 'application/json'
+  'Content-Type': 'application/x-www-form-urlencoded'
 }
 ```
 

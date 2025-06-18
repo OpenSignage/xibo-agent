@@ -14,9 +14,7 @@ import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
-
 
 const regionOptionSchema = z.object({
   regionId: z.number(),
@@ -128,106 +126,79 @@ const regionSchema = z.object({
   regionPlaylist: regionPlaylistSchema
 });
 
-const layoutResponseSchema = z.object({
-  layoutId: z.number(),
-  ownerId: z.number(),
-  campaignId: z.number(),
-  parentId: z.number(),
-  publishedStatusId: z.number(),
-  publishedStatus: z.string(),
-  publishedDate: z.string(),
-  backgroundImageId: z.number(),
-  schemaVersion: z.number(),
-  layout: z.string(),
-  description: z.string(),
-  backgroundColor: z.string(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
-  status: z.number(),
-  retired: z.number(),
-  backgroundzIndex: z.number(),
-  width: z.number(),
-  height: z.number(),
-  orientation: z.string(),
-  displayOrder: z.number(),
-  duration: z.number(),
-  statusMessage: z.string(),
-  enableStat: z.number(),
-  autoApplyTransitions: z.number(),
-  code: z.string(),
-  isLocked: z.boolean(),
-  regions: z.array(regionSchema),
-  tags: z.array(tagSchema),
-  folderId: z.number(),
-  permissionsFolderId: z.number()
-});
-
 /**
- * Tool to add a new fullscreen layout
- * Implements the layout endpoint with resolution values for fullscreen display
- * Creates a layout with one full size region covering the entire layout area
+ * Tool to add a new drawer region to a layout
+ * Implements the region/drawer endpoint from Xibo API
+ * Creates a new drawer region for the specified layout
  */
-export const addFullscreenLayout = createTool({
-  id: 'add-fullscreen-layout',
-  description: 'Add a new fullscreen layout with a single region',
+export const addDrawerRegion = createTool({
+  id: 'add-drawer-region',
+  description: 'Add a new drawer region to a layout',
   inputSchema: z.object({
-    id: z.number().describe('The Media or Playlist ID that should be added to this Layout'),
-    type: z.enum(['media', 'playlist']).describe('The type of Layout to be created = media or playlist'),
-    resolutionId: z.number().optional().describe('The Id of the resolution for this Layout, defaults to 1080p for playlist and closest resolution match for Media'),
-    backgroundColor: z.string().default('#000000').describe('A HEX color to use as the background color of this Layout. Default is black #000'),
-    layoutDuration: z.boolean().optional().describe('Use with media type, to specify the duration this Media should play in one loop')
-    //enableStat: z.number().min(0).max(1).default(0).describe('Enable statistics collection (0: disabled, 1: enabled)'),
-    //folderId: z.number().optional().describe('Folder ID to assign the layout to'),
-    //tags: z.array(z.string()).optional().describe('Array of tags to add to the layout')
+    id: z.number().describe('The Layout ID to add the Drawer Region to')
   }),
-  outputSchema: layoutResponseSchema,
+  outputSchema: z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    error: z.string().optional(),
+    data: regionSchema.optional()
+  }),
   execute: async ({ context }) => {
     try {
       if (!config.cmsUrl) {
+        logger.error("addDrawerRegion: CMS URL is not configured");
         throw new Error("CMS URL is not configured");
       }
 
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/fullscreen`;
+      logger.info(`Adding drawer region to layout ${context.id}`);
 
-      // Build form data
-      const formData = new URLSearchParams();
-      formData.append('id', context.id.toString());
-      formData.append('type', context.type);
-      if (context.resolutionId) formData.append('resolutionId', context.resolutionId.toString());
-      formData.append('backgroundColor', context.backgroundColor);
-      if (context.layoutDuration) formData.append('layoutDuration', context.layoutDuration.toString());
-      //formData.append('enableStat', context.enableStat.toString());
-      //if (context.folderId) formData.append('folderId', context.folderId.toString());
-      
-      // Add tags if provided
-      //if (context.tags && context.tags.length > 0) {
-      //  context.tags.forEach(tag => {
-      //    formData.append('tags[]', tag);
-      //  });
-      //}
+      const headers = await getAuthHeaders();
+      const url = `${config.cmsUrl}/api/region/drawer/${context.id}`;
+
+      logger.debug("addDrawerRegion: Request details", {
+        url,
+        method: 'POST',
+        headers
+      });
 
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           ...headers,
           'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: formData
+        }
       });
 
       if (!response.ok) {
         const responseText = await response.text();
-        const errorMessage = decodeErrorMessage(responseText);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
+        const decodedText = decodeURIComponent(responseText);
+        const parsedError = JSON.parse(decodedText);
+        logger.error("addDrawerRegion: API error response", {
+          status: response.status,
+          error: parsedError.error,
+          message: parsedError.message,
+          property: parsedError.property,
+          help: parsedError.help
+        });
+        return {
+          success: false,
+          message: `HTTP error! status: ${response.status}, message: ${parsedError.message}`,
+          error: parsedError
+        };
       }
 
       const data = await response.json();
-      const validatedData = layoutResponseSchema.parse(data);
+      const validatedData = regionSchema.parse(data);
 
-      return validatedData;
+      return {
+        success: true,
+        data: validatedData
+      };
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : "Unknown error");
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Unknown error"
+      };
     }
   },
-}); 
+});
