@@ -84,7 +84,7 @@ export function generateTreeView(
     // Format node display
     let nodeDisplay: string;
     if (nodeFormatter) {
-      // Use custom formatter if provided
+      // Use custom formatter for the node's content
       nodeDisplay = nodeFormatter(node);
     } else {
       // Default display format

@@ -412,11 +412,25 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
                       type: 'widget-options',
                       id: widget.widgetId * 100,
                       name: 'Options',
-                      children: widget.widgetOptions.map((opt: any, idx: number) => ({
-                        type: 'option',
-                        id: widget.widgetId * 100 + idx,
-                        name: `${opt.option}: ${opt.value}`
-                      }))
+                      children: widget.widgetOptions.map((opt: any, idx: number) => {
+                        let valueStr;
+                        if (typeof opt.value === 'object' && opt.value !== null) {
+                          // For objects/arrays, stringify them to avoid '[object Object]'
+                          valueStr = JSON.stringify(opt.value);
+                        } else {
+                          // For other types, convert to string safely
+                          valueStr = String(opt.value ?? '');
+                        }
+
+                        // Replace newline characters with a space to prevent breaking the tree view
+                        const finalValue = valueStr.replace(/\n/g, ' ');
+
+                        return {
+                          type: 'option',
+                          id: widget.widgetId * 100 + idx,
+                          name: `${opt.option}: ${finalValue}`
+                        };
+                      })
                     };
                     widgetNode.children!.push(optionsNode);
                   }
@@ -482,8 +496,8 @@ function buildLayoutTree(layouts: any[]): TreeNode[] {
 /**
  * Custom formatter for layout nodes
  * 
- * @param node Tree node
- * @returns Formatted display string
+ * @param node Tree node to format
+ * @returns Formatted node string
  */
 function layoutNodeFormatter(node: TreeNode): string {
   switch (node.type) {
@@ -491,46 +505,30 @@ function layoutNodeFormatter(node: TreeNode): string {
       return `📄 Layout: ${node.name}`;
     case 'info':
       return `ℹ️ ${node.name}`;
-    case 'properties':
-      return `⚙️ ${node.name}`;
     case 'regions':
-      return `🔲 ${node.name}`;
+      return `🖼️ ${node.name}`;
     case 'region':
-      return `└─ Region: ${node.name}`;
-    case 'region-props':
-    case 'region-options':
-      return `   ${node.name}`;
+      return `${node.name}`;
     case 'playlist':
-      return `🎬 Playlist: ${node.name}`;
-    case 'playlist-props':
-      return `   Properties`;
+      return `📋 ${node.name}`;
     case 'widgets':
       return `🔧 ${node.name}`;
     case 'widget':
-      return `└─ ${node.name}`;
-    case 'widget-props':
-    case 'widget-options':
-    case 'media':
-      return `   ${node.name}`;
+      return `${node.name}`;
     case 'tags':
       return `🏷️ ${node.name}`;
     case 'tag':
-      return `└─ ${node.name}`;
+      return `${node.name}`;
+    case 'permissions':
+      return `🔒 ${node.name}`;
+    case 'permission':
+      return `${node.name}`;
     case 'dimensions':
     case 'status':
     case 'created':
     case 'modified':
-    case 'published':
-    case 'owner':
-    case 'background':
-    case 'orientation':
-    case 'duration':
-    case 'position':
-    case 'zindex':
-    case 'option':
-    case 'media-id':
-    case 'tag-value':
-      return `└─ ${node.name}`;
+    case 'widget-info':
+      return node.name;
     default:
       return node.name;
   }

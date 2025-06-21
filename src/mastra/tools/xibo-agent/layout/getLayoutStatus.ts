@@ -296,19 +296,19 @@ function buildLayoutTree(layout: any): TreeNode[] {
 function layoutNodeFormatter(node: TreeNode): string {
   switch (node.type) {
     case 'layout':
-      return `Layout: ${node.name} (ID: ${node.id})`;
+      return `📄 Layout: ${node.name}`;
     case 'region':
-      return `Region: ${node.name}`;
+      return `🖼️ Region: ${node.name}`;
     case 'playlist':
-      return `Playlist: ${node.name}`;
+      return `📋 Playlist: ${node.name}`;
     case 'widget':
-      return `Widget: ${node.name}${node.duration ? ` (${node.duration}s)` : ''}`;
-    case 'folder':
-      return `Folder: ${node.name}`;
-    case 'drawer':
-      return `Drawer: ${node.name}`;
+      return `🔧 Widget: ${node.name}`;
+    case 'media':
+      return `🖼️ Media: ${node.name}`;
+    case 'tag':
+      return `🏷️ Tag: ${node.name}`;
     default:
-      return `${node.type}: ${node.name}`;
+      return node.name;
   }
 }
 

@@ -577,26 +577,27 @@ function buildUserTree(users: any[]): TreeNode[] {
 }
 
 /**
- * ユーザーノードのカスタム表示フォーマッタ
+ * Formats a user tree node for display.
+ * @param node The tree node to format.
+ * @returns A formatted string representation of the node.
  */
 function userNodeFormatter(node: TreeNode): string {
   switch (node.type) {
     case 'user':
-      return `User: ${node.name}`;
-    case 'profile':
+      return `👤 ${node.name}`;
+    case 'info':
+      return `ℹ️ ${node.name}`;
     case 'groups':
-    case 'related':
-      return node.name;
+      return `👥 ${node.name}`;
     case 'group':
-      return `Group: ${node.name}`;
-    case 'email':
-      return `Email: ${node.name}`;
-    case 'phone':
-      return `Phone: ${node.name}`;
-    case 'name':
-      return `Name: ${node.name}`;
+      return node.name;
+    case 'homepage':
+    case 'user-id':
+    case 'user-type':
+    case 'retired':
+      return node.name;
     default:
-      return `${node.name}`;
+      return node.name;
   }
 }
 

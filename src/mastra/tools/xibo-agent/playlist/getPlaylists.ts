@@ -11,11 +11,9 @@
  */
 
 /**
- * Xibo CMS Playlist Management Tool
- * 
- * This module provides functionality to retrieve and search playlists from the Xibo CMS system.
- * It implements the playlist API endpoint and handles the necessary validation
- * and data transformation for playlist operations.
+ * @module get-playlists
+ * @description This module provides functionality to retrieve and search playlists from the Xibo CMS system.
+ * It implements the GET /api/playlist endpoint.
  */
 
 import { z } from "zod";
@@ -24,50 +22,67 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
 import { parseJsonStrings } from '../utility/jsonParser';
-import { TreeNode, createTreeViewResponse } from '../utility/treeView';
-import { decodeErrorMessage } from "../utility/error";
+import { TreeNode, treeResponseSchema, createTreeViewResponse } from '../utility/treeView';
 
-/**
- * Schema for playlist data validation
- * Defines the structure and validation rules for playlist data in the Xibo CMS system
- */
+// Schema for tags
+const tagSchema = z.object({
+  tag: z.string().nullable(),
+  tagId: z.number(),
+  value: z.string().nullable(),
+});
+
+// Schema for widgets
+const widgetSchema = z.object({
+  widgetId: z.number(),
+  playlistId: z.number(),
+  ownerId: z.number(),
+  type: z.string().nullable(),
+  duration: z.number(),
+  displayOrder: z.number(),
+  useDuration: z.number(),
+  calculatedDuration: z.number(),
+  createdDt: z.number().nullable(),
+  modifiedDt: z.number().nullable(),
+  fromDt: z.number().nullable(),
+  toDt: z.number().nullable(),
+  schemaVersion: z.number(),
+  transitionIn: z.string().nullable(),
+  transitionOut: z.string().nullable(),
+  transitionDurationIn: z.number().nullable(),
+  transitionDurationOut: z.number().nullable(),
+  widgetOptions: z.array(z.any()), // Can be more specific if needed
+  mediaIds: z.array(z.number()),
+  audio: z.array(z.any()), // Can be more specific if needed
+  permissions: z.array(z.any()), // Can be more specific if needed
+  playlist: z.string().nullable(),
+});
+
+// Main schema for a playlist
 const playlistSchema = z.object({
   playlistId: z.number(),
   ownerId: z.number(),
   name: z.string(),
-  regionId: z.number().optional(),
+  regionId: z.number().nullable(),
   isDynamic: z.number(),
-  filterMediaName: z.string().optional(),
-  filterMediaNameLogicalOperator: z.string().optional(),
-  filterMediaTags: z.string().optional(),
-  filterExactTags: z.number().optional(),
-  filterMediaTagsLogicalOperator: z.string().optional(),
-  filterFolderId: z.number().optional(),
-  maxNumberOfItems: z.number().optional(),
+  filterMediaName: z.string().nullable(),
+  filterMediaNameLogicalOperator: z.string().nullable(),
+  filterMediaTags: z.string().nullable(),
+  filterExactTags: z.number().nullable(),
+  filterMediaTagsLogicalOperator: z.string().nullable(),
+  filterFolderId: z.number().nullable(),
+  maxNumberOfItems: z.number().nullable(),
   createdDt: z.string(),
   modifiedDt: z.string(),
-  duration: z.number().optional(),
-  requiresDurationUpdate: z.number().optional(),
-  enableStat: z.string().optional(),
-  tags: z.array(z.object({
-    tagId: z.number(),
-    tag: z.string()
-  })).optional(),
-  widgets: z.array(z.object({
-    widgetId: z.number(),
-    type: z.string(),
-    duration: z.number().optional(),
-    useDuration: z.number().optional(),
-    displayOrder: z.number().optional()
-  })).optional(),
-  permissions: z.array(z.object({
-    groupId: z.number(),
-    view: z.number(),
-    edit: z.number(),
-    delete: z.number()
-  })).optional(),
-  folderId: z.number().optional(),
-  permissionsFolderId: z.number().optional()
+  duration: z.number(),
+  requiresDurationUpdate: z.number(),
+  enableStat: z.string().nullable(),
+  tags: z.array(tagSchema),
+  widgets: z.array(widgetSchema),
+  permissions: z.array(z.any()), // Can be more specific if needed
+  folderId: z.number().nullable(),
+  permissionsFolderId: z.number().nullable(),
+  // Handling cases where statusMessage can be a string or an array
+  statusMessage: z.union([z.string(), z.array(z.any())]).nullable().optional(),
 });
 
 /**
@@ -191,23 +206,20 @@ function playlistNodeFormatter(node: TreeNode): string {
       return `ℹ️ ${node.name}`;
     case 'widgets':
       return `🔧 ${node.name}`;
-    case 'widget':
-      return `└─ ${node.name}`;
-    case 'widget-info':
-      return `   ${node.name}`;
     case 'tags':
       return `🏷️ ${node.name}`;
-    case 'tag':
-      return `└─ ${node.name}`;
     case 'permissions':
       return `🔒 ${node.name}`;
+    case 'widget':
+    case 'tag':
     case 'permission':
-      return `└─ ${node.name}`;
     case 'duration':
     case 'owner':
     case 'created':
     case 'modified':
-      return `└─ ${node.name}`;
+      return node.name;
+    case 'widget-info':
+      return node.name;
     default:
       return node.name;
   }
@@ -226,114 +238,115 @@ export const getPlaylists = createTool({
   id: 'get-playlists',
   description: 'Search and retrieve playlists from Xibo CMS',
   inputSchema: z.object({
-    playlistId: z.number().optional().describe('Filter by playlist ID'),
-    name: z.string().optional().describe('Filter by playlist name (partial match)'),
-    userId: z.number().optional().describe('Filter by user ID'),
-    tags: z.string().optional().describe('Filter by tags'),
-    exactTags: z.number().optional().describe('Exact tag match flag'),
-    logicalOperator: z.string().optional().describe('Logical operator for multiple tags (AND|OR)'),
-    ownerUserGroupId: z.number().optional().describe('Filter by user group ID'),
+    playlistId: z.number().optional().describe('Filter by playlist ID.'),
+    name: z.string().optional().describe('Filter by playlist name (partial match).'),
+    userId: z.number().optional().describe('Filter by user ID.'),
+    tags: z.string().optional().describe('Filter by a comma-separated list of tags.'),
+    exactTags: z.number().optional().describe('Set to 1 for an exact tag match.'),
+    logicalOperator: z.enum(['AND', 'OR']).optional().describe('Logical operator for tag filtering (AND/OR).'),
+    ownerUserGroupId: z.number().optional().describe('Filter by user group ID.'),
     embed: z.union([
-      z.string().describe('Include related data as comma-separated values (e.g. "regions,widgets,permissions,tags"). If not specified, these detailed information will not be included in the response.'),
-      z.array(z.string()).describe('Include related data as array of values')
+      z.string().describe('Include related data as comma-separated values (e.g., "widgets,permissions,tags").'),
+      z.array(z.string()).describe('Include related data as an array of values.')
     ]).optional(),
-    folderId: z.number().optional().describe('Filter by folder ID'),
-    treeView: z.boolean().optional().describe('Set to true to return playlists in tree structure')
+    folderId: z.number().optional().describe('Filter by folder ID.'),
+    treeView: z.boolean().optional().describe('Set to true to return playlists in a tree structure.')
   }),
   outputSchema: z.object({
     success: z.boolean(),
+    data: z.union([z.array(playlistSchema), treeResponseSchema]).optional(),
     message: z.string().optional(),
-    error: z.string().optional(),
-    data: z.union([
-      z.array(playlistSchema),
-      z.string() // For markdown tree view
-    ]).optional()
+    errorData: z.any().optional(),
   }),
   execute: async ({ context }) => {
     try {
-      // Validate CMS URL configuration
+      const logContext = { ...context };
+      logger.info(`Retrieving playlists with filters`, logContext);
+      
       if (!config.cmsUrl) {
         logger.error("getPlaylists: CMS URL is not configured");
         return { success: false, message: "CMS URL is not configured" };
       }
 
-      // Prepare request headers and parameters
       const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
       
-      // Add filter parameters if provided, skipping treeView
+      const queryParams = new URLSearchParams();
       Object.entries(context).forEach(([key, value]) => {
-        if (value !== undefined && key !== 'treeView') {
-          if (key === 'embed' && Array.isArray(value)) {
-            params.append(key, value.join(','));
-          } else {
-            params.append(key, value.toString());
+        if (value !== undefined) {
+          if (key === 'treeView') return;
+          
+          const embedValue = Array.isArray(value) ? value.join(',') : String(value);
+          queryParams.append(key, embedValue);
+          if (key === 'embed') {
+            logger.debug(`Using embed parameter: ${embedValue}`);
           }
         }
       });
-      
-      // If treeView is enabled, ensure all necessary data is embedded
-      if (context.treeView && !params.has('embed')) {
-        params.append('embed', 'regions,widgets,permissions,tags');
+
+      if (context.treeView && !queryParams.has('embed')) {
+        const embedValue = 'widgets,tags,permissions';
+        queryParams.append('embed', embedValue);
+        logger.debug(`Added default embed parameter for treeView: ${embedValue}`);
       }
       
-      // Construct and execute API request
-      const url = `${config.cmsUrl}/api/playlist?${params.toString()}`;
-
-      logger.debug("getPlaylists: Request details", {
-        url,
-        method: 'GET',
-        headers,
-        params: params.toString()
-      });
-
-      const response = await fetch(url, {
-        method: 'GET',
-        headers
-      });
-
-      // Handle error responses
+      let url = `${config.cmsUrl}/api/playlist`;
+      if (queryParams.toString()) {
+        url = `${url}?${queryParams.toString()}`;
+      }
+      
+      logger.debug(`Requesting playlists from: ${url}`);
+      
+      const response = await fetch(url, { headers });
+      
       if (!response.ok) {
-        const errorMessage = await decodeErrorMessage(await response.text());
-        logger.error("getPlaylists: API error response", {
-            status: response.status,
-            error: errorMessage
-        });
-        return {
-          success: false,
-          message: `HTTP error! status: ${response.status}, message: ${errorMessage}`,
-          error: errorMessage
-        };
+        const responseText = await response.text();
+        let parsedError: any;
+        try {
+            parsedError = JSON.parse(responseText);
+        } catch (e) {
+            parsedError = responseText;
+        }
+        logger.error("getPlaylists: API error response", { status: response.status, error: parsedError });
+        return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
-      // Process successful response
       const data = await response.json();
       
-      // Handle empty response
       if (Array.isArray(data) && data.length === 0) {
         return { success: true, data: [] };
       }
 
       const parsedData = parseJsonStrings(data);
-
+      
       if (context.treeView) {
-        logger.info(`Generating tree view for ${parsedData.length} playlists`);
         const playlistTree = buildPlaylistTree(parsedData);
-        return createTreeViewResponse(parsedData, playlistTree, playlistNodeFormatter);
+        const treeViewData = createTreeViewResponse(parsedData, playlistTree, playlistNodeFormatter);
+        return { success: true, data: treeViewData };
       }
-
-      return {
-        success: true,
-        data: parsedData
-      };
+      
+      try {
+        const validatedData = z.array(playlistSchema).parse(parsedData);
+        return { success: true, data: validatedData };
+      } catch (validationError) {
+        logger.warn(`Playlist data validation failed`, {
+          error: validationError,
+          dataSize: Array.isArray(parsedData) ? parsedData.length : 'unknown',
+          dataPreview: Array.isArray(parsedData) && parsedData.length > 0 ? { playlistId: parsedData[0].playlistId } : 'No data'
+        });
+        return {
+          success: false,
+          message: "Playlist data validation failed",
+          errorData: validationError instanceof Error ? validationError.message : String(validationError)
+        };
+      }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error in getPlaylists';
-      logger.error('Error in getPlaylists', { error: errorMessage });
-      return {
-        success: false,
-        message: errorMessage,
-        error: errorMessage
-      };
+      if (error instanceof z.ZodError) {
+        logger.error("getPlaylists: Input validation error", { error: error.issues });
+        return { success: false, message: "Input validation error occurred", errorData: error.issues };
+      }
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error(`Error in getPlaylists: ${errorMessage}`, { error });
+      return { success: false, message: errorMessage };
     }
   },
 }); 

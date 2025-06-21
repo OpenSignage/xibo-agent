@@ -142,19 +142,13 @@ function folderNodeFormatter(node: TreeNode): string {
     case 'folder':
       return `📁 ${node.name}`;
     case 'folder-id':
-      return `└─ ${node.name}`;
     case 'type':
-      return `└─ ${node.name}`;
     case 'parent-id':
-      return `└─ ${node.name}`;
     case 'is-root':
-      return `└─ ${node.name}`;
     case 'permissions-folder-id':
-      return `└─ ${node.name}`;
     case 'folder-id-alt':
-      return `└─ ${node.name}`;
     case 'folder-name':
-      return `└─ ${node.name}`;
+      return node.name;
     default:
       return node.name;
   }
