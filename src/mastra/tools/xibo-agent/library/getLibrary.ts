@@ -23,6 +23,55 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { decodeErrorMessage } from "../utility/error";
+
+// Schema for a single media item in the library, based on actual API response
+const mediaSchema = z.object({
+  mediaId: z.number(),
+  ownerId: z.number(),
+  parentId: z.number().nullable(),
+  name: z.string(),
+  mediaType: z.string(),
+  storedAs: z.string(),
+  fileName: z.string(),
+  tags: z.array(
+    z.object({
+      tag: z.string(),
+      tagId: z.number(),
+      value: z.string().nullable(),
+    })
+  ).optional(),
+  fileSize: z.number(),
+  duration: z.number(),
+  valid: z.number(),
+  moduleSystemFile: z.number(),
+  expires: z.number(),
+  retired: z.number(),
+  isEdited: z.number(),
+  md5: z.string().nullable(),
+  owner: z.string(),
+  groupsWithPermissions: z.string().nullable(),
+  released: z.number(),
+  apiRef: z.string().nullable(),
+  createdDt: z.string(),
+  modifiedDt: z.string(),
+  enableStat: z.string().nullable(),
+  orientation: z.string().nullable(),
+  width: z.number(),
+  height: z.number(),
+  folderId: z.number(),
+  permissionsFolderId: z.number(),
+  
+  // Add new fields from the actual response data
+  thumbnail: z.string().nullable().optional(),
+  fileSizeFormatted: z.string().nullable().optional(),
+  isSaveRequired: z.any().nullable().optional(),
+  isRemote: z.any().nullable().optional(),
+  cloned: z.boolean().nullable().optional(),
+  newExpiry: z.any().nullable().optional(),
+  alwaysCopy: z.boolean().nullable().optional(),
+  revised: z.number().nullable().optional(),
+}).passthrough(); // Allow other fields not explicitly defined
 
 /**
  * Tool for searching and retrieving media from Xibo CMS library
@@ -44,45 +93,94 @@ export const getLibrary = createTool({
     tags: z.string().optional().describe("Filter by tags"),
     folderId: z.number().optional().describe("Filter by folder ID"),
   }),
-  outputSchema: z.any(),
+  outputSchema: z.object({
+    success: z.boolean(),
+    data: z.array(mediaSchema).optional(),
+    message: z.string().optional(),
+    error: z.string().optional(),
+    errorData: z.any().optional(),
+  }),
   execute: async ({ context }) => {
+    const logContext = { ...context };
+    logger.info("Attempting to retrieve library media", logContext);
+
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      logger.error("CMS URL is not configured.", logContext);
+      return { success: false, error: "CMS URL is not configured." };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/library`);
-    if (context.mediaId) url.searchParams.append("mediaId", context.mediaId.toString());
-    if (context.media) url.searchParams.append("media", context.media);
-    if (context.type) url.searchParams.append("type", context.type);
-    if (context.ownerId) url.searchParams.append("ownerId", context.ownerId.toString());
-    if (context.retired) url.searchParams.append("retired", context.retired.toString());
-    if (context.tags) url.searchParams.append("tags", context.tags);
-    if (context.folderId) url.searchParams.append("folderId", context.folderId.toString());
+    try {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
 
-    logger.debug(`Requesting library data from: ${url.toString()}`);
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: await getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error('Failed to retrieve library data:', {
-        status: response.status,
-        error: errorText
+      Object.entries(context).forEach(([key, value]) => {
+        if (value !== undefined) {
+          params.append(key, String(value));
+        }
       });
-      try {
-        return JSON.parse(errorText);
-      } catch {
-        return {
-          success: false,
-          error: errorText
+      
+      const url = new URL(`${config.cmsUrl}/api/library`);
+      url.search = params.toString();
+
+      logger.debug(`Requesting library data from: ${url.toString()}`, logContext);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        const errorData = decodeErrorMessage(errorText);
+        logger.error('Failed to retrieve library data from CMS API.', {
+          ...logContext,
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+        });
+        return { 
+          success: false, 
+          message: `API request failed with status ${response.status}.`,
+          error: "Failed to fetch library media.", 
+          errorData 
         };
       }
-    }
 
-    const data = await response.json();
-    return data;
+      const data = await response.json();
+      
+      // Handle cases where the API returns an empty array for "not found"
+      if (Array.isArray(data) && data.length === 0) {
+        logger.info("No media found matching the criteria.", logContext);
+        return { success: true, data: [] };
+      }
+
+      // Validate the received data against our schema
+      const validationResult = z.array(mediaSchema).safeParse(data);
+
+      if (!validationResult.success) {
+        logger.warn("API response validation failed for getLibrary.", {
+          ...logContext,
+          error: validationResult.error.flatten(),
+          rawData: data,
+        });
+        return { 
+          success: false, 
+          error: "Response validation failed.", 
+          errorData: validationResult.error.issues 
+        };
+      }
+      
+      logger.info("Successfully retrieved and validated library media.", logContext);
+      return { success: true, data: validationResult.data };
+
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      logger.error("An unexpected error occurred in getLibrary.", {
+        ...logContext,
+        error: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      return { success: false, error: "An unexpected error occurred.", message: errorMessage };
+    }
   },
 }); 
