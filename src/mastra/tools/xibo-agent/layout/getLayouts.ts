@@ -55,7 +55,7 @@ const layoutResponseSchema = z.array(z.object({
   orientation: z.string().nullable(),
   displayOrder: z.union([z.number(), z.string().transform(Number)]).nullable(),
   duration: z.union([z.number(), z.string().transform(Number)]),
-  statusMessage: z.string().nullable(),
+  statusMessage: z.union([z.string(), z.array(z.any())]).nullable(),
   enableStat: z.union([z.number(), z.string().transform(Number)]),
   autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
   code: z.string().nullable(),
