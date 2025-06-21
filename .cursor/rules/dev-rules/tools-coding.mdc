@@ -101,21 +101,23 @@ inputSchema: z.object({
 
 ### レスポンスフォーマット
 すべてのレスポンスは以下のフォーマットに従う必要があります：
-- **validatedDataはstringifyしてはいけません。**
-Errorの場合でも、CMSからのresponseデータを、可能な限りreturnして下さい。
-urlEncodeされているデータは、urlDecodeして下さい。
+- **`validatedData`はシリアライズせず、JSONオブジェクトとして返却してください。**
+- **エラーの場合でも、CMSからのレスポンスデータは可能な限り`errorData`に含めて返却してください。**
+- **URLエンコードされたデータは、デコードしてから返却してください。**
+
 ```typescript
 // Success response
 {
   success: true,
-  data: validatedData
+  data: validatedData // JSON object
 }
 
 // Error response
 {
   success: false,
-  message: "Error message",
-  error?: errorDetails  // Optional detailed error information
+  message: "Error message", // A simple, readable error message
+  error?: errorDetails,  // Optional detailed error information (e.g., from Zod)
+  errorData?: any // Raw response data from CMS
 }
 ```
 
@@ -124,7 +126,8 @@ urlEncodeされているデータは、urlDecodeして下さい。
 ```typescript
 {
   success: false,
-  message: `HTTP error! status: ${status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`
+  message: `HTTP error! status: ${status}`,
+  errorData: parsedErrorData // Parsed JSON or raw text from response
 }
 ```
 
@@ -133,7 +136,8 @@ urlEncodeされているデータは、urlDecodeして下さい。
 {
   success: false,
   message: "Validation error occurred",
-  error: errorDetails  // Parsed validation error details
+  error: errorDetails,  // Parsed validation error details from Zod
+  errorData: rawResponseData // Raw response data that failed validation
 }
 ```
 
@@ -141,7 +145,8 @@ urlEncodeされているデータは、urlDecodeして下さい。
 ```typescript
 {
   success: false,
-  message: error instanceof Error ? error.message : "Unknown error"
+  message: error instanceof Error ? error.message : "Unknown error",
+  error: errorDetails
 }
 ```
 

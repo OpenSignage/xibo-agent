@@ -1,6 +1,6 @@
 export { getPlaylists } from './getPlaylists';
-export { postPlaylist } from './postPlaylist';
-export { putPlaylist } from './putPlaylist';
+export { addPlaylist } from './addPlaylist';
+export { editPlaylist } from './editPlaylist';
 export { deletePlaylist } from './deletePlaylist';
 export { copyPlaylist } from './copyPlaylist';
 export { assignLibraryItems } from './assignLibraryItems';

@@ -38,4 +38,14 @@ export { tagLayout } from './tagLayout';
 export { untagLayout } from './untagLayout';
 export { addFullscreenLayout } from './addFullscreenLayout';
 export { addRegion } from './addRegion';
+export { editRegion } from './editRegion';
+export { deleteRegion } from './deleteRegion';
+export { addDrawerRegion } from './addDrawerRegion';
+export { saveDrawerRegion } from './saveDrawerRegion';
+export { positionAllRegions } from './positionAllRegions';
+
+
+
+
+
 

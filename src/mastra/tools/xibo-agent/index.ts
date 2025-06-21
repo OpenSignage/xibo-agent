@@ -27,13 +27,14 @@ import { getDisplays } from './display';
 import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
   clearLayout, getLayoutStatus, checkoutLayout, discardLayout,editLayout,
   setLayoutEnableStat,editLayoutBackground,copyLayout,tagLayout,untagLayout,
-  publishLayout,applyLayoutTemplate,addFullscreenLayout,addRegion } from './layout';
+  publishLayout,applyLayoutTemplate,addFullscreenLayout,addRegion,editRegion,
+  addDrawerRegion,saveDrawerRegion,deleteRegion,positionAllRegions } from './layout';
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
 import { getNews, getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles } from './etc';
 import { getFonts, getFontDetails, uploadFont } from './font';
 import { getUserGroups, addUserGroup } from './usergroup';
-import { getPlaylists } from './playlist';
+import { getPlaylists, addPlaylist, editPlaylist } from './playlist';
 import { getStats } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
@@ -41,6 +42,8 @@ import { generateImage, updateImage, getImageHistory } from './generation';
 import { getNotifications, deleteNotification, postNotification, putNotification } from './notification';
 import { getDisplayGroups } from './displayGroup';
 import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } from './template';
+import { getLogs } from './log';
+import { getTransition } from './transition';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -70,6 +73,8 @@ export * from './tags';         // Tags management
 export * from './dayPart';      // Day part management
 export * from './statistics';   // Statistics management
 export * from './generation';   // Image generation
+export * from './log';          // Log management
+export * from './transition';   // Transition management
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -83,6 +88,10 @@ export function getTools() {
   return {
     // Misc
     getCmsTime,getAbout,
+    // Log
+    getLogs,
+    // Transition
+    getTransition,
     // User
     getUser,getUserMe,addUser,deleteUser,editUser,
     // Module 
@@ -93,7 +102,8 @@ export function getTools() {
     getLayouts,addLayout,deleteLayout,retireLayout,unretireLayout,clearLayout,
     getLayoutStatus,checkoutLayout,discardLayout,setLayoutEnableStat,editLayout,
     editLayoutBackground,copyLayout,tagLayout,untagLayout,publishLayout,
-    applyLayoutTemplate,addFullscreenLayout,addRegion,
+    applyLayoutTemplate,addFullscreenLayout,addRegion,editRegion,addDrawerRegion,
+    saveDrawerRegion,deleteRegion,positionAllRegions,
     // Folder
     getFolders,addFolder,editFolder,deleteFolder,
     // Resolution
@@ -105,7 +115,7 @@ export function getTools() {
     // User group
     getUserGroups,addUserGroup,
     // Playlist
-    getPlaylists,
+    getPlaylists,addPlaylist,editPlaylist,
     // Statistics
     getStats,
     // Tags
