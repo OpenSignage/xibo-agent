@@ -26,22 +26,29 @@ import { logger } from '../../../index';
 import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for resolution data returned from the API
+ * Schema for a single resolution object.
  */
 const resolutionSchema = z.object({
   resolutionId: z.number(),
   resolution: z.string(),
   width: z.number(),
   height: z.number(),
-  enabled: z.number().optional(),
-});
+  designerWidth: z.number(),
+  designerHeight: z.number(),
+  version: z.number(),
+  enabled: z.number(),
+  userId: z.number(),
+}).passthrough();
 
 /**
- * Schema for API response after creating a resolution
+ * Schema for the tool's output, covering both success and failure cases.
  */
-const apiResponseSchema = z.object({
+const outputSchema = z.object({
   success: z.boolean(),
-  data: resolutionSchema,
+  data: resolutionSchema.optional(),
+  message: z.string().optional(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
 });
 
 export const addResolution = createTool({
@@ -52,84 +59,91 @@ export const addResolution = createTool({
     width: z.number().describe('Width in pixels'),
     height: z.number().describe('Height in pixels'),
   }),
-  outputSchema: apiResponseSchema,
+  outputSchema,
   execute: async ({ context }) => {
+    const logContext = { ...context };
+    logger.info("Attempting to add a new resolution.", logContext);
+
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not configured");
+      logger.error("CMS URL is not configured.", logContext);
+      return { success: false, message: "CMS URL is not configured." };
     }
 
     try {
       const url = new URL(`${config.cmsUrl}/api/resolution`);
-      logger.info(`Creating resolution: ${context.resolution} (${context.width}x${context.height})`);
+      logger.debug(`Requesting to add resolution at: ${url.toString()}`, logContext);
 
       const formData = new URLSearchParams();
       formData.append("resolution", context.resolution);
       formData.append("width", context.width.toString());
       formData.append("height", context.height.toString());
 
-      // Get authentication headers
       const headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/x-www-form-urlencoded';
 
       const response = await fetch(url.toString(), {
         method: "POST",
-        headers: headers,
+        headers,
         body: formData.toString(),
       });
 
-      // Get the complete response text
-      let responseText = await response.text();
+      const responseText = await response.text();
       
       if (!response.ok) {
-        // Decode the error message for better readability
-        const decodedText = decodeErrorMessage(responseText);
-        let errorMessage;
-        try {
-          const errorObj = JSON.parse(decodedText);
-          errorMessage = errorObj.message || decodedText;
-        } catch {
-          errorMessage = decodedText;
-        }
-        
-        logger.error(`Failed to create resolution: ${errorMessage}`, { 
+        const errorData = decodeErrorMessage(responseText);
+        logger.error("Failed to add resolution via CMS API.", {
+          ...logContext,
           status: response.status,
-          url: url.toString(),
-          resolution: context.resolution
+          errorData,
         });
-        throw new Error(errorMessage);
-      }
-
-      // Parse the response data
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (error) {
-        logger.error(`Failed to parse response as JSON: ${responseText}`);
-        throw new Error(`Invalid JSON response from server: ${error instanceof Error ? error.message : "Unknown error"}`);
-      }
-      
-      // Validate the response data against schema
-      try {
-        const validatedData = apiResponseSchema.parse({
-          success: true,
-          data: data
-        });
-        logger.info(`Resolution created successfully: ${context.resolution}`);
-        return validatedData;
-      } catch (validationError) {
-        logger.warn(`Response validation failed: ${validationError instanceof Error ? validationError.message : "Unknown error"}`, { 
-          responseData: data 
-        });
-        
-        // Return with basic validation even if full schema validation fails
         return {
-          success: true,
-          data: data
+          success: false,
+          message: `API request failed with status ${response.status}.`,
+          errorData,
         };
       }
-    } catch (error) {
-      logger.error(`addResolution: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      throw error;
+      
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        logger.error("Failed to parse JSON response from CMS API.", {
+          ...logContext,
+          responseText,
+        });
+        return {
+          success: false,
+          message: "Invalid JSON response from server.",
+          errorData: responseText,
+        };
+      }
+      
+      const validationResult = resolutionSchema.safeParse(responseData);
+
+      if (!validationResult.success) {
+        logger.warn("API response validation failed for addResolution.", {
+          ...logContext,
+          error: validationResult.error.flatten(),
+          responseData,
+        });
+        return {
+          success: false,
+          message: "Response validation failed.",
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
+      }
+
+      logger.info(`Successfully added resolution "${validationResult.data.resolution}".`, logContext);
+      return { success: true, data: validationResult.data };
+
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      logger.error("An unexpected error occurred in addResolution.", {
+        ...logContext,
+        error: errorMessage,
+      });
+      return { success: false, message: "An unexpected error occurred.", error: errorMessage };
     }
   },
 });

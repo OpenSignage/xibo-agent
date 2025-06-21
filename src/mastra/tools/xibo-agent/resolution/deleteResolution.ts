@@ -25,11 +25,13 @@ import { logger } from '../../../index';
 import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for API response after deleting a resolution
+ * Schema for the tool's output, covering both success and failure cases.
  */
-const apiResponseSchema = z.object({
+const outputSchema = z.object({
   success: z.boolean(),
-  data: z.null(),
+  message: z.string().optional(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
 });
 
 export const deleteResolution = createTool({
@@ -38,57 +40,53 @@ export const deleteResolution = createTool({
   inputSchema: z.object({
     resolutionId: z.number().describe('ID of the resolution to delete'),
   }),
-  outputSchema: apiResponseSchema,
+  outputSchema,
   execute: async ({ context }) => {
+    const logContext = { ...context };
+    logger.info("Attempting to delete a resolution.", logContext);
+
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not configured");
+      logger.error("CMS URL is not configured.", logContext);
+      return { success: false, message: "CMS URL is not configured." };
     }
 
     try {
       const url = new URL(`${config.cmsUrl}/api/resolution/${context.resolutionId}`);
-      logger.info(`Deleting resolution with ID: ${context.resolutionId}`);
+      logger.debug(`Requesting to delete resolution at: ${url.toString()}`, logContext);
 
-      const formData = new URLSearchParams();
-      formData.append("resolutionId", context.resolutionId.toString());
-
-      // Get authentication headers
       const headers = await getAuthHeaders();
-      headers['Content-Type'] = 'application/x-www-form-urlencoded';
 
       const response = await fetch(url.toString(), {
         method: "DELETE",
-        headers: headers,
-        body: formData.toString(),
+        headers,
       });
 
-      const text = await response.text();
-      if (!response.ok) {
-        // Decode the error message for better readability
-        const decodedText = decodeErrorMessage(text);
-        let errorMessage;
-        try {
-          const errorObj = JSON.parse(decodedText);
-          errorMessage = errorObj.message || decodedText;
-        } catch {
-          errorMessage = decodedText;
-        }
-        
-        logger.error(`Failed to delete resolution: ${errorMessage}`, { 
-          status: response.status,
-          url: url.toString(),
-          resolutionId: context.resolutionId
-        });
-        throw new Error(errorMessage);
+      if (response.status === 204) {
+        logger.info(`Successfully deleted resolution ID ${context.resolutionId}.`, logContext);
+        return { success: true, message: `Resolution with ID ${context.resolutionId} deleted successfully.` };
       }
 
-      logger.info(`Resolution with ID ${context.resolutionId} deleted successfully`);
+      const responseText = await response.text();
+      const errorData = decodeErrorMessage(responseText);
+      
+      logger.error("Failed to delete resolution via CMS API.", {
+        ...logContext,
+        status: response.status,
+        errorData,
+      });
       return {
-        success: true,
-        data: null
+        success: false,
+        message: `API request failed with status ${response.status}.`,
+        errorData,
       };
-    } catch (error) {
-      logger.error(`deleteResolution: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      throw error;
+
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      logger.error("An unexpected error occurred in deleteResolution.", {
+        ...logContext,
+        error: errorMessage,
+      });
+      return { success: false, message: "An unexpected error occurred.", error: errorMessage };
     }
   },
 });
