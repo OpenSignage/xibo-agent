@@ -654,36 +654,20 @@ function buildUserMeTree(userData: z.infer<typeof userResponseSchema>): TreeNode
 }
 
 /**
- * ユーザー情報ノードのカスタム表示フォーマッタ
+ * Formats the tree node for display.
+ * @param node The node to format.
+ * @returns The formatted string.
  */
 function userMeNodeFormatter(node: TreeNode): string {
   switch (node.type) {
     case 'user':
-      return `Current User: ${node.name}`;
-    case 'profile':
+      return `👤 ${node.name}`;
     case 'groups':
-    case 'content':
-    case 'notifications':
-    case 'features':
-    case 'details':
-    case 'account':
-    case 'references':
-      return node.name;
-    case 'name':
-      return `Name: ${node.name}`;
-    case 'email':
-      return `Email: ${node.name}`;
-    case 'phone':
-      return `Phone: ${node.name}`;
+      return `👥 ${node.name}`;
+    case 'permissions':
+      return `🔒 ${node.name}`;
     case 'group':
-      return `Group: ${node.name}`;
-    case 'layouts':
-    case 'media':
-    case 'campaigns':
-    case 'playlists':
-    case 'displayGroups':
-    case 'events':
-    case 'dayParts':
+    case 'permission':
       return node.name;
     default:
       return node.name;
