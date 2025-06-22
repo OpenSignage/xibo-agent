@@ -44,6 +44,7 @@ import { getDisplayGroups } from './displayGroup';
 import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } from './template';
 import { getLogs } from './log';
 import { getTransition } from './transition';
+import { getDayParts, addDayPart, editDayPart, deleteDayPart } from './dayPart';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -129,6 +130,8 @@ export function getTools() {
     // Display group
     getDisplayGroups,
     // Template
-    getTemplate,searchAllTemplates,addTemplate,addTemplateFromLayout
+    getTemplate,searchAllTemplates,addTemplate,addTemplateFromLayout,
+    // Day part
+    getDayParts,addDayPart,editDayPart,deleteDayPart
   };
 }
