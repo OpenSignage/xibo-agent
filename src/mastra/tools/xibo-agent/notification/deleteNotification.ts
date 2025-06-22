@@ -21,35 +21,17 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for success response
+ * Schema for the tool's output, covering both success and failure cases.
  */
-const successResponseSchema = z.object({
-  success: z.literal(true),
-  message: z.string()
+const outputSchema = z.object({
+  success: z.boolean(),
+  message: z.string().optional(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
 });
-
-/**
- * Schema for error response
- */
-const errorResponseSchema = z.object({
-  success: z.literal(false),
-  error: z.object({
-    code: z.number(),
-    message: z.string(),
-    details: z.any().optional()
-  })
-});
-
-/**
- * Combined response schema
- */
-const responseSchema = z.union([successResponseSchema, errorResponseSchema]);
-
-type SuccessResponse = z.infer<typeof successResponseSchema>;
-type ErrorResponse = z.infer<typeof errorResponseSchema>;
-type Response = SuccessResponse | ErrorResponse;
 
 /**
  * Tool for deleting notifications from Xibo CMS
@@ -60,88 +42,52 @@ export const deleteNotification = createTool({
   inputSchema: z.object({
     notificationId: z.number().describe('ID of the notification to delete')
   }),
+  outputSchema,
+  execute: async ({ context }) => {
+    const logContext = { ...context };
+    logger.info("Attempting to delete a notification.", logContext);
 
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<Response> => {
+    if (!config.cmsUrl) {
+      logger.error("CMS URL is not configured.", logContext);
+      return { success: false, message: "CMS URL is not configured." };
+    }
+    
     try {
-      logger.info('Deleting notification from CMS');
-
-      if (!config.cmsUrl) {
-        const errorResponse: ErrorResponse = {
-          success: false,
-          error: {
-            code: 500,
-            message: "CMS URL is not configured"
-          }
-        };
-        return errorResponse;
-      }
+      const url = new URL(`${config.cmsUrl}/api/notification/${context.notificationId}`);
+      logger.debug(`Requesting to delete notification at: ${url.toString()}`, logContext);
 
       const headers = await getAuthHeaders();
-      logger.debug('Auth headers obtained');
-
-      const url = `${config.cmsUrl}/api/notification/${context.notificationId}`;
-      logger.debug(`Request URL: ${url}`);
-
-      const response = await fetch(url, {
+      const response = await fetch(url.toString(), {
         method: 'DELETE',
         headers
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        logger.error(`HTTP error occurred: ${response.status}`, { errorData });
-        const errorResponse: ErrorResponse = {
-          success: false,
-          error: {
-            code: response.status,
-            message: errorData?.message || `HTTP error occurred: ${response.status}`,
-            details: errorData
-          }
-        };
-        return errorResponse;
+      if (response.status === 204) {
+        logger.info(`Successfully deleted notification ID ${context.notificationId}.`, logContext);
+        return { success: true, message: `Notification with ID ${context.notificationId} deleted successfully.` };
       }
-
-      // Check if response is empty
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        // Return success response for empty or non-JSON response
-        const successResponse: SuccessResponse = {
-          success: true,
-          message: "Notification deleted successfully"
-        };
-        logger.info('Notification deleted successfully (empty response)');
-        return successResponse;
-      }
-
-      // Try to parse JSON response
-      try {
-        const data = await response.json();
-        logger.debug('Raw API response:', { data });
-        
-        const validatedData = successResponseSchema.parse(data);
-        logger.info('Notification deleted successfully');
-        return validatedData;
-      } catch (parseError) {
-        // If JSON parsing fails, return success response
-        const successResponse: SuccessResponse = {
-          success: true,
-          message: "Notification deleted successfully (invalid JSON response)"
-        };
-        logger.info('Notification deleted successfully (invalid JSON response)');
-        return successResponse;
-      }
-    } catch (error) {
-      logger.error('Error occurred while deleting notification', { error });
-      const errorResponse: ErrorResponse = {
+      
+      const responseText = await response.text();
+      const errorData = decodeErrorMessage(responseText);
+      
+      logger.error("Failed to delete notification via CMS API.", {
+        ...logContext,
+        status: response.status,
+        errorData,
+      });
+      return {
         success: false,
-        error: {
-          code: 500,
-          message: error instanceof Error ? error.message : "Unknown error occurred",
-          details: error
-        }
+        message: `API request failed with status ${response.status}.`,
+        errorData,
       };
-      return errorResponse;
+
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      logger.error("An unexpected error occurred in deleteNotification.", {
+        ...logContext,
+        error: errorMessage,
+      });
+      return { success: false, message: "An unexpected error occurred.", error: errorMessage };
     }
   },
 }); 

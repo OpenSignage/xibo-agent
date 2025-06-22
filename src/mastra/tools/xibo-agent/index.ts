@@ -39,7 +39,7 @@ import { getStats } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
 import { generateImage, updateImage, getImageHistory } from './generate';
-import { getNotifications, deleteNotification, postNotification, putNotification } from './notification';
+  import { getNotifications, deleteNotification, addNotification, editNotification } from './notification';
 import { getDisplayGroups } from './displayGroup';
 import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } from './template';
 import { getLogs } from './log';
@@ -125,7 +125,7 @@ export function getTools() {
     // Generation
     generateImage,updateImage,getImageHistory,
     // Notification
-    getNotifications,deleteNotification,postNotification,putNotification,
+    getNotifications,deleteNotification,addNotification,editNotification,
     // Display group
     getDisplayGroups,
     // Template

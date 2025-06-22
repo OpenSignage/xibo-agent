@@ -23,13 +23,14 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
+import { decodeErrorMessage } from "../utility/error";
 
 // Schema for tag information in display groups
 const tagSchema = z.object({
-  tag: z.string(),
+  tag: z.string().nullable(),
   tagId: z.number(),
-  value: z.string()
-});
+  value: z.string().nullable(),
+}).passthrough();
 
 // Schema for user group information
 const userGroupSchema = z.object({
@@ -49,8 +50,8 @@ const userGroupSchema = z.object({
   isCustomNotification: z.number().nullable(),
   isShownForAddUser: z.number().nullable(),
   defaultHomepageId: z.string().nullable(),
-  features: z.array(z.string()).nullable()
-});
+  features: z.array(z.string()).nullable(),
+}).passthrough();
 
 // Schema for display group information
 const displayGroupSchema = z.object({
@@ -76,14 +77,14 @@ const displayGroupSchema = z.object({
   ref2: z.string().nullable(),
   ref3: z.string().nullable(),
   ref4: z.string().nullable(),
-  ref5: z.string().nullable()
-});
+  ref5: z.string().nullable(),
+}).passthrough();
 
 // Schema for notification data validation
 const notificationSchema = z.object({
   notificationId: z.number(),
-  createDt: z.string(),
-  releaseDt: z.string(),
+  createDt: z.union([z.string(), z.number()]),
+  releaseDt: z.union([z.string(), z.number()]),
   subject: z.string(),
   type: z.string(),
   body: z.string(),
@@ -94,14 +95,16 @@ const notificationSchema = z.object({
   originalFileName: z.string().nullable(),
   nonusers: z.string().nullable(),
   userGroups: z.array(userGroupSchema).nullable(),
-  displayGroups: z.array(displayGroupSchema).nullable()
-});
+  displayGroups: z.array(displayGroupSchema).nullable(),
+}).passthrough();
 
 // Schema for API response validation
-const responseSchema = z.object({
+const outputSchema = z.object({
   success: z.boolean(),
+  data: notificationSchema.optional(),
   message: z.string().optional(),
-  data: notificationSchema.optional()
+  error: z.any().optional(),
+  errorData: z.any().optional(),
 });
 
 /**
@@ -110,8 +113,8 @@ const responseSchema = z.object({
  * This tool accepts notification details and updates an existing notification
  * in the Xibo CMS system.
  */
-export const putNotification = createTool({
-  id: 'put-notification',
+export const editNotification = createTool({
+  id: 'edit-notification',
   description: 'Update an existing notification',
   inputSchema: z.object({
     notificationId: z.number().describe('ID of the notification to update'),
@@ -122,90 +125,96 @@ export const putNotification = createTool({
     displayGroupIds: z.array(z.number()).describe('Array of display group IDs to assign the notification to'),
     userGroupIds: z.array(z.number()).describe('Array of user group IDs to assign the notification to')
   }),
-
-  outputSchema: responseSchema,
-
+  outputSchema,
   execute: async ({ context }) => {
+    const logContext = { ...context };
+    logger.info("Attempting to update a notification.", logContext);
+
+    if (!config.cmsUrl) {
+      logger.error("CMS URL is not configured.", logContext);
+      return { success: false, message: "CMS URL is not configured." };
+    }
+
     try {
-      logger.info("Starting notification update");
-      
-      // Validate CMS URL configuration
-      if (!config.cmsUrl) {
-        throw new Error("CMS URL is not set");
-      }
+      const url = new URL(`${config.cmsUrl}/api/notification/${context.notificationId}`);
+      logger.debug(`Requesting to update notification at: ${url.toString()}`, logContext);
 
-      // Get authentication headers for API request
+      const formData = new URLSearchParams();
+      formData.append("subject", context.subject);
+      if (context.body) {
+        formData.append("body", context.body);
+      }
+      formData.append("releaseDt", context.releaseDt);
+      formData.append("isInterrupt", context.isInterrupt.toString());
+      context.displayGroupIds.forEach(id => formData.append('displayGroupIds[]', id.toString()));
+      context.userGroupIds.forEach(id => formData.append('userGroupIds[]', id.toString()));
+
       const headers = await getAuthHeaders();
-      logger.debug("Authentication headers obtained");
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
 
-      // Prepare request body with ISO 8601 formatted date
-      const requestBody = {
-        ...context,
-        releaseDt: new Date(context.releaseDt).toISOString()
-      };
-
-      logger.debug("Sending notification update request", { requestBody });
-
-      // Send PUT request to update notification
-      const response = await fetch(`${config.cmsUrl}/api/notification/${context.notificationId}`, {
+      const response = await fetch(url.toString(), {
         method: 'PUT',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
+        headers,
+        body: formData.toString(),
       });
 
-      // Handle HTTP error responses
+      const responseText = await response.text();
+      
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        logger.error("HTTP error occurred", { 
-          status: response.status, 
-          errorData 
+        const errorData = decodeErrorMessage(responseText);
+        logger.error("Failed to update notification via CMS API.", {
+          ...logContext,
+          status: response.status,
+          errorData,
         });
         return {
           success: false,
-          message: `HTTP error! status: ${response.status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`
+          message: `API request failed with status ${response.status}.`,
+          errorData,
         };
       }
-
-      // Parse and validate response data
-      const data = await response.json();
-      logger.debug("Response data received", { data });
-
+      
+      let responseData;
       try {
-        const validatedData = notificationSchema.parse(data);
-        logger.info("Notification updated successfully");
-
-        return {
-          success: true,
-          data: validatedData
-        };
-      } catch (validationError) {
-        // Handle validation errors
-        const errorDetails = validationError instanceof Error 
-          ? JSON.parse(validationError.message)
-          : "Unknown validation error";
-
-        logger.error("Validation error occurred", { 
-          error: errorDetails
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        logger.error("Failed to parse JSON response from CMS API.", {
+          ...logContext,
+          responseText,
         });
-
         return {
           success: false,
-          message: "Validation error occurred",
-          error: errorDetails
+          message: "Invalid JSON response from server.",
+          errorData: responseText,
         };
       }
-    } catch (error) {
-      // Handle unexpected errors
-      logger.error("Error occurred during notification update", { 
-        error: error instanceof Error ? error.message : "Unknown error" 
+      
+      const validationResult = notificationSchema.safeParse(responseData);
+
+      if (!validationResult.success) {
+        logger.warn("API response validation failed for putNotification.", {
+          ...logContext,
+          error: validationResult.error.flatten(),
+          responseData,
+        });
+        return {
+          success: false,
+          message: "Response validation failed.",
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
+      }
+
+      logger.info(`Successfully updated notification ID ${validationResult.data.notificationId}.`, logContext);
+      return { success: true, data: validationResult.data };
+
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      logger.error("An unexpected error occurred in putNotification.", {
+        ...logContext,
+        error: errorMessage,
       });
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : "Unknown error"
-      };
+      return { success: false, message: "An unexpected error occurred.", error: errorMessage };
     }
   },
 }); 

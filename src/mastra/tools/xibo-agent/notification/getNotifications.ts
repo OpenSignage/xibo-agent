@@ -22,6 +22,61 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { decodeErrorMessage } from "../utility/error";
+
+// Schemas for embedded data, based on actual API response
+const tagSchema = z.object({
+  tag: z.string().nullable(),
+  tagId: z.number(),
+  value: z.string().nullable(),
+}).passthrough();
+
+const userGroupSchema = z.object({
+  groupId: z.number(),
+  group: z.string(),
+  isUserSpecific: z.number(),
+  isEveryone: z.number(),
+  description: z.string().nullable(),
+  libraryQuota: z.number().nullable(),
+  isSystemNotification: z.number().nullable(),
+  isDisplayNotification: z.number().nullable(),
+  isDataSetNotification: z.number().nullable(),
+  isLayoutNotification: z.number().nullable(),
+  isLibraryNotification: z.number().nullable(),
+  isReportNotification: z.number().nullable(),
+  isScheduleNotification: z.number().nullable(),
+  isCustomNotification: z.number().nullable(),
+  isShownForAddUser: z.number().nullable(),
+  defaultHomepageId: z.string().nullable(),
+  features: z.array(z.string()).nullable(),
+}).passthrough();
+
+const displayGroupSchema = z.object({
+  displayGroupId: z.number(),
+  displayGroup: z.string(),
+  description: z.string().nullable(),
+  isDisplaySpecific: z.number(),
+  isDynamic: z.number(),
+  dynamicCriteria: z.string().nullable(),
+  dynamicCriteriaLogicalOperator: z.string().nullable(),
+  dynamicCriteriaTags: z.string().nullable(),
+  dynamicCriteriaExactTags: z.number(),
+  dynamicCriteriaTagsLogicalOperator: z.string().nullable(),
+  userId: z.number(),
+  tags: z.array(tagSchema).nullable(),
+  bandwidthLimit: z.number().nullable(),
+  groupsWithPermissions: z.string().nullable(),
+  createdDt: z.string().nullable(),
+  modifiedDt: z.string().nullable(),
+  folderId: z.number().nullable(),
+  permissionsFolderId: z.number().nullable(),
+  ref1: z.string().nullable(),
+  ref2: z.string().nullable(),
+  ref3: z.string().nullable(),
+  ref4: z.string().nullable(),
+  ref5: z.string().nullable(),
+}).passthrough();
+
 
 /**
  * Schema for notification data
@@ -30,23 +85,35 @@ const notificationSchema = z.object({
   notificationId: z.number(),
   subject: z.string(),
   body: z.string(),
-  createdDt: z.string().optional(),
+  createDt: z.union([z.string(), z.number()]).optional(),
   releaseDt: z.union([z.string(), z.number()]).optional(),
+  type: z.string().optional(),
   isEmail: z.number().optional(),
   isInterrupt: z.number(),
   isSystem: z.number(),
   userId: z.number(),
+  filename: z.string().nullable().optional(),
+  originalFileName: z.string().nullable().optional(),
+  nonusers: z.string().nullable().optional(),
+  userGroups: z.array(userGroupSchema).nullable().optional(),
+  displayGroups: z.array(displayGroupSchema).nullable().optional(),
   displayGroupIds: z.array(z.number()).optional(),
   displayGroupNames: z.array(z.string()).optional(),
   read: z.number().optional(),
   readDt: z.string().nullable().optional(),
   readBy: z.string().nullable().optional()
-});
+}).passthrough();
 
 /**
- * Schema for API response
+ * Schema for the tool's output, covering both success and failure cases.
  */
-const responseSchema = z.array(notificationSchema);
+const outputSchema = z.object({
+  success: z.boolean(),
+  data: z.array(notificationSchema).optional(),
+  message: z.string().optional(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
  * Tool for retrieving notifications from Xibo CMS
@@ -59,54 +126,96 @@ export const getNotifications = createTool({
     subject: z.string().optional().describe('Filter by subject'),
     embed: z.string().optional().describe('Include related data (userGroups, displayGroups)')
   }),
-
-  outputSchema: z.array(notificationSchema),
+  outputSchema,
   execute: async ({ context }) => {
+    const logContext = { ...context };
+    logger.info("Attempting to retrieve notifications.", logContext);
+    
+    if (!config.cmsUrl) {
+      logger.error("CMS URL is not configured.", logContext);
+      return { success: false, message: "CMS URL is not configured." };
+    }
+
     try {
-      logger.info('Fetching notifications from CMS');
-
-      if (!config.cmsUrl) {
-        throw new Error("CMS URL is not configured");
-      }
-
-      const headers = await getAuthHeaders();
-      logger.debug('Auth headers obtained');
-
-      const queryParams = new URLSearchParams();
+      const params = new URLSearchParams();
       if (context.notificationId) {
-        queryParams.append('notificationId', context.notificationId.toString());
+        params.append('notificationId', context.notificationId.toString());
       }
       if (context.subject) {
-        queryParams.append('subject', context.subject);
+        params.append('subject', context.subject);
       }
       if (context.embed) {
-        queryParams.append('embed', context.embed);
+        params.append('embed', context.embed);
       }
 
-      const url = `${config.cmsUrl}/api/notification?${queryParams.toString()}`;
-      logger.debug(`Request URL: ${url}`);
+      const url = new URL(`${config.cmsUrl}/api/notification`);
+      url.search = params.toString();
+      
+      logger.debug(`Requesting notifications from: ${url.toString()}`, logContext);
 
-      const response = await fetch(url, {
+      const headers = await getAuthHeaders();
+      const response = await fetch(url.toString(), {
         method: 'GET',
         headers
       });
+      
+      const responseText = await response.text();
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        logger.error(`HTTP error occurred: ${response.status}`, { errorData });
-        throw new Error(`HTTP error! status: ${response.status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`);
+        const errorData = decodeErrorMessage(responseText);
+        logger.error("Failed to retrieve notifications from CMS API.", {
+          ...logContext,
+          status: response.status,
+          errorData,
+        });
+        return {
+          success: false,
+          message: `API request failed with status ${response.status}.`,
+          errorData,
+        };
+      }
+      
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        logger.error("Failed to parse JSON response from CMS API.", {
+          ...logContext,
+          responseText,
+        });
+        return {
+          success: false,
+          message: "Invalid JSON response from server.",
+          errorData: responseText,
+        };
       }
 
-      const data = await response.json();
-      logger.debug('Raw API response:', { data });
-      
-      const validatedData = responseSchema.parse(data);
-      logger.info('Notifications retrieved successfully');
+      const validationResult = z.array(notificationSchema).safeParse(responseData);
 
-      return validatedData;
-    } catch (error) {
-      logger.error('Error occurred while fetching notifications', { error });
-      throw error;
+      if (!validationResult.success) {
+        logger.warn("API response validation failed for getNotifications.", {
+          ...logContext,
+          error: validationResult.error.flatten(),
+          responseData,
+        });
+        return {
+          success: false,
+          message: "Response validation failed.",
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
+      }
+
+      logger.info(`Successfully retrieved ${validationResult.data.length} notifications.`, logContext);
+      return { success: true, data: validationResult.data };
+
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      logger.error("An unexpected error occurred in getNotifications.", {
+        ...logContext,
+        error: errorMessage,
+      });
+      return { success: false, message: "An unexpected error occurred.", error: errorMessage };
     }
   },
 }); 
