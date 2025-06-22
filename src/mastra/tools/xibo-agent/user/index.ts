@@ -32,3 +32,4 @@ export { getUserPreferences } from './getUserPreferences';
 export { setUserPreferences } from './setUserPreferences';
 export { getMultiEntityPermissions } from './getMultiEntityPermissions';
 export { setMultiEntityPermissions } from './setMultiEntityPermissions'; 
+export { editUserPreferences } from './editUserPreferences';

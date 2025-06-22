@@ -25,7 +25,7 @@ export const setUserPreferences = createTool({
       throw new Error("CMS URL is not set");
     }
 
-    const url = new URL(`${config.cmsUrl}/user/pref`);
+    const url = new URL(`${config.cmsUrl}/api/user/pref`);
     
     console.log(`Requesting URL: ${url.toString()}`);
 

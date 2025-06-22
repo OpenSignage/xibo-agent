@@ -29,7 +29,7 @@ export const getMultiEntityPermissions = createTool({
       throw new Error("CMS URL is not set");
     }
 
-    const url = new URL(`${config.cmsUrl}/user/permissions/${context.entity}`);
+    const url = new URL(`${config.cmsUrl}/api/user/permissions/${context.entity}`);
     url.searchParams.append("ids", context.ids);
     
     console.log(`Requesting URL: ${url.toString()}`);

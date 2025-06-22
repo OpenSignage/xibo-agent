@@ -21,7 +21,9 @@ import 'dotenv/config';
 
 // Import core tools individually to ensure they're always available for getTools()
 import { getCmsTime, getAbout } from './misc';
-import { getUser, getUserMe, addUser, deleteUser, editUser } from './user';
+import { getUser, getUserMe, addUser, deleteUser, editUser, getUserPermissions,
+  setUserPermissions, getUserPreferences, setUserPreferences,
+  getMultiEntityPermissions, editUserPreferences } from './user';
 import { getModules, getModuleProperties, getModuleTemplateProperties, getModuleTemplates } from './modules';
 import { getDisplays } from './display';
 import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
@@ -94,7 +96,9 @@ export function getTools() {
     // Transition
     getTransition,
     // User
-    getUser,getUserMe,addUser,deleteUser,editUser,
+    getUser,getUserMe,addUser,deleteUser,editUser,getUserPermissions,
+    setUserPermissions,getUserPreferences,setUserPreferences,
+    getMultiEntityPermissions,editUserPreferences,
     // Module 
     getModules,getModuleProperties,getModuleTemplateProperties,getModuleTemplates, 
     // Display
