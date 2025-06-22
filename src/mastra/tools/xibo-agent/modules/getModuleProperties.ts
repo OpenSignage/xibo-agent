@@ -11,9 +11,8 @@
  */
 
 /**
- * Xibo CMS Module Properties Tool
- * 
- * This module provides functionality to retrieve module properties from the Xibo CMS system.
+ * @module getModuleProperties
+ * @description This module provides functionality to retrieve module properties from the Xibo CMS system.
  * It implements the module properties API endpoint and handles the necessary validation
  * and data transformation for retrieving module configuration details.
  */
@@ -37,14 +36,19 @@ const propertySchema = z.object({
   options: z.array(z.any()).optional(),
 });
 
-/**
- * Schema for API response validation
- * Expected response format from the Xibo CMS API
- */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.array(propertySchema),
-});
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    data: z.array(propertySchema),
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
 
 /**
  * Tool for retrieving module properties from Xibo CMS
@@ -58,46 +62,54 @@ export const getModuleProperties = createTool({
   inputSchema: z.object({
     moduleId: z.string().describe("ID of the module to retrieve properties for. This can be either a numeric ID or a string identifier."),
   }),
-  outputSchema: apiResponseSchema,
+  outputSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/module/properties/${context.moduleId}`);
-    
-    logger.info('Requesting module properties:', {
-      url: url.toString(),
-      moduleId: context.moduleId
-    });
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: await getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      const decodedError = decodeErrorMessage(errorText);
-      logger.error('Failed to get module properties:', {
-        status: response.status,
-        statusText: response.statusText,
-        error: decodedError
+    try {
+      const url = new URL(`${config.cmsUrl}/api/module/properties/${context.moduleId}`);
+      
+      logger.info('Requesting module properties:', {
+        url: url.toString(),
+        moduleId: context.moduleId
       });
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: await getAuthHeaders(),
+      });
+      console.log(response);
+      const rawData = await response.json();
+
+      if (!response.ok) {
+        const message = `Failed to get module properties. API responded with status ${response.status}`;
+        logger.error(message, { response: rawData });
+        return { success: false as const, message, errorData: rawData };
+      }
+
+      const validationResult = z.array(propertySchema).safeParse(rawData);
+      if (!validationResult.success) {
+        const message = "API response validation failed";
+        logger.error(message, { error: validationResult.error, data: rawData });
+        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+      }
+      
+      const message = "Module properties retrieved successfully";
+      logger.info(message, { moduleId: context.moduleId, count: validationResult.data.length });
+      return { success: true, data: validationResult.data, message };
+    } catch (error) {
+      const message = "An unexpected error occurred while getting module properties.";
+      logger.error(message, { error });
       return {
-        success: false,
-        data: [],
-        error: {
-          status: response.status,
-          message: decodedError
-        }
+        success: false as const,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
       };
     }
-
-    const rawData = await response.json();
-
-    const validatedData = apiResponseSchema.parse(rawData);
-    return validatedData;
   },
 });
 

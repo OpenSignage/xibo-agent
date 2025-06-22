@@ -11,9 +11,8 @@
  */
 
 /**
- * Xibo CMS Module Information Tool
- * 
- * This module provides functionality to retrieve information about all available
+ * @module getModules
+ * @description This module provides functionality to retrieve information about all available
  * modules in the Xibo CMS. It accesses the /api/module endpoint to get details
  * about module properties, configuration options, and compatibility.
  */
@@ -23,7 +22,6 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
-import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Schema for module property definition
@@ -44,7 +42,7 @@ const propertySchema = z.object({
  * Comprehensive definition of module information returned by the API,
  * including module metadata, compatibility settings, and configuration options.
  */
-const moduleResponseSchema = z.array(z.object({
+const moduleSchema = z.object({
   moduleId: z.union([z.number(), z.string().transform(Number)]),
   name: z.string().nullable(),
   author: z.string().nullable(),
@@ -88,19 +86,21 @@ const moduleResponseSchema = z.array(z.object({
   isError: z.boolean(),
   errors: z.array(z.string()),
   allowPreview: z.union([z.number(), z.string().transform(Number)]).nullable(),
-}));
-
-/**
- * Schema for error response
- */
-const errorResponseSchema = z.object({
-  success: z.literal(false),
-  data: z.array(z.any()),
-  error: z.object({
-    status: z.number().optional(),
-    message: z.string()
-  })
 });
+
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    data: z.array(moduleSchema),
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
 
 /**
  * Tool for retrieving all module information from Xibo CMS
@@ -109,55 +109,47 @@ export const getModules = createTool({
   id: 'get-modules',
   description: 'Get information about all available Xibo CMS modules',
   inputSchema: z.object({
-    _placeholder: z.string().optional().describe('This tool does not require input parameters')
+    _placeholder: z.string().optional().describe('This tool does not require input parameters.')
   }),
-  outputSchema: z.union([moduleResponseSchema, errorResponseSchema]),
-  execute: async ({ context }) => {
-    try {
-      if (!config.cmsUrl) {
-        return {
-          success: false as const,
-          data: [],
-          error: {
-            message: "CMS URL is not configured"
-          }
-        };
-      }
+  outputSchema,
+  execute: async () => {
+    if (!config.cmsUrl) {
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
+    }
 
+    try {
       const headers = await getAuthHeaders();
       const response = await fetch(`${config.cmsUrl}/api/module`, {
         headers,
       });
 
+      const rawData = await response.json();
+
       if (!response.ok) {
-        const errorText = await response.text();
-        const decodedError = decodeErrorMessage(errorText);
-        logger.error('Failed to get modules:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: decodedError
-        });
-        return {
-          success: false as const,
-          data: [],
-          error: {
-            status: response.status,
-            message: decodedError
-          }
-        };
+        const message = `Failed to get modules. API responded with status ${response.status}`;
+        logger.error(message, { response: rawData });
+        return { success: false as const, message, errorData: rawData };
       }
 
-      const data = await response.json();
-      const validatedData = moduleResponseSchema.parse(data);
-      return validatedData;
+      const validationResult = z.array(moduleSchema).safeParse(rawData);
+      if (!validationResult.success) {
+        const message = "API response validation failed";
+        logger.error(message, { error: validationResult.error, data: rawData });
+        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+      }
+
+      const message = "Modules retrieved successfully";
+      logger.info(message, { count: validationResult.data.length });
+      return { success: true, data: validationResult.data, message };
     } catch (error) {
-      logger.error(`getModules: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
+      const message = "An unexpected error occurred while getting modules.";
+      logger.error(message, { error });
       return {
         success: false as const,
-        data: [],
-        error: {
-          message: error instanceof Error ? error.message : "Unknown error"
-        }
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
       };
     }
   },
