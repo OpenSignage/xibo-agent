@@ -1,7 +1,26 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * @module getModuleTemplates
+ * @description This module provides functionality to retrieve module templates
+ * from the Xibo CMS, filtered by data type.
+ */
+
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { logger } from "../../../index";
 
 const extendSchema = z.object({
   templateId: z.string(),
@@ -46,44 +65,75 @@ const moduleTemplateSchema = z.object({
   groupsWithPermissions: z.string().nullable(),
 });
 
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.array(moduleTemplateSchema),
-});
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    data: z.array(moduleTemplateSchema),
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
 
 export const getModuleTemplates = createTool({
   id: "get-module-templates",
-  description: "モジュールテンプレートを検索",
+  description: "Get module templates by data type",
   inputSchema: z.object({
-    dataType: z.string(),
-    type: z.string().optional(),
+    dataType: z.string().describe("The data type of the module to filter by (e.g., 'rss')."),
+    type: z.string().optional().describe("The type of module to filter by."),
   }),
-  outputSchema: apiResponseSchema,
+  outputSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/module/templates/${context.dataType}`);
-    if (context.type) {
-      url.searchParams.append("type", context.type);
+    try {
+      const url = new URL(`${config.cmsUrl}/api/module/templates/${context.dataType}`);
+      if (context.type) {
+        url.searchParams.append("type", context.type);
+      }
+
+      logger.info(`Requesting module templates from: ${url.toString()}`);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: await getAuthHeaders(),
+      });
+
+      const rawData = await response.json();
+
+      if (!response.ok) {
+        const message = `Failed to get module templates. API responded with status ${response.status}`;
+        logger.error(message, { response: rawData });
+        return { success: false as const, message, errorData: rawData };
+      }
+
+      const validationResult = z.array(moduleTemplateSchema).safeParse(rawData);
+      if (!validationResult.success) {
+        const message = "API response validation failed";
+        logger.error(message, { error: validationResult.error, data: rawData });
+        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+      }
+
+      const message = "Module templates retrieved successfully";
+      logger.info(message, { count: validationResult.data.length });
+      return { success: true, data: validationResult.data, message };
+    } catch (error) {
+      const message = "An unexpected error occurred while getting module templates.";
+      logger.error(message, { error });
+      return {
+        success: false as const,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+      };
     }
-    
-    console.log(`Requesting URL: ${url.toString()}`);
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: await getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const rawData = await response.json();
-    const validatedData = apiResponseSchema.parse(rawData);
-    console.log("Module templates retrieved successfully");
-    return validatedData;
   },
 });
 
