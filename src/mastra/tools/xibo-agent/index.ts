@@ -38,7 +38,7 @@ import { getPlaylists, addPlaylist, editPlaylist } from './playlist';
 import { getStats } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
-import { generateImage, updateImage, getImageHistory } from './generation';
+import { generateImage, updateImage, getImageHistory } from './generate';
 import { getNotifications, deleteNotification, postNotification, putNotification } from './notification';
 import { getDisplayGroups } from './displayGroup';
 import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } from './template';
@@ -72,7 +72,7 @@ export * from './usergroup';    // User group management
 export * from './tags';         // Tags management
 export * from './dayPart';      // Day part management
 export * from './statistics';   // Statistics management
-export * from './generation';   // Image generation
+export * from './generate';     // Image and Video generate
 export * from './log';          // Log management
 export * from './transition';   // Transition management
 
