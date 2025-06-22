@@ -11,11 +11,8 @@
  */
 
 /**
- * Xibo CMS User Creation Tool
- * 
- * This module provides functionality to create new users in the Xibo CMS system.
- * It implements the user creation API endpoint and handles the necessary validation
- * and data transformation for creating users with appropriate permissions and settings.
+ * @module addUser
+ * @description This module provides functionality to create new users in the Xibo CMS system.
  */
 
 import { z } from "zod";
@@ -24,7 +21,6 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
 import { base64Encode } from "../utility/encoding";
-import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Available home page options for users
@@ -35,23 +31,6 @@ const HomePageId = {
   MEDIA_MANAGER: 'mediamanager.view',
   PLAYLIST_DASHBOARD: 'playlistdashboard.view',
 } as const;
-
-type HomePageIdType = typeof HomePageId[keyof typeof HomePageId];
-
-/**
- * Create a safe version of data for logging without sensitive information
- * 
- * @param data The original data object
- * @returns A copy with password replaced by asterisks
- */
-function getSafeDataForLogging(data: any): any {
-  if (!data) return data;
-  const safeCopy = { ...data };
-  if (safeCopy.password) {
-    safeCopy.password = '********';
-  }
-  return safeCopy;
-}
 
 /**
  * Schema for user data validation
@@ -104,12 +83,22 @@ const userSchema = z.object({
   twoFactorTypeId: z.number().nullable(),
 });
 
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    data: userSchema,
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
+
 /**
  * Tool for creating new users in Xibo CMS
- * 
- * This tool accepts user details and creates a new user account
- * with appropriate permissions based on the userTypeId.
- * Default values are provided for common settings.
  */
 export const addUser = createTool({
   id: "add-user",
@@ -148,29 +137,17 @@ export const addUser = createTool({
     ref5: z.string().optional().describe("Reference 5 for the user (optional)"),
     isPasswordChangeReuest: z.number().default(0).describe("Whether to change password on first login (0: no, 1: yes)"),
   }),
-  outputSchema: userSchema,
+  outputSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not configured");
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
 
-    // Use the standard API endpoint
-    const url = new URL(`${config.cmsUrl}/api/user`);
-    
-    // Use the original username as is
-    logger.info(`Creating new user: ${context.userName}`);
-
     try {
-      // Get authentication headers
-      const headers = await getAuthHeaders();
+      const url = new URL(`${config.cmsUrl}/api/user`);
       
-      // Set Content-Type header for form-urlencoded
-      const requestHeaders = {
-        ...headers,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      };
-      
-      // Create form data using URLSearchParams
       const formData = new URLSearchParams();
       formData.append("userName", context.userName);
       formData.append("userTypeId", context.userTypeId.toString());
@@ -183,94 +160,55 @@ export const addUser = createTool({
       formData.append("libraryQuota", context.libraryQuota.toString());
       formData.append("isPasswordChangeReuest", context.isPasswordChangeReuest.toString());
       
-      // Add optional parameters if they exist
-      if (context.email) {
-        formData.append("email", context.email);
-      }
-      if (context.firstName) {
-        formData.append("firstName", context.firstName);
-      }
-      if (context.lastName) {
-        formData.append("lastName", context.lastName);
-      }
-      if (context.isPasswordChangeRequired) {
-        formData.append("isPasswordChangeRequired", context.isPasswordChangeRequired.toString());
-      }
-      if (context.phone) {
-        formData.append("phone", context.phone);
-      }
-      if (context.ref1) {
-        formData.append("ref1", context.ref1);
-      }
-      if (context.ref2) {
-        formData.append("ref2", context.ref2);
-      }
-      if (context.ref3) {
-        formData.append("ref3", context.ref3);
-      }
-      if (context.ref4) {
-        formData.append("ref4", context.ref4);
-      }
-      if (context.ref5) {
-        formData.append("ref5", context.ref5);
-      }
+      if (context.email) formData.append("email", context.email);
+      if (context.firstName) formData.append("firstName", context.firstName);
+      if (context.lastName) formData.append("lastName", context.lastName);
+      if (context.isPasswordChangeRequired) formData.append("isPasswordChangeRequired", context.isPasswordChangeRequired.toString());
+      if (context.phone) formData.append("phone", context.phone);
+      if (context.ref1) formData.append("ref1", context.ref1);
+      if (context.ref2) formData.append("ref2", context.ref2);
+      if (context.ref3) formData.append("ref3", context.ref3);
+      if (context.ref4) formData.append("ref4", context.ref4);
+      if (context.ref5) formData.append("ref5", context.ref5);
       
-      // Submit request to Xibo CMS API with form-urlencoded data
+      const headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
+
+      logger.info(`Creating new user: ${context.userName}`);
+
       const response = await fetch(url.toString(), {
         method: "POST",
-        headers: requestHeaders,
+        headers,
         body: formData.toString(),
       });
 
-      // Get response text
-      const responseText = await response.text();
-      
-      // Check if response is successful
+      const rawData = await response.json().catch(() => response.text());
+
       if (!response.ok) {
-        const decodedError = decodeErrorMessage(responseText);
-        logger.error('Failed to add user:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: decodedError
-        });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
+        const message = `Failed to add user. API responded with status ${response.status}`;
+        logger.error(message, { response: rawData });
+        return { success: false as const, message, errorData: rawData };
       }
 
-      // Parse and validate response data
-      try {
-        const userData = JSON.parse(responseText);
-        const validatedData = userSchema.parse(userData);
-        
-        logger.info(`User created successfully`, {
-          userId: validatedData.userId,
-          userName: validatedData.userName,
-          groupId: validatedData.groupId
-        });
-        
-        return validatedData;
-      } catch (error) {
-        logger.error('Failed to validate response data:', {
-          error: error instanceof Error ? error.message : "Unknown error"
-        });
-        throw error;
+      const validationResult = userSchema.safeParse(rawData);
+      if (!validationResult.success) {
+        const message = "API response validation failed";
+        logger.error(message, { error: validationResult.error, data: rawData });
+        return { success: false as const, message, error: validationResult.error, errorData: rawData };
       }
+
+      const messageText = `User '${validationResult.data.userName}' created successfully.`;
+      logger.info(messageText, { userId: validationResult.data.userId });
+      return { success: true, data: validationResult.data, message: messageText };
+
     } catch (error) {
-      logger.error(`addUser: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      
-      // Decode error message
-      if (error instanceof Error) {
-        try {
-          const errorObj = JSON.parse(error.message);
-          if (errorObj.message) {
-            errorObj.message = decodeURIComponent(errorObj.message);
-            error.message = JSON.stringify(errorObj);
-          }
-        } catch (e) {
-          // Use original error message if JSON parsing fails
-        }
-      }
-      
-      throw error;
+      const message = "An unexpected error occurred while adding the user.";
+      logger.error(message, { error });
+      return {
+        success: false as const,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+      };
     }
   },
 });

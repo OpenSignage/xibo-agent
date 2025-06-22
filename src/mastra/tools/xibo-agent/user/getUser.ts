@@ -11,21 +11,15 @@
  */
 
 /**
- * Xibo CMS User Information Retrieval Tool
- * 
- * This module provides functionality to retrieve user information from the Xibo CMS API.
- * It supports filtering users by various parameters such as userId, userName, userTypeId,
- * and retired status.
- * 
- * The tool validates both input parameters and API responses using Zod schemas to ensure
- * data integrity and type safety throughout the request/response cycle.
+ * @module getUser
+ * @description This module provides a tool to retrieve user information from the Xibo CMS,
+ * with optional tree view formatting.
  */
 
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { createLogger } from '@mastra/core/logger';
 import { 
   TreeNode, 
   treeResponseSchema, 
@@ -33,17 +27,18 @@ import {
 } from "../utility/treeView";
 import { logger } from '../../../index';
 
-/**
- * Schema for user group data
- */
-// タグスキーマの定義
+// =================================================================
+// Schema Definitions
+// =================================================================
+
+// Schema for tags associated with various Xibo entities.
 const tagSchema = z.object({
   tag: z.string(),
   tagId: z.number(),
   value: z.string().optional(),
 });
 
-// 権限スキーマの定義
+// Schema for permission details on Xibo entities.
 const permissionSchema = z.object({
   permissionId: z.number(),
   entityId: z.number(),
@@ -59,7 +54,7 @@ const permissionSchema = z.object({
   modifyPermissions: z.number(),
 });
 
-// ウィジェットオプションスキーマ
+// Schema for widget options.
 const widgetOptionSchema = z.object({
   widgetId: z.number(),
   type: z.string().optional(),
@@ -67,7 +62,7 @@ const widgetOptionSchema = z.object({
   value: z.string(),
 });
 
-// オーディオスキーマ
+// Schema for audio associated with a widget.
 const audioSchema = z.object({
   widgetId: z.number(),
   mediaId: z.number(),
@@ -75,7 +70,7 @@ const audioSchema = z.object({
   loop: z.number(),
 });
 
-// ウィジェットスキーマ
+// Schema for a widget within a playlist.
 const widgetSchema = z.object({
   widgetId: z.number(),
   playlistId: z.number(),
@@ -101,7 +96,7 @@ const widgetSchema = z.object({
   playlist: z.string().optional(),
 });
 
-// プレイリストスキーマ
+// Schema for a playlist, which contains widgets.
 const playlistSchema = z.object({
   playlistId: z.number(),
   ownerId: z.number(),
@@ -127,14 +122,14 @@ const playlistSchema = z.object({
   permissionsFolderId: z.number().nullable(),
 });
 
-// リージョンオプションスキーマ
+// Schema for layout region options.
 const regionOptionSchema = z.object({
   regionId: z.number(),
   option: z.string(),
   value: z.string(),
 });
 
-// リージョンスキーマ
+// Schema for a layout region.
 const regionSchema = z.object({
   regionId: z.number(),
   layoutId: z.number(),
@@ -154,7 +149,7 @@ const regionSchema = z.object({
   regionPlaylist: playlistSchema.optional(),
 });
 
-// レイアウトスキーマ
+// Schema for a layout, which is composed of regions.
 const layoutSchema = z.object({
   layoutId: z.number(),
   ownerId: z.number(),
@@ -189,7 +184,7 @@ const layoutSchema = z.object({
   permissionsFolderId: z.number().nullable(),
 });
 
-// キャンペーンスキーマ
+// Schema for a campaign, which is a collection of layouts.
 const campaignSchema = z.object({
   campaignId: z.number(),
   ownerId: z.number(),
@@ -219,7 +214,7 @@ const campaignSchema = z.object({
   ref5: z.string().nullable(),
 });
 
-// メディアスキーマ
+// Schema for a media item in the library.
 const mediaSchema = z.object({
   mediaId: z.number(),
   ownerId: z.number(),
@@ -251,7 +246,7 @@ const mediaSchema = z.object({
   permissionsFolderId: z.number().nullable(),
 });
 
-// ディスプレイグループスキーマ
+// Schema for a display group.
 const displayGroupSchema = z.object({
   displayGroupId: z.number(),
   displayGroup: z.string(),
@@ -278,7 +273,7 @@ const displayGroupSchema = z.object({
   ref5: z.string().nullable(),
 });
 
-// スケジュールリマインダースキーマ
+// Schema for schedule reminders.
 const scheduleReminderSchema = z.object({
   scheduleReminderId: z.number(),
   eventId: z.number(),
@@ -290,7 +285,7 @@ const scheduleReminderSchema = z.object({
   lastReminderDt: z.number().nullable(),
 });
 
-// イベントスキーマ
+// Schema for a scheduled event.
 const eventSchema = z.object({
   eventId: z.number(),
   eventTypeId: z.number(),
@@ -333,13 +328,14 @@ const eventSchema = z.object({
   name: z.string().nullable(),
 });
 
-// 日付区切りスキーマ
+// Schema for day parts used in scheduling.
 const dayPartSchema = z.object({
   dayPartId: z.number(),
   isAlways: z.number(),
   isCustom: z.number(),
 });
 
+// Schema for user groups.
 const groupSchema = z.object({
   groupId: z.number(),
   group: z.string(),
@@ -361,9 +357,7 @@ const groupSchema = z.object({
   buttons: z.array(z.unknown()).optional(),
 });
 
-/**
- * Schema for user response data from the Xibo API
- */
+// Schema for the user list response from the API. Note that it's an array.
 const userResponseSchema = z.array(z.object({
   userId: z.number(),
   userName: z.string(),
@@ -409,15 +403,33 @@ const userResponseSchema = z.array(z.object({
   homeFolder: z.string().optional(),
 }));
 
+// Schema for a successful response, containing the data and a message.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.union([userResponseSchema, treeResponseSchema]),
+  message: z.string(),
+});
+
+// Schema for an error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
+
+// The final output schema is a union of success and error responses.
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
 /**
- * ユーザーデータからツリーノード構造を構築する
- * 
- * @param users APIから取得したユーザー配列
- * @returns ツリーノード構造
+ * Builds a hierarchical tree structure from the user data array.
+ * This is used for the optional tree view output.
+ * @param users An array of user objects from the API.
+ * @returns An array of TreeNode objects, one for each user.
  */
 function buildUserTree(users: any[]): TreeNode[] {
   return users.map(user => {
-    // ユーザーノード
+    // Create the main root node for the user.
     const userNode: TreeNode = {
       type: 'user',
       id: user.userId,
@@ -425,15 +437,15 @@ function buildUserTree(users: any[]): TreeNode[] {
       children: []
     };
     
-    // プロファイル情報を子ノードとして追加
+    // Create a 'Profile' node to hold personal details.
     const profileNode: TreeNode = {
       type: 'profile',
-      id: 0,
+      id: 0, // Static ID for the profile category node
       name: 'Profile',
       children: []
     };
     
-    // 名前情報
+    // Add name if available.
     if (user.firstName || user.lastName) {
       profileNode.children!.push({
         type: 'name',
@@ -442,7 +454,7 @@ function buildUserTree(users: any[]): TreeNode[] {
       });
     }
     
-    // 連絡先情報
+    // Add contact information.
     if (user.email) {
       profileNode.children!.push({
         type: 'email',
@@ -457,7 +469,7 @@ function buildUserTree(users: any[]): TreeNode[] {
         name: user.phone
       });
     }
-    // 参照フィールド
+    // Add reference fields if they have values.
     const refs = [
       { field: 'ref1', value: user.ref1 },
       { field: 'ref2', value: user.ref2 },
@@ -478,11 +490,11 @@ function buildUserTree(users: any[]): TreeNode[] {
       };
       profileNode.children!.push(refsNode);
     }
-    // プロファイルノードに子ノードがある場合のみ追加
+    // Only add the profile node to the user tree if it contains information.
     if (profileNode.children!.length > 0) {
       userNode.children!.push(profileNode);
     }
-    // グループ情報を子ノードとして追加
+    // Add group memberships as a child node.
     if (user.groups && user.groups.length > 0) {
       const groupsNode: TreeNode = {
         type: 'groups',
@@ -508,7 +520,7 @@ function buildUserTree(users: any[]): TreeNode[] {
       };
       userNode.children!.push(groupsNode);
     }
-    // 関連アイテム情報を子ノードとして追加
+    // Configuration for displaying various types of related content.
     const relatedItems: { type: string; items: any[]; label: string; icon: string; detailFields?: string[] }[] = [
       { type: 'campaigns', items: user.campaigns, label: 'Campaigns', icon: '📢', detailFields: ['campaignId','campaign','type','startDt','endDt','tags'] },
       { type: 'layouts', items: user.layouts, label: 'Layouts', icon: '📄', detailFields: ['layoutId','layout','description','createdDt','modifiedDt','tags'] },
@@ -518,6 +530,7 @@ function buildUserTree(users: any[]): TreeNode[] {
       { type: 'displayGroups', items: user.displayGroups, label: 'Display Groups', icon: '🖥️', detailFields: ['displayGroupId','displayGroup','description','createdDt','modifiedDt','tags'] },
       { type: 'dayParts', items: user.dayParts, label: 'Day Parts', icon: '⏰', detailFields: ['dayPartId','isAlways','isCustom'] }
     ];
+    // Filter out item types that have no data for this user.
     const itemsWithData = relatedItems.filter(item => item.items && item.items.length > 0);
     if (itemsWithData.length > 0) {
       const relatedNode: TreeNode = {
@@ -526,19 +539,22 @@ function buildUserTree(users: any[]): TreeNode[] {
         name: 'Related Items',
         children: []
       };
+      // Create a category node for each type of related item.
       itemsWithData.forEach((item, categoryIndex) => {
         const categoryNode: TreeNode = {
           type: item.type,
           id: 60 + categoryIndex,
           name: `${item.icon} ${item.label}`,
           children: item.items.map((subItem: any, itemIndex: number) => {
-            // 各アイテムのプロパティを詳細に表示
+            // Display detailed properties for each item.
             const itemId = subItem.id || subItem.campaignId || subItem.layoutId || subItem.mediaId || subItem.eventId || subItem.playlistId || subItem.displayGroupId || subItem.dayPartId || (600 + itemIndex);
             const itemName = subItem.name || subItem.campaign || subItem.layout || subItem.media || subItem.displayGroup || subItem.eventId || `Item ${itemIndex + 1}`;
             const children: TreeNode[] = [];
+            // Add specified detail fields as child nodes.
             if (item.detailFields) {
               item.detailFields.forEach(field => {
                 if (subItem[field] !== undefined && subItem[field] !== null) {
+                  // Special handling for tags to create a nested list.
                   if (field === 'tags' && Array.isArray(subItem.tags) && subItem.tags.length > 0) {
                     children.push({
                       type: 'tags',
@@ -561,7 +577,7 @@ function buildUserTree(users: any[]): TreeNode[] {
               });
             }
             return {
-              type: item.type.slice(0, -1),
+              type: item.type.slice(0, -1), // e.g., 'layouts' -> 'layout'
               id: itemId,
               name: itemName,
               children: children.length > 0 ? children : undefined
@@ -577,7 +593,7 @@ function buildUserTree(users: any[]): TreeNode[] {
 }
 
 /**
- * Formats a user tree node for display.
+ * Formats a user tree node for display, adding an icon based on its type.
  * @param node The tree node to format.
  * @returns A formatted string representation of the node.
  */
@@ -602,65 +618,84 @@ function userNodeFormatter(node: TreeNode): string {
 }
 
 /**
- * Tool for retrieving user information from Xibo CMS
+ * Tool for retrieving user information from Xibo CMS.
+ * This tool retrieves a list of users and can format the output as a tree view.
  */
 export const getUser = createTool({
   id: 'get-user',
-  description: 'Get user information from Xibo CMS',
+  description: 'Get user information from Xibo CMS, with optional tree view.',
   inputSchema: z.object({
-    userId: z.number().optional().describe('Filter by user ID, if not specified all users will be returned'),
-    userName: z.string().optional().describe('Filter by User Name'),
-    userTypeId: z.number().optional().describe('Filter by UserType Id'),
-    retired: z.number().optional().describe('Filter by Retired'),
-    treeView: z.boolean().optional().describe('Set to true to return users in tree structure')
+    userId: z.number().optional().describe('Filter by a specific User ID.'),
+    userName: z.string().optional().describe('Filter by a specific User Name.'),
+    userTypeId: z.number().optional().describe('Filter by a specific UserType ID.'),
+    retired: z.number().optional().describe('Filter by retired status (0 for not retired, 1 for retired).'),
+    treeView: z.boolean().optional().describe('Set to true to return the user list in a tree structure for better visualization.')
   }),
-  outputSchema: z.union([
-    userResponseSchema,
-    treeResponseSchema
-  ]),
+  outputSchema,
   execute: async ({ context }) => {
+    if (!config.cmsUrl) {
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        throw new Error("CMS URL is not configured");
-      }
-
-      const headers = await getAuthHeaders();
-
-      // Build query parameters
       const queryParams = new URLSearchParams();
       if (context.userId) queryParams.append('userId', context.userId.toString());
       if (context.userName) queryParams.append('userName', context.userName);
       if (context.userTypeId) queryParams.append('userTypeId', context.userTypeId.toString());
-      if (context.retired) queryParams.append('retired', context.retired.toString());
-
+      if (context.retired !== undefined) queryParams.append('retired', context.retired.toString());
+      
       const queryString = queryParams.toString();
       const url = `${config.cmsUrl}/api/user${queryString ? `?${queryString}` : ''}`;
 
-      logger.info(`Retrieving users${context.treeView ? ' with tree view' : ''}`);
-      
+      logger.info(`Requesting user information from: ${url}`);
+
       const response = await fetch(url, {
-        headers,
+        method: 'GET',
+        headers: await getAuthHeaders(),
       });
 
+      const rawData = await response.json();
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const message = `Failed to get user information. API responded with status ${response.status}`;
+        logger.error(message, { response: rawData });
+        return { success: false as const, message, errorData: rawData };
       }
+      
+      const validationResult = userResponseSchema.safeParse(rawData);
 
-      const data = await response.json();
-      const validatedData = userResponseSchema.parse(data);
+      if (!validationResult.success) {
+        const message = "API response validation failed.";
+        logger.error(message, { error: validationResult.error, data: rawData });
+        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+      }
+      
+      const validatedData = validationResult.data;
+      let responseData: z.infer<typeof userResponseSchema> | z.infer<typeof treeResponseSchema> = validatedData;
+      let message: string;
 
-      // If tree view is requested
       if (context.treeView) {
-        logger.info(`Generating tree view for ${validatedData.length} users`);
+        logger.info(`Generating tree view for ${validatedData.length} users.`);
         const userTree = buildUserTree(validatedData);
-        return createTreeViewResponse(validatedData, userTree, userNodeFormatter);
+        responseData = createTreeViewResponse(validatedData, userTree, userNodeFormatter);
+        message = "User information retrieved and formatted as a tree view successfully.";
+      } else {
+        message = "User information retrieved successfully.";
       }
+      
+      logger.info(message, { userCount: validatedData.length, treeView: !!context.treeView });
+      return { success: true, data: responseData, message };
 
-      // Return raw JSON data without serialization
-      return validatedData;
     } catch (error) {
-      logger.error(`getUser: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      throw error;  // Throw error for proper error handling
+      const message = "An unexpected error occurred while getting user information.";
+      logger.error(message, { error });
+      return {
+        success: false as const,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+      };
     }
   },
 });

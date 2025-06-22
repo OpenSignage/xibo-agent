@@ -11,9 +11,8 @@
  */
 
 /**
- * Xibo CMS User Edit Tool
- * 
- * This module provides functionality to edit existing users in the Xibo CMS system.
+ * @module editUser
+ * @description This module provides a tool to edit existing users in the Xibo CMS system.
  * It implements the user edit API endpoint and handles the necessary validation
  * and data transformation for updating user settings and permissions.
  */
@@ -24,208 +23,227 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
 import { base64Encode } from "../utility/encoding";
-import { decodeErrorMessage } from "../utility/error";
 
-/**
- * Schema for user data validation
- * Defines the structure of user data in the Xibo CMS system
- */
+// =================================================================
+// Schema Definitions (from getUser for response validation)
+// =================================================================
+
+const tagSchema = z.object({
+  tag: z.string(),
+  tagId: z.number(),
+  value: z.string().optional(),
+});
+
+const permissionSchema = z.object({
+  permissionId: z.number(),
+  entityId: z.number(),
+  groupId: z.number(),
+  objectId: z.number(),
+  isUser: z.number(),
+  entity: z.string(),
+  objectIdString: z.string(),
+  group: z.string(),
+  view: z.number(),
+  edit: z.number(),
+  delete: z.number(),
+  modifyPermissions: z.number(),
+});
+
+const groupSchema = z.object({
+  groupId: z.number(),
+  group: z.string(),
+  isUserSpecific: z.number(),
+  isEveryone: z.number(),
+  description: z.string().nullable(),
+  libraryQuota: z.number(),
+  isSystemNotification: z.number(),
+  isDisplayNotification: z.number(),
+  isDataSetNotification: z.number(),
+  isLayoutNotification: z.number(),
+  isLibraryNotification: z.number(),
+  isReportNotification: z.number(),
+  isScheduleNotification: z.number(),
+  isCustomNotification: z.number(),
+  isShownForAddUser: z.number(),
+  defaultHomepageId: z.string().nullable(),
+  features: z.array(z.string()),
+  buttons: z.array(z.unknown()).optional(),
+});
+
 const userSchema = z.object({
-  userId: z.number(),
-  userName: z.string(),
-  email: z.string().optional(),
-  userTypeId: z.number(),
-  homePageId: z.number(),
-  libraryQuota: z.number().optional(),
-  isSystemNotification: z.number().optional(),
-  isDisplayNotification: z.number().optional(),
-  isScheduleNotification: z.number().optional(),
-  isCustomNotification: z.number().optional(),
-  isShownForAddUser: z.number().optional(),
-  defaultHomePageId: z.number().optional(),
-  retired: z.number().optional(),
-  tags: z.string().optional(),
+    userId: z.number(),
+    userName: z.string(),
+    userTypeId: z.number(),
+    loggedIn: z.union([z.string(), z.number()]).nullable(),
+    email: z.string().nullable(),
+    homePageId: z.union([z.string(), z.number()]),
+    homeFolderId: z.number(),
+    lastAccessed: z.string().nullable(),
+    newUserWizard: z.number(),
+    retired: z.number(),
+    isPasswordChangeRequired: z.number(),
+    groupId: z.number(),
+    group: z.union([z.string(), z.number()]),
+    libraryQuota: z.number(),
+    firstName: z.string().nullable(),
+    lastName: z.string().nullable(),
+    phone: z.string().nullable(),
+    ref1: z.string().nullable(),
+    ref2: z.string().nullable(),
+    ref3: z.string().nullable(),
+    ref4: z.string().nullable(),
+    ref5: z.string().nullable(),
+    groups: z.array(groupSchema),
+    isSystemNotification: z.number(),
+    isDisplayNotification: z.number(),
+    isDataSetNotification: z.number(),
+    isLayoutNotification: z.number(),
+    isLibraryNotification: z.number(),
+    isReportNotification: z.number(),
+    isScheduleNotification: z.number(),
+    isCustomNotification: z.number(),
+    twoFactorTypeId: z.number(),
+    twoFactorSecret: z.string().optional(),
+    twoFactorRecoveryCodes: z.array(z.string()).optional(),
+    homeFolder: z.string().optional(),
+    permissions: z.array(permissionSchema).optional(),
 });
 
-/**
- * Schema for API response validation
- * Expected response format from the Xibo CMS API
- */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: userSchema,
+const successResponseSchema = z.object({
+    success: z.literal(true),
+    data: userSchema.describe("The updated user object."),
+    message: z.string(),
 });
 
-/**
- * Tool for editing users in Xibo CMS
- * 
- * This tool accepts user details and updates an existing user account
- * with new settings and permissions.
- */
+const errorResponseSchema = z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+});
+
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
 export const editUser = createTool({
   id: "edit-user",
-  description: "Edit an existing user in Xibo CMS",
+  description: "Edits an existing user in the Xibo CMS.",
   inputSchema: z.object({
-    userId: z.number().describe("ID of the user to be edited"),
-    userName: z.string().optional().describe("New username for the user"),
-    email: z.string().optional().describe("Email address for the user"),
-    userTypeId: z.number().optional().describe("User type ID"),
-    homePageId: z.string().describe("Home page ID for the user"),
-    homeFolderId: z.number().optional().describe("Home folder ID for the user"),
-    newPassword: z.string().optional().describe("New password for the user"),
-    retypeNewPassword: z.string().optional().describe("Retype new password for the user"),
-    retired: z.number().optional().describe("Whether the user is retired (0: no, 1: yes)"),
-    groupId: z.number().optional().describe("Group ID for the user"),
-    newUserWizard: z.number().optional().describe("Whether to show new user wizard (0: no, 1: yes)"),
-    hideNavigation: z.number().optional().describe("Whether to hide navigation (0: no, 1: yes)"),
-    firstName: z.string().optional().describe("User's first name"),
-    lastName: z.string().optional().describe("User's last name"),
-    libraryQuota: z.number().optional().describe("Library quota in MB"),
-    isPasswordChangeRequired: z.number().optional().describe("Whether password change is required on first login (0: no, 1: yes)"),
-    phone: z.string().optional().describe("Phone number for the user"),
-    ref1: z.string().optional().describe("Reference 1 for the user"),
-    ref2: z.string().optional().describe("Reference 2 for the user"),
-    ref3: z.string().optional().describe("Reference 3 for the user"),
-    ref4: z.string().optional().describe("Reference 4 for the user"),
-    ref5: z.string().optional().describe("Reference 5 for the user"),
-    isPasswordChangeReuest: z.number().optional().describe("Whether to change password on first login (0: no, 1: yes)")
+    userId: z.number().describe("ID of the user to be edited. This is required."),
+    userName: z.string().optional().describe("A new username for the user."),
+    userTypeId: z.number().optional().describe("The ID of the new user type for this user."),
+    groupId: z.number().optional().describe("The ID of the new group for this user."),
+    homePageId: z.string().optional().describe("The new home page for this user (e.g., 'dashboard', 'status', etc.)."),
+    homeFolderId: z.number().optional().describe("The ID of the folder to be used as the user's home folder."),
+    newPassword: z.string().optional().describe("A new password for the user. Must be provided with retypeNewPassword."),
+    retypeNewPassword: z.string().optional().describe("Confirmation of the new password. Must match newPassword."),
+    retired: z.number().optional().describe("Set to 1 to retire the user, or 0 to un-retire."),
+    newUserWizard: z.number().optional().describe("Set to 1 to show the new user wizard on next login, or 0 to hide it."),
+    hideNavigation: z.number().optional().describe("Set to 1 to hide the top navigation bar, or 0 to show it."),
+    firstName: z.string().optional().describe("The user's first name."),
+    lastName: z.string().optional().describe("The user's last name."),
+    email: z.string().optional().describe("The user's email address."),
+    libraryQuota: z.number().optional().describe("The library storage quota in megabytes (MB)."),
+    isPasswordChangeRequired: z.number().optional().describe("Set to 1 to force a password change on the next login, 0 otherwise."),
+    phone: z.string().optional().describe("The user's phone number."),
+    ref1: z.string().optional().describe("A user-definable reference field."),
+    ref2: z.string().optional().describe("A user-definable reference field."),
+    ref3: z.string().optional().describe("A user-definable reference field."),
+    ref4: z.string().optional().describe("A user-definable reference field."),
+    ref5: z.string().optional().describe("A user-definable reference field."),
   }),
-  outputSchema: apiResponseSchema,
+  outputSchema,
   execute: async ({ context }) => {
-    // Check if CMS URL is configured
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
 
-    // Construct API endpoint URL
-    const url = new URL(`${config.cmsUrl}/api/user/${context.userId}`);
-    
-    // Create form data using URLSearchParams
-    const formData = new URLSearchParams();
-    
-    // Add required parameters
-    formData.append("homePageId", context.homePageId);
-    
-    // Add optional parameters
-    if (context.userName) {
-      formData.append("userName", context.userName);
-    }
-    if (context.userTypeId) {
-      formData.append("userTypeId", context.userTypeId.toString());
-    }
-    if (context.homeFolderId) {
-      formData.append("homeFolderId", context.homeFolderId.toString());
-    }
-    if (context.groupId) {
-      formData.append("groupId", context.groupId.toString());
-    }
-    if (context.newUserWizard) {
-      formData.append("newUserWizard", context.newUserWizard.toString());
-    }
-    if (context.hideNavigation) {
-      formData.append("hideNavigation", context.hideNavigation.toString());
-    }
-    if (context.libraryQuota) {
-      formData.append("libraryQuota", context.libraryQuota.toString());
-    }
-    if (context.isPasswordChangeReuest) {
-      formData.append("isPasswordChangeReuest", context.isPasswordChangeReuest.toString());
-    }
-    if (context.email) {
-      formData.append("email", context.email);
-    }
-    if (context.newPassword) {
-      formData.append("newPassword", base64Encode(context.newPassword));
-    }
-    if (context.retypeNewPassword) {
-      formData.append("retypeNewPassword", base64Encode(context.retypeNewPassword));
-    }
-    if (context.retired) {
-      formData.append("retired", context.retired.toString());
-    }
-    if (context.firstName) {
-      formData.append("firstName", context.firstName);
-    }
-    if (context.lastName) {
-      formData.append("lastName", context.lastName);
-    }
-    if (context.isPasswordChangeRequired) {
-      formData.append("isPasswordChangeRequired", context.isPasswordChangeRequired.toString());
-    }
-    if (context.phone) {
-      formData.append("phone", context.phone);
-    }
-    if (context.ref1) {
-      formData.append("ref1", context.ref1);
-    }
-    if (context.ref2) {
-      formData.append("ref2", context.ref2);
-    }
-    if (context.ref3) {
-      formData.append("ref3", context.ref3);
-    }
-    if (context.ref4) {
-      formData.append("ref4", context.ref4);
-    }
-    if (context.ref5) {
-      formData.append("ref5", context.ref5);
+    if (context.newPassword !== context.retypeNewPassword) {
+        const message = "Passwords do not match.";
+        logger.error(message);
+        return { success: false as const, message };
     }
 
-    // Get authentication headers and add Content-Type
-    const headers = await getAuthHeaders();
-    const requestHeaders = {
-      ...headers,
-      'Content-Type': 'application/x-www-form-urlencoded'
-    };
-
-    // Log form data for debugging
-    logger.info('Sending form data:', {
-      url: url.toString(),
-      formData: formData.toString()
-    });
-
-    // Send PUT request to Xibo CMS API
-    const response = await fetch(url.toString(), {
-      method: "PUT",
-      headers: requestHeaders,
-      body: formData.toString(),
-    });
-
-    // Get response text
-    const responseText = await response.text();
-    
-    // Decode response message
-    let decodedResponse = responseText;
     try {
-      const responseObj = JSON.parse(responseText);
-      if (responseObj.message) {
-        responseObj.message = decodeURIComponent(responseObj.message);
-        decodedResponse = JSON.stringify(responseObj);
-      }
-    } catch (e) {
-      // Use original message if JSON parsing fails
-    }
+        const url = `${config.cmsUrl}/api/user/${context.userId}`;
+        const formData = new URLSearchParams();
+        
+        // A helper function to append parameters if they exist in the context
+        const appendIfExists = (key: string, value: any, transform?: (v: any) => string) => {
+            if (value !== undefined && value !== null) {
+                formData.append(key, transform ? transform(value) : String(value));
+            }
+        };
 
-    // Check if the request was successful
-    if (!response.ok) {
-      const errorText = await response.text();
-      const decodedError = decodeErrorMessage(errorText);
-      logger.error('Failed to edit user:', {
-        status: response.status,
-        statusText: response.statusText,
-        error: decodedError
-      });
-      throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
-    }
+        // Append all optional parameters from context to formData
+        appendIfExists("userName", context.userName);
+        appendIfExists("userTypeId", context.userTypeId);
+        appendIfExists("homePageId", context.homePageId);
+        appendIfExists("homeFolderId", context.homeFolderId);
+        appendIfExists("retired", context.retired);
+        appendIfExists("groupId", context.groupId);
+        appendIfExists("newUserWizard", context.newUserWizard);
+        appendIfExists("hideNavigation", context.hideNavigation);
+        appendIfExists("firstName", context.firstName);
+        appendIfExists("lastName", context.lastName);
+        appendIfExists("email", context.email);
+        appendIfExists("libraryQuota", context.libraryQuota);
+        appendIfExists("isPasswordChangeRequired", context.isPasswordChangeRequired);
+        appendIfExists("phone", context.phone);
+        appendIfExists("ref1", context.ref1);
+        appendIfExists("ref2", context.ref2);
+        appendIfExists("ref3", context.ref3);
+        appendIfExists("ref4", context.ref4);
+        appendIfExists("ref5", context.ref5);
+        appendIfExists("newPassword", context.newPassword, base64Encode);
+        appendIfExists("retypeNewPassword", context.retypeNewPassword, base64Encode);
+        
+        logger.debug(`Attempting to edit user ${context.userId} with data:`, { body: formData.toString() });
 
-    // Parse and validate response data
-    try {
-      const rawData = JSON.parse(responseText);
-      const validatedData = apiResponseSchema.parse(rawData);
-      return validatedData;
+        const response = await fetch(url, {
+            method: "PUT",
+            headers: {
+                ...(await getAuthHeaders()),
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: formData.toString(),
+        });
+
+        const responseText = await response.text();
+        let responseData: any = null;
+        try {
+            responseData = responseText ? JSON.parse(responseText) : null;
+        } catch (e) {
+            responseData = responseText;
+        }
+
+        if (!response.ok) {
+            const message = `Failed to edit user. API responded with status ${response.status}`;
+            logger.error(message, { status: response.status, response: responseData });
+            return { success: false as const, message, errorData: responseData };
+        }
+
+        const validationResult = userSchema.safeParse(responseData);
+
+        if (!validationResult.success) {
+            const message = "API call succeeded, but response validation failed.";
+            logger.error(message, { error: validationResult.error, data: responseData });
+            return { success: false as const, message, error: validationResult.error, errorData: responseData };
+        }
+        
+        const message = `User '${validationResult.data.userName}' (ID: ${context.userId}) was updated successfully.`;
+        logger.info(message, { data: validationResult.data });
+        return { success: true, data: validationResult.data, message };
+
     } catch (error) {
-      logger.error(`Failed to parse response: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      throw error;
+        const message = `An unexpected error occurred while editing user ${context.userId}.`;
+        logger.error(message, { error });
+        return {
+            success: false as const,
+            message,
+            error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        };
     }
   },
 });

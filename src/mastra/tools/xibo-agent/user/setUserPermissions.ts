@@ -23,7 +23,7 @@ export const setUserPermissions = createTool({
       throw new Error("CMS URL is not set");
     }
 
-    const url = new URL(`${config.cmsUrl}/user/permissions/${context.entity}/${context.objectId}`);
+    const url = new URL(`${config.cmsUrl}/api/user/permissions/${context.entity}/${context.objectId}`);
     
     // フォームデータの作成
     const formData = new FormData();
