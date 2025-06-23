@@ -11,133 +11,117 @@
  */
 
 /**
- * Xibo CMS Folder Editing Tool
- * 
- * This module provides functionality to edit existing folders in the Xibo CMS system.
- * It implements the folder editing API endpoint and handles the necessary validation
- * and data transformation for updating folder properties.
+ * @module editFolder
+ * @description Provides a tool to edit existing folders in the Xibo CMS.
+ * It handles the necessary API calls, data validation, and error handling.
  */
 
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { logger } from '../../../index';
+import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for folder data returned from the API
- * 
- * This defines the structure of folder data as returned from Xibo CMS.
- * The schema includes validation for all expected folder properties.
- * It uses a recursive definition to handle nested children folders.
+ * Defines the schema for the folder data returned by the API upon update.
+ * The API is expected to return an array containing the updated folder object.
  */
-// Define folderSchema with recursion support
-const folderSchema: z.ZodType<any> = z.lazy(() => 
-  z.object({
-    id: z.number(),
-    type: z.string().nullable(),
-    text: z.string(),
-    parentId: z.union([z.number(), z.string()]).nullable(),
-    isRoot: z.number().nullable(),
-    // Allow children to be either an array of folders or null
-    children: z.union([z.array(folderSchema), z.null()]),
-    permissionsFolderId: z.number().nullable().optional(),
-    // Additional fields that appear in the response
-    folderId: z.number().optional(),
-    folderName: z.string().optional()
-  })
-);
-
-/**
- * Schema for API response after editing a folder
- */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: folderSchema,
+const folderSchema = z.object({
+  id: z.number().describe("The unique identifier for the folder."),
+  type: z.string().nullable().describe("The type of the folder, if specified."),
+  text: z.string().describe("The name of the folder."),
+  parentId: z.number().nullable().describe("The ID of the parent folder."),
+  isRoot: z.number().nullable().describe("Flag indicating if this is a root folder."),
+  children: z
+    .string()
+    .nullable()
+    .describe("A string representation related to child items."),
+  permissionsFolderId: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("The ID of the folder that defines permissions for this folder."),
 });
 
 /**
- * Tool for editing an existing folder in Xibo CMS
- * 
- * This tool allows updating folder properties, primarily the folder name.
+ * A tool to edit an existing folder in the Xibo CMS.
+ * It primarily allows for changing the folder's name.
  */
 export const editFolder = createTool({
   id: "edit-folder",
-  description: "Edit an existing folder in Xibo CMS",
+  description: "Edits an existing folder in the Xibo CMS.",
   inputSchema: z.object({
-    folderId: z.number().describe('ID of the folder to edit'),
-    text: z.string().describe('New name for the folder'),
+    folderId: z.number().describe("The ID of the folder to edit. This is required."),
+    text: z.string().describe("The new name for the folder. This is required."),
   }),
-  outputSchema: apiResponseSchema,
+  outputSchema: z
+    .array(folderSchema)
+    .describe("An array containing the updated folder object."),
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not configured");
+      const errorMessage = "CMS URL is not configured.";
+      logger.error(errorMessage);
+      throw new Error(errorMessage);
     }
 
     try {
-      // Prepare the API endpoint URL with the folder ID
+      // Construct the API URL for the specific folder.
       const url = new URL(`${config.cmsUrl}/api/folders/${context.folderId}`);
-      logger.info(`Editing folder with ID: ${context.folderId}`);
+      logger.info(`Editing folder with ID ${context.folderId}...`);
 
-      // Prepare form data with the new folder name
+      // Prepare the form data with the new folder name.
       const formData = new URLSearchParams();
       formData.append("text", context.text);
 
-      // Get authentication headers
-      const headers = await getAuthHeaders();
-      
-      // Set Content-Type header as required by Xibo API
-      const requestHeaders = {
-        ...headers,
-        'Content-Type': 'application/x-www-form-urlencoded'
+      // Set up the request headers, including authorization and content type.
+      const headers = {
+        ...(await getAuthHeaders()),
+        "Content-Type": "application/x-www-form-urlencoded",
       };
 
-      // Send the update request
+      // Perform the PUT request to update the folder.
       const response = await fetch(url.toString(), {
         method: "PUT",
-        headers: requestHeaders,
+        headers: headers,
         body: formData.toString(),
       });
-      
-      // Get the complete response text
-      let responseText = await response.text();
-      
-      // Handle error responses
-      if (!response.ok) {
-        throw new Error(decodeErrorMessage(responseText));
+
+      const responseText = await response.text();
+      let responseData: any;
+
+      // Try to parse the response as JSON, but fall back to text if it fails.
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        responseData = responseText;
       }
 
-      // Parse and validate the response data
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (error) {
-        logger.error(`Failed to parse response as JSON: ${responseText}`);
-        throw new Error(`Invalid JSON response from server: ${error instanceof Error ? error.message : "Unknown error"}`);
+      // Handle non-successful HTTP responses.
+      if (!response.ok) {
+        const decodedText = decodeErrorMessage(responseText);
+        const errorMessage = `Failed to edit folder. API responded with status ${response.status}.`;
+        logger.error(errorMessage, { status: response.status, response: decodedText });
+        throw new Error(`${errorMessage} Message: ${decodedText}`);
       }
-      
-      // Validate the response data against schema
-      try {
-        const validatedData = apiResponseSchema.parse({
-          success: true,
-          data: data
-        });
-        logger.info(`Folder with ID ${context.folderId} updated to name: ${context.text}`);
-        return validatedData;
-      } catch (validationError) {
-        logger.warn(`Response validation failed: ${validationError instanceof Error ? validationError.message : "Unknown error"}`, { 
-          responseData: data 
-        });
-        
-        // Return with basic validation even if full schema validation fails
-        return {
-          success: true,
-          data: data
-        };
+
+      // Validate the structure of the successful response.
+      const validationResult = z.array(folderSchema).safeParse(responseData);
+
+      if (!validationResult.success) {
+        const errorMessage = "Folder edit response validation failed.";
+        logger.error(errorMessage, { error: validationResult.error.issues, data: responseData });
+        throw new Error(errorMessage, { cause: validationResult.error });
       }
-    } catch (error) {
-      logger.error(`editFolder: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
+
+      // Log the success and return the validated data.
+      logger.info(`Folder with ID ${context.folderId} updated successfully to name '${validationResult.data[0].text}'.`);
+      return validationResult.data;
+
+    } catch (error: any) {
+      // Catch and log any unexpected errors during the process.
+      const errorMessage = `An unexpected error occurred in editFolder: ${error.message}`;
+      logger.error(errorMessage, { error });
       throw error;
     }
   },
