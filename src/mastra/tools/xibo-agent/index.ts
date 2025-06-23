@@ -37,7 +37,7 @@ import { getNews, getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploa
 import { getFonts, getFontDetails, uploadFont } from './font';
 import { getUserGroups, addUserGroup } from './usergroup';
 import { getPlaylists, addPlaylist, editPlaylist } from './playlist';
-import { getStats } from './statistics';
+import { getStats, getTimeDisconnected, getExportStatsCount } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
 import { generateImage, updateImage, getImageHistory } from './generate';
@@ -124,7 +124,7 @@ export function getTools() {
     // Playlist
     getPlaylists,addPlaylist,editPlaylist,
     // Statistics
-    getStats,
+    getStats,getTimeDisconnected, getExportStatsCount,
     // Tags
     getTags,addTag,editTag,deleteTag,
     // Library

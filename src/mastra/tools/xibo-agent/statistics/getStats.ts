@@ -11,129 +11,203 @@
  */
 
 /**
- * Xibo CMS Statistics Tool
- * 
- * This module provides functionality to retrieve and search statistics data from the Xibo CMS system.
- * It implements the statistics API endpoint and handles the necessary validation
- * and data transformation for statistics operations.
+ * @module getStats
+ * @description Provides a tool to retrieve and search statistics data from the Xibo CMS.
+ * It implements the statistics API endpoint and handles validation and error handling.
  */
 
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { logger } from '../../../index';
+import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for statistics data validation
- * Defines the structure and validation rules for statistics data in the Xibo CMS system
+ * Defines the schema for a single statistics data record.
+ * This ensures that the data received from the Xibo API conforms to the expected structure.
  */
 const statisticsDataSchema = z.object({
-  statId: z.number(),
-  type: z.string(),
-  statDate: z.string(),
-  displayId: z.number(),
-  layoutId: z.number().optional(),
-  mediaId: z.number().optional(),
-  campaignId: z.number().optional(),
-  duration: z.number(),
-  count: z.number(),
-  display: z.string(),
-  layout: z.string().optional(),
-  media: z.string().optional(),
-  campaign: z.string().optional(),
-  tags: z.string().optional(),
+  type: z.string().describe("The type of stat record (e.g., 'Layout', 'Media')."),
+  display: z.string().describe("The name of the display."),
+  displayId: z.number().describe("The ID of the display."),
+  layout: z.string().optional().describe("The name of the layout."),
+  layoutId: z.number().optional().describe("The ID of the layout."),
+  media: z.string().optional().describe("The name of the media."),
+  mediaId: z.number().optional().describe("The ID of the media."),
+  widgetId: z.number().optional().describe("The ID of the widget."),
+  scheduleId: z.number().optional().describe("The ID of the schedule entry."),
+  numberPlays: z.number().describe("The number of times the item was played."),
+  duration: z.number().describe("The duration of the playback in seconds."),
+  start: z.string().describe("The start date and time of the statistics period."),
+  end: z.string().describe("The end date and time of the statistics period."),
+  statDate: z.string().describe("The date the statistic was recorded."),
+  tag: z.string().optional().describe("Any tag associated with the item."),
 });
 
 /**
- * Schema for API response validation
- * Expected response format from the Xibo CMS API
- */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.array(statisticsDataSchema),
-});
-
-/**
- * Tool for retrieving statistics data from Xibo CMS
- * 
- * This tool provides functionality to:
- * - Search statistics by various criteria (type, date range, display, layout, etc.)
- * - Filter statistics based on different parameters
- * - Handle statistics data validation and transformation
+ * A tool for retrieving statistics data from the Xibo CMS.
+ * It supports a wide range of filters to search and retrieve specific statistics.
  */
 export const getStats = createTool({
   id: "get-stats",
-  description: "Search and retrieve statistics data from Xibo CMS",
+  description: "Search and retrieve statistics data from Xibo CMS.",
   inputSchema: z.object({
-    type: z.enum(["Layout", "Media", "Widget"]).optional().describe("Type of statistics to retrieve"),
-    fromDt: z.string().optional().describe("Start date for statistics (format: YYYY-MM-DD)"),
-    toDt: z.string().optional().describe("End date for statistics (format: YYYY-MM-DD)"),
-    statDate: z.string().optional().describe("Specific date for statistics (format: YYYY-MM-DD)"),
-    statId: z.string().optional().describe("Filter by statistics ID"),
-    displayId: z.number().optional().describe("Filter by display ID"),
-    displayIds: z.string().optional().describe("Filter by multiple display IDs (comma-separated numbers)"),
-    layoutId: z.string().optional().describe("Filter by layout IDs (comma-separated numbers)"),
-    parentCampaignId: z.number().optional().describe("Filter by parent campaign ID"),
-    mediaId: z.string().optional().describe("Filter by media IDs (comma-separated numbers)"),
-    campaignId: z.number().optional().describe("Filter by campaign ID"),
-    returnDisplayLocalTime: z.boolean().optional().describe("Return times in display's local timezone"),
-    returnDateFormat: z.string().optional().describe("Format for returned dates"),
-    embed: z.string().optional().describe("Embed related data"),
+    type: z
+      .enum(["Layout", "Media", "Widget"])
+      .optional()
+      .describe("The type of stat to return. Can be 'Layout', 'Media', or 'Widget'."),
+    fromDt: z
+      .string()
+      .optional()
+      .describe("The start date for the filter (e.g., 'YYYY-MM-DD HH:MM:SS'). Defaults to 24 hours ago."),
+    toDt: z
+      .string()
+      .optional()
+      .describe("The end date for the filter (e.g., 'YYYY-MM-DD HH:MM:SS'). Defaults to the current time."),
+    statDate: z
+      .string()
+      .optional()
+      .describe("Filter for records on or after a specific date (YYYY-MM-DD)."),
+    statId: z
+      .string()
+      .optional()
+      .describe("Filter for records with a statId greater than the specified value."),
+    displayId: z
+      .number()
+      .optional()
+      .describe("Filter by a single Display ID."),
+    displayIds: z
+      .array(z.number())
+      .optional()
+      .describe("Filter by a list of Display IDs."),
+    layoutId: z
+      .array(z.number())
+      .optional()
+      .describe("Filter by a list of Layout IDs."),
+    parentCampaignId: z
+      .number()
+      .optional()
+      .describe("Filter by a specific parent Campaign ID."),
+    mediaId: z
+      .array(z.number())
+      .optional()
+      .describe("Filter by a list of Media IDs."),
+    campaignId: z
+      .number()
+      .optional()
+      .describe("Filter by a single Campaign ID."),
+    returnDisplayLocalTime: z
+      .boolean()
+      .optional()
+      .describe("Return results in the display's local time. The API accepts boolean true, 1, or 'On'."),
+    returnDateFormat: z
+      .string()
+      .optional()
+      .describe("A PHP-style date format string for how the returned dates should be formatted."),
+    embed: z
+      .string()
+      .optional()
+      .describe("Embed additional data. Options include: 'layoutTags', 'displayTags', 'mediaTags'. Can be a comma-separated list."),
   }),
-  outputSchema: apiResponseSchema,
+  outputSchema: z
+    .array(statisticsDataSchema)
+    .describe("An array of statistics data records."),
   execute: async ({ context }) => {
+    // Ensure the CMS URL is configured before proceeding.
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      const errorMessage = "CMS URL is not configured.";
+      logger.error(errorMessage);
+      throw new Error(errorMessage);
     }
 
-    const url = new URL(`${config.cmsUrl}/api/stats`);
-    
-    // Add query parameters
-    if (context.type) url.searchParams.append("type", context.type);
-    if (context.fromDt) url.searchParams.append("fromDt", context.fromDt);
-    if (context.toDt) url.searchParams.append("toDt", context.toDt);
-    if (context.statDate) url.searchParams.append("statDate", context.statDate);
-    if (context.statId) url.searchParams.append("statId", context.statId);
-    if (context.displayId) url.searchParams.append("displayId", context.displayId.toString());
-    if (context.displayIds) url.searchParams.append("displayIds", context.displayIds);
-    if (context.layoutId) url.searchParams.append("layoutId", context.layoutId);
-    if (context.parentCampaignId) url.searchParams.append("parentCampaignId", context.parentCampaignId.toString());
-    if (context.mediaId) url.searchParams.append("mediaId", context.mediaId);
-    if (context.campaignId) url.searchParams.append("campaignId", context.campaignId.toString());
-    if (context.returnDisplayLocalTime) url.searchParams.append("returnDisplayLocalTime", context.returnDisplayLocalTime.toString());
-    if (context.returnDateFormat) url.searchParams.append("returnDateFormat", context.returnDateFormat);
-    if (context.embed) url.searchParams.append("embed", context.embed);
+    try {
+      // Construct the API endpoint URL.
+      const url = new URL(`${config.cmsUrl}/api/stats`);
 
-    logger.info('Request URL:', { url: url.toString() });
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: await getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      const decodedError = decodeErrorMessage(errorText);
-      logger.error('HTTP error occurred:', {
-        status: response.status,
-        error: decodedError
-      });
-      return {
-        success: false,
-        data: [],
-        error: {
-          status: response.status,
-          message: decodedError
+      // Helper function to append a query parameter to the URL only if it has a value.
+      // This keeps the resulting URL clean and avoids sending empty parameters.
+      const appendIfExists = (key: string, value: any) => {
+        if (value !== undefined && value !== null) {
+          const stringValue = String(value);
+          if (stringValue !== "") {
+            url.searchParams.append(key, stringValue);
+          }
         }
       };
-    }
 
-    const rawData = await response.json();
-    logger.info('Response data:', rawData);
-    const validatedData = apiResponseSchema.parse(rawData);
-    return validatedData;
+      // Dynamically build the query string from the tool's input context.
+      appendIfExists("type", context.type);
+      appendIfExists("fromDt", context.fromDt);
+      appendIfExists("toDt", context.toDt);
+      appendIfExists("statDate", context.statDate);
+      appendIfExists("statId", context.statId);
+      appendIfExists("displayId", context.displayId);
+      appendIfExists("displayIds", context.displayIds);
+      appendIfExists("layoutId", context.layoutId);
+      appendIfExists("parentCampaignId", context.parentCampaignId);
+      appendIfExists("mediaId", context.mediaId);
+      appendIfExists("campaignId", context.campaignId);
+      appendIfExists("returnDisplayLocalTime", context.returnDisplayLocalTime);
+      appendIfExists("returnDateFormat", context.returnDateFormat);
+      appendIfExists("embed", context.embed);
+
+      logger.info(`Requesting statistics from: ${url.toString()}`);
+
+      // Perform the GET request to the Xibo CMS API.
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: await getAuthHeaders(),
+      });
+      
+      // Read the response body as text first to handle both JSON and non-JSON error messages.
+      const responseText = await response.text();
+      let responseData: any;
+
+      // Attempt to parse the response as JSON. If it fails, use the raw text.
+      // This is crucial for capturing non-JSON error details from the API.
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        responseData = responseText;
+      }
+
+      // Handle non-successful HTTP responses.
+      if (!response.ok) {
+        const decodedText = decodeErrorMessage(responseText);
+        const errorMessage = `Failed to get statistics. API responded with status ${response.status}.`;
+        logger.error(errorMessage, {
+          status: response.status,
+          response: decodedText,
+        });
+        throw new Error(`${errorMessage} Message: ${decodedText}`);
+      }
+
+      // Validate the structure of the successful response data using Zod's safeParse.
+      const validationResult =
+        z.array(statisticsDataSchema).safeParse(responseData);
+
+      // If validation fails, log the details and throw an error.
+      if (!validationResult.success) {
+        const errorMessage = "Statistics response validation failed.";
+        logger.error(errorMessage, {
+          error: validationResult.error.issues,
+          data: responseData,
+        });
+        throw new Error(errorMessage, { cause: validationResult.error });
+      }
+
+      // On success, log the number of records retrieved and return the validated data.
+      logger.info(
+        `Successfully retrieved ${validationResult.data.length} statistics records.`
+      );
+      return validationResult.data;
+    } catch (error: any) {
+      // Catch any other errors that occur during execution, log them, and re-throw.
+      const errorMessage = `An unexpected error occurred in getStats: ${error.message}`;
+      logger.error(errorMessage, { error });
+      throw error;
+    }
   },
 });
 
