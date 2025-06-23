@@ -30,6 +30,6 @@ export { getUserPermissions } from './getUserPermissions';
 export { setUserPermissions } from './setUserPermissions';
 export { getUserPreferences } from './getUserPreferences';
 export { setUserPreferences } from './setUserPreferences';
+export { editUserPreferences } from './editUserPreferences';
 export { getMultiEntityPermissions } from './getMultiEntityPermissions';
 export { setMultiEntityPermissions } from './setMultiEntityPermissions'; 
-export { editUserPreferences } from './editUserPreferences';

@@ -47,6 +47,7 @@ import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } f
 import { getLogs } from './log';
 import { getTransition } from './transition';
 import { getDayParts, addDayPart, editDayPart, deleteDayPart } from './dayPart';
+import { changePassword } from './compound';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -78,6 +79,7 @@ export * from './statistics';   // Statistics management
 export * from './generate';     // Image and Video generate
 export * from './log';          // Log management
 export * from './transition';   // Transition management
+export * from './compound';     // Compound tools
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -136,6 +138,8 @@ export function getTools() {
     // Template
     getTemplate,searchAllTemplates,addTemplate,addTemplateFromLayout,
     // Day part
-    getDayParts,addDayPart,editDayPart,deleteDayPart
+    getDayParts,addDayPart,editDayPart,deleteDayPart,
+    // Compound
+    changePassword
   };
 }

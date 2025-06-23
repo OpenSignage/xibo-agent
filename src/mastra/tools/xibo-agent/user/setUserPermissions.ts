@@ -10,7 +10,7 @@ const apiResponseSchema = z.object({
 
 export const setUserPermissions = createTool({
   id: "set-user-permissions",
-  description: "ユーザー権限を設定",
+  description: "Sets permissions for a specific user.",
   inputSchema: z.object({
     entity: z.string(),
     objectId: z.number(),
@@ -23,28 +23,33 @@ export const setUserPermissions = createTool({
       throw new Error("CMS URL is not set");
     }
 
+    // Construct the request URL for the user permissions API endpoint.
     const url = new URL(`${config.cmsUrl}/api/user/permissions/${context.entity}/${context.objectId}`);
     
-    // フォームデータの作成
+    // Create a FormData object to send the permission data.
     const formData = new FormData();
     context.groupIds.forEach(groupId => {
       formData.append("groupIds[]", groupId);
     });
+    // Optionally include the new owner's ID.
     if (context.ownerId) formData.append("ownerId", context.ownerId.toString());
 
     console.log(`Requesting URL: ${url.toString()}`);
 
+    // Perform the POST request to the Xibo CMS API.
     const response = await fetch(url.toString(), {
       method: "POST",
       headers: await getAuthHeaders(),
       body: formData,
     });
 
+    // Handle non-successful HTTP responses.
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
     console.log("User permissions set successfully");
+    // Return a standard success response.
     return {
       success: true,
       data: null

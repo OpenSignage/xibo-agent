@@ -15,7 +15,7 @@ const apiResponseSchema = z.object({
 
 export const setUserPreferences = createTool({
   id: "set-user-preferences",
-  description: "ユーザー設定を保存",
+  description: "Sets user preferences.",
   inputSchema: z.object({
     preferences: z.array(userOptionSchema),
   }),
