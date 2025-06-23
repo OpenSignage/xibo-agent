@@ -18,7 +18,7 @@ const apiResponseSchema = z.object({
 
 export const getMultiEntityPermissions = createTool({
   id: "get-multi-entity-permissions",
-  description: "複数エンティティの権限データを取得",
+  description: "Gets permissions for multiple entities.",
   inputSchema: z.object({
     entity: z.string(),
     ids: z.string(),
