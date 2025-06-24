@@ -70,6 +70,18 @@ const apiResponseSchema = z.object({
 });
 
 /**
+ * Defines the schema for a failed operation, including a success flag, a message, and optional error details.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * Recursively converts the nested folder structure from the API into a TreeNode structure.
  * This is a helper function for building the tree view.
  * @param folder The folder data to convert.
@@ -159,78 +171,106 @@ export const getFolders = createTool({
       .optional()
       .describe("Set to true to return folders in a structured, hierarchical tree view."),
   }),
-  outputSchema: z.union([apiResponseSchema, treeResponseSchema]),
-  execute: async ({ context }) => {
+  outputSchema: z.union([apiResponseSchema, treeResponseSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    | z.infer<typeof apiResponseSchema>
+    | z.infer<typeof treeResponseSchema>
+    | z.infer<typeof errorSchema>
+  > => {
     if (!config.cmsUrl) {
       const errorMessage = "CMS URL is not configured.";
       logger.error(errorMessage);
-      throw new Error(errorMessage);
+      return {
+        success: false,
+        message: errorMessage,
+      };
     }
+
+    const url = new URL(`${config.cmsUrl}/api/folders`);
+    if (context.folderId)
+      url.searchParams.append("folderId", String(context.folderId));
+    if (context.gridView)
+      url.searchParams.append("gridView", String(context.gridView));
+    if (context.folderName)
+      url.searchParams.append("folderName", context.folderName);
+    if (context.exactFolderName)
+      url.searchParams.append(
+        "exactFolderName",
+        String(context.exactFolderName)
+      );
+
+    logger.info(`Retrieving folders from: ${url.toString()}`);
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: await getAuthHeaders(),
+    });
+
+    const responseText = await response.text();
+    let responseData: any;
 
     try {
-      const url = new URL(`${config.cmsUrl}/api/folders`);
-      if (context.folderId) url.searchParams.append("folderId", String(context.folderId));
-      if (context.gridView) url.searchParams.append("gridView", String(context.gridView));
-      if (context.folderName) url.searchParams.append("folderName", context.folderName);
-      if (context.exactFolderName) url.searchParams.append("exactFolderName", String(context.exactFolderName));
-
-      logger.info(`Retrieving folders from: ${url.toString()}`);
-
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: await getAuthHeaders(),
-      });
-
-      const responseText = await response.text();
-      let responseData: any;
-      
-      try {
-        responseData = JSON.parse(responseText);
-      } catch (e) {
-        // If parsing fails, it might be an error message string.
-        responseData = responseText;
-      }
-
-      if (!response.ok) {
-        const decodedText = decodeErrorMessage(responseText);
-        const errorMessage = `Failed to retrieve folders. API responded with status ${response.status}.`;
-        logger.error(errorMessage, {
-          status: response.status,
-          response: decodedText,
-        });
-        throw new Error(`${errorMessage} Message: ${decodedText}`);
-      }
-      
-      // The API returns a raw array of folder objects.
-      const validationResult = z.array(folderSchema).safeParse(responseData);
-
-      if (!validationResult.success) {
-          const errorMessage = "Folder response validation failed.";
-          logger.error(errorMessage, { error: validationResult.error.issues, data: responseData });
-          throw new Error(errorMessage, { cause: validationResult.error });
-      }
-      
-      const folders = validationResult.data;
-
-      // Generate and return a tree view if requested.
-      if (context.treeView) {
-        const folderTree = buildFolderTree(folders);
-        logger.info(`Successfully retrieved ${folders.length} folders and generated tree view.`);
-        return createTreeViewResponse(folders, folderTree, folderNodeFormatter);
-      }
-
-      // Otherwise, return the standard success response.
-      logger.info(`Successfully retrieved ${folders.length} folders.`);
-      return {
-        success: true,
-        data: folders,
-      };
-
-    } catch (error: any) {
-        const errorMessage = `An unexpected error occurred in getFolders: ${error.message}`;
-        logger.error(errorMessage, { error });
-        throw error;
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      // If parsing fails, it might be an error message string.
+      responseData = responseText;
     }
+
+    if (!response.ok) {
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to retrieve folders. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        response: decodedText,
+      });
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: responseData,
+        },
+      };
+    }
+
+    // The API returns a raw array of folder objects.
+    const validationResult = z.array(folderSchema).safeParse(responseData);
+
+    if (!validationResult.success) {
+      const errorMessage = "Folder response validation failed.";
+      logger.error(errorMessage, {
+        error: validationResult.error.issues,
+        data: responseData,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationIssues: validationResult.error.issues,
+          receivedData: responseData,
+        },
+      };
+    }
+
+    const folders = validationResult.data;
+
+    // Generate and return a tree view if requested.
+    if (context.treeView) {
+      const folderTree = buildFolderTree(folders);
+      logger.info(
+        `Successfully retrieved ${folders.length} folders and generated tree view.`
+      );
+      return createTreeViewResponse(folders, folderTree, folderNodeFormatter);
+    }
+
+    // Otherwise, return the standard success response.
+    logger.info(`Successfully retrieved ${folders.length} folders.`);
+    return {
+      success: true,
+      data: folders,
+    };
   },
 });
 

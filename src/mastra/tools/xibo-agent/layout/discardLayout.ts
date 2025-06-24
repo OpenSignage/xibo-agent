@@ -26,6 +26,27 @@ import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
 
 /**
+ * Defines the schema for a successful response, containing the reverted layout data.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  message: z.string().optional(),
+  data: z.any().optional(), // Using z.any() as the layout structure is complex.
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * Permission schema for layout, region, and widget permissions
  */
 const permissionSchema = z.object({
@@ -208,84 +229,80 @@ export const discardLayout = createTool({
   inputSchema: z.object({
     layoutId: z.number().describe('ID of the layout to discard changes for')
   }),
-  outputSchema: z.object({
-    success: z.boolean(),
-    message: z.string().optional(),
-    data: layoutDiscardResponseSchema.optional(),
-    error: z.object({
-      status: z.number().optional(),
-      message: z.string(),
-      details: z.any().optional(),
-      help: z.string().optional()
-    }).optional()
-  }),
-  execute: async ({ context }) => {
-    try {
-      if (!config.cmsUrl) {
-        logger.error("discardLayout: CMS URL is not configured");
-        throw new Error("CMS URL is not configured");
-      }
-
-      logger.info(`Discarding changes for layout ${context.layoutId}`);
-      
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/discard/${context.layoutId}`;
-
-      const response = await fetch(url, {
-        method: 'PUT',
-        headers,
-      });
-
-      // Parse response data
-      const data = await response.json();
-
-      if (!response.ok) {
-        const errorMessage = decodeErrorMessage(JSON.stringify(data));
-        logger.error(`Failed to discard layout changes ${context.layoutId}: ${errorMessage}`, {
-          status: response.status,
-          layoutId: context.layoutId
-        });
-
-        return {
-          success: false,
-          error: {
-            status: response.status,
-            message: errorMessage,
-            details: data
-          }
-        };
-      }
-
-      // Validate response data
-      try {
-        const validatedData = layoutDiscardResponseSchema.parse(data);
-        logger.info(`Successfully discarded changes for layout ${context.layoutId}`);
-        return {
-          success: true,
-          data: validatedData
-        };
-      } catch (validationError) {
-        logger.error(`Layout data validation failed`, {
-          error: validationError,
-          layoutId: context.layoutId
-        });
-        return {
-          success: false,
-          error: {
-            message: "Layout data validation failed",
-            details: validationError
-          }
-        };
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`discardLayout: An error occurred: ${errorMessage}`, { error });
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({ context }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured";
+      logger.error(`discardLayout: ${errorMessage}`);
       return {
         success: false,
+        message: errorMessage,
+      };
+    }
+
+    logger.info(`Discarding changes for layout ${context.layoutId}`);
+
+    const headers = await getAuthHeaders();
+    const url = `${config.cmsUrl}/api/layout/discard/${context.layoutId}`;
+
+    const response = await fetch(url, {
+      method: "PUT",
+      headers,
+    });
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to discard layout changes. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        layoutId: context.layoutId,
+        response: decodedText,
+      });
+
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
         error: {
-          message: errorMessage,
-          type: error instanceof Error ? error.constructor.name : 'Unknown'
-        }
+          statusCode: response.status,
+          responseBody: decodedText,
+        },
+      };
+    }
+
+    // Handle successful response (204 No Content or with body)
+    if (response.status === 204) {
+        logger.info(`Successfully discarded changes for layout ${context.layoutId} (No Content)`);
+        return {
+          success: true,
+          message: "Layout changes discarded successfully.",
+        };
+    }
+
+    try {
+      const data = await response.json();
+      const validatedData = layoutDiscardResponseSchema.parse(data);
+      logger.info(`Successfully discarded changes for layout ${context.layoutId}`);
+      return {
+        success: true,
+        data: validatedData,
+      };
+    } catch (validationError) {
+      const errorMessage = "Response data validation failed after discarding layout.";
+      logger.error(errorMessage, {
+        error:
+          validationError instanceof Error
+            ? validationError.message
+            : "Unknown validation error",
+        layoutId: context.layoutId,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error:
+          validationError instanceof Error
+            ? validationError.message
+            : "Unknown validation error",
       };
     }
   },

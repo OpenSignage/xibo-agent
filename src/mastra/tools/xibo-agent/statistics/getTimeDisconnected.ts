@@ -42,6 +42,28 @@ const timeDisconnectedSchema = z.object({
 });
 
 /**
+ * Defines the schema for a successful response, containing an array of disconnection records and a success flag.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  data: z
+    .array(timeDisconnectedSchema)
+    .describe("An array of time disconnected statistics records."),
+});
+
+/**
+ * Defines the schema for a failed operation, including a success flag, a message, and optional error details.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * A tool for retrieving statistics about the time displays have been disconnected.
  * It allows filtering by date range and specific display IDs.
  */
@@ -73,95 +95,106 @@ export const getTimeDisconnected = createTool({
       ),
   }),
   outputSchema: z
-    .array(timeDisconnectedSchema)
+    .union([successSchema, errorSchema])
     .describe("An array of time disconnected statistics records."),
-  execute: async ({ context }) => {
+  execute: async ({
+    context,
+  }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
     // Ensure the CMS URL is configured before proceeding.
     if (!config.cmsUrl) {
       const errorMessage = "CMS URL is not configured.";
       logger.error(errorMessage);
-      throw new Error(errorMessage);
+      return {
+        success: false,
+        message: errorMessage,
+      };
     }
+
+    // Construct the API endpoint URL. Note the specific path for this statistic.
+    const url = new URL(`${config.cmsUrl}/api/stats/timeDisconnected`);
+
+    // Helper function to append a query parameter to the URL only if it has a value.
+    const appendIfExists = (key: string, value: any) => {
+      if (value !== undefined && value !== null) {
+        const stringValue = String(value);
+        if (stringValue !== "") {
+          url.searchParams.append(key, stringValue);
+        }
+      }
+    };
+
+    // Dynamically build the query string from the tool's input context.
+    appendIfExists("fromDt", context.fromDt);
+    appendIfExists("toDt", context.toDt);
+    appendIfExists("displayId", context.displayId);
+    appendIfExists("displayIds", context.displayIds);
+    appendIfExists("returnDisplayLocalTime", context.returnDisplayLocalTime);
+    appendIfExists("returnDateFormat", context.returnDateFormat);
+
+    logger.info(`Requesting time disconnected stats from: ${url.toString()}`);
+
+    // Perform the GET request to the Xibo CMS API.
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: await getAuthHeaders(),
+    });
+
+    // Read the response body as text to handle various response formats.
+    const responseText = await response.text();
+    let responseData: any;
 
     try {
-      // Construct the API endpoint URL. Note the specific path for this statistic.
-      const url = new URL(`${config.cmsUrl}/api/stats/timeDisconnected`);
-
-      // Helper function to append a query parameter to the URL only if it has a value.
-      const appendIfExists = (key: string, value: any) => {
-        if (value !== undefined && value !== null) {
-          const stringValue = String(value);
-          if (stringValue !== "") {
-            url.searchParams.append(key, stringValue);
-          }
-        }
-      };
-
-      // Dynamically build the query string from the tool's input context.
-      appendIfExists("fromDt", context.fromDt);
-      appendIfExists("toDt", context.toDt);
-      appendIfExists("displayId", context.displayId);
-      appendIfExists("displayIds", context.displayIds);
-      appendIfExists(
-        "returnDisplayLocalTime",
-        context.returnDisplayLocalTime
-      );
-      appendIfExists("returnDateFormat", context.returnDateFormat);
-
-      logger.info(`Requesting time disconnected stats from: ${url.toString()}`);
-
-      // Perform the GET request to the Xibo CMS API.
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: await getAuthHeaders(),
-      });
-
-      // Read the response body as text to handle various response formats.
-      const responseText = await response.text();
-      let responseData: any;
-
-      try {
-        responseData = JSON.parse(responseText);
-      } catch (e) {
-        responseData = responseText;
-      }
-
-      // Handle non-successful HTTP responses.
-      if (!response.ok) {
-        const decodedText = decodeErrorMessage(responseText);
-        const errorMessage = `Failed to get time disconnected stats. API responded with status ${response.status}.`;
-        logger.error(errorMessage, {
-          status: response.status,
-          response: decodedText,
-        });
-        throw new Error(`${errorMessage} Message: ${decodedText}`);
-      }
-
-      // Validate the structure of the successful response data.
-      const validationResult =
-        z.array(timeDisconnectedSchema).safeParse(responseData);
-
-      if (!validationResult.success) {
-        const errorMessage =
-          "Time disconnected response validation failed.";
-        logger.error(errorMessage, {
-          error: validationResult.error.issues,
-          data: responseData,
-        });
-        throw new Error(errorMessage, { cause: validationResult.error });
-      }
-
-      // On success, log and return the validated data.
-      logger.info(
-        `Successfully retrieved ${validationResult.data.length} time disconnected records.`
-      );
-      return validationResult.data;
-    } catch (error: any) {
-      // Catch any other errors, log them, and re-throw.
-      const errorMessage = `An unexpected error occurred in getTimeDisconnected: ${error.message}`;
-      logger.error(errorMessage, { error });
-      throw error;
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      responseData = responseText;
     }
+
+    // Handle non-successful HTTP responses.
+    if (!response.ok) {
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to get time disconnected stats. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        response: decodedText,
+      });
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: responseData,
+        },
+      };
+    }
+
+    // Validate the structure of the successful response data.
+    const validationResult =
+      z.array(timeDisconnectedSchema).safeParse(responseData);
+
+    if (!validationResult.success) {
+      const errorMessage = "Time disconnected response validation failed.";
+      logger.error(errorMessage, {
+        error: validationResult.error.issues,
+        data: responseData,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationIssues: validationResult.error.issues,
+          receivedData: responseData,
+        },
+      };
+    }
+
+    // On success, log and return the validated data.
+    logger.info(
+      `Successfully retrieved ${validationResult.data.length} time disconnected records.`
+    );
+    return {
+      success: true,
+      data: validationResult.data,
+    };
   },
 });
 

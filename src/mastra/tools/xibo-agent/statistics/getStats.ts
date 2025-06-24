@@ -46,6 +46,28 @@ const statisticsDataSchema = z.object({
 });
 
 /**
+ * Defines the schema for a successful response, containing an array of stats and a success flag.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  data: z
+    .array(statisticsDataSchema)
+    .describe("An array of statistics data records."),
+});
+
+/**
+ * Defines the schema for a failed operation, including a success flag, a message, and optional error details.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * A tool for retrieving statistics data from the Xibo CMS.
  * It supports a wide range of filters to search and retrieve specific statistics.
  */
@@ -111,103 +133,118 @@ export const getStats = createTool({
       .describe("Embed additional data. Options include: 'layoutTags', 'displayTags', 'mediaTags'. Can be a comma-separated list."),
   }),
   outputSchema: z
-    .array(statisticsDataSchema)
+    .union([successSchema, errorSchema])
     .describe("An array of statistics data records."),
-  execute: async ({ context }) => {
+  execute: async ({
+    context,
+  }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
     // Ensure the CMS URL is configured before proceeding.
     if (!config.cmsUrl) {
       const errorMessage = "CMS URL is not configured.";
       logger.error(errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    try {
-      // Construct the API endpoint URL.
-      const url = new URL(`${config.cmsUrl}/api/stats`);
-
-      // Helper function to append a query parameter to the URL only if it has a value.
-      // This keeps the resulting URL clean and avoids sending empty parameters.
-      const appendIfExists = (key: string, value: any) => {
-        if (value !== undefined && value !== null) {
-          const stringValue = String(value);
-          if (stringValue !== "") {
-            url.searchParams.append(key, stringValue);
-          }
-        }
+      return {
+        success: false,
+        message: errorMessage,
       };
-
-      // Dynamically build the query string from the tool's input context.
-      appendIfExists("type", context.type);
-      appendIfExists("fromDt", context.fromDt);
-      appendIfExists("toDt", context.toDt);
-      appendIfExists("statDate", context.statDate);
-      appendIfExists("statId", context.statId);
-      appendIfExists("displayId", context.displayId);
-      appendIfExists("displayIds", context.displayIds);
-      appendIfExists("layoutId", context.layoutId);
-      appendIfExists("parentCampaignId", context.parentCampaignId);
-      appendIfExists("mediaId", context.mediaId);
-      appendIfExists("campaignId", context.campaignId);
-      appendIfExists("returnDisplayLocalTime", context.returnDisplayLocalTime);
-      appendIfExists("returnDateFormat", context.returnDateFormat);
-      appendIfExists("embed", context.embed);
-
-      logger.info(`Requesting statistics from: ${url.toString()}`);
-
-      // Perform the GET request to the Xibo CMS API.
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: await getAuthHeaders(),
-      });
-      
-      // Read the response body as text first to handle both JSON and non-JSON error messages.
-      const responseText = await response.text();
-      let responseData: any;
-
-      // Attempt to parse the response as JSON. If it fails, use the raw text.
-      // This is crucial for capturing non-JSON error details from the API.
-      try {
-        responseData = JSON.parse(responseText);
-      } catch (e) {
-        responseData = responseText;
-      }
-
-      // Handle non-successful HTTP responses.
-      if (!response.ok) {
-        const decodedText = decodeErrorMessage(responseText);
-        const errorMessage = `Failed to get statistics. API responded with status ${response.status}.`;
-        logger.error(errorMessage, {
-          status: response.status,
-          response: decodedText,
-        });
-        throw new Error(`${errorMessage} Message: ${decodedText}`);
-      }
-
-      // Validate the structure of the successful response data using Zod's safeParse.
-      const validationResult =
-        z.array(statisticsDataSchema).safeParse(responseData);
-
-      // If validation fails, log the details and throw an error.
-      if (!validationResult.success) {
-        const errorMessage = "Statistics response validation failed.";
-        logger.error(errorMessage, {
-          error: validationResult.error.issues,
-          data: responseData,
-        });
-        throw new Error(errorMessage, { cause: validationResult.error });
-      }
-
-      // On success, log the number of records retrieved and return the validated data.
-      logger.info(
-        `Successfully retrieved ${validationResult.data.length} statistics records.`
-      );
-      return validationResult.data;
-    } catch (error: any) {
-      // Catch any other errors that occur during execution, log them, and re-throw.
-      const errorMessage = `An unexpected error occurred in getStats: ${error.message}`;
-      logger.error(errorMessage, { error });
-      throw error;
     }
+
+    // Construct the API endpoint URL.
+    const url = new URL(`${config.cmsUrl}/api/stats`);
+
+    // Helper function to append a query parameter to the URL only if it has a value.
+    // This keeps the resulting URL clean and avoids sending empty parameters.
+    const appendIfExists = (key: string, value: any) => {
+      if (value !== undefined && value !== null) {
+        const stringValue = String(value);
+        if (stringValue !== "") {
+          url.searchParams.append(key, stringValue);
+        }
+      }
+    };
+
+    // Dynamically build the query string from the tool's input context.
+    appendIfExists("type", context.type);
+    appendIfExists("fromDt", context.fromDt);
+    appendIfExists("toDt", context.toDt);
+    appendIfExists("statDate", context.statDate);
+    appendIfExists("statId", context.statId);
+    appendIfExists("displayId", context.displayId);
+    appendIfExists("displayIds", context.displayIds);
+    appendIfExists("layoutId", context.layoutId);
+    appendIfExists("parentCampaignId", context.parentCampaignId);
+    appendIfExists("mediaId", context.mediaId);
+    appendIfExists("campaignId", context.campaignId);
+    appendIfExists("returnDisplayLocalTime", context.returnDisplayLocalTime);
+    appendIfExists("returnDateFormat", context.returnDateFormat);
+    appendIfExists("embed", context.embed);
+
+    logger.info(`Requesting statistics from: ${url.toString()}`);
+
+    // Perform the GET request to the Xibo CMS API.
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: await getAuthHeaders(),
+    });
+
+    // Read the response body as text first to handle both JSON and non-JSON error messages.
+    const responseText = await response.text();
+    let responseData: any;
+
+    // Attempt to parse the response as JSON. If it fails, use the raw text.
+    // This is crucial for capturing non-JSON error details from the API.
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      responseData = responseText;
+    }
+
+    // Handle non-successful HTTP responses.
+    if (!response.ok) {
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to get statistics. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        response: decodedText,
+      });
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: responseData,
+        },
+      };
+    }
+
+    // Validate the structure of the successful response data using Zod's safeParse.
+    const validationResult =
+      z.array(statisticsDataSchema).safeParse(responseData);
+
+    // If validation fails, log the details and throw an error.
+    if (!validationResult.success) {
+      const errorMessage = "Statistics response validation failed.";
+      logger.error(errorMessage, {
+        error: validationResult.error.issues,
+        data: responseData,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationIssues: validationResult.error.issues,
+          receivedData: responseData,
+        },
+      };
+    }
+
+    // On success, log the number of records retrieved and return the validated data.
+    logger.info(
+      `Successfully retrieved ${validationResult.data.length} statistics records.`
+    );
+    return {
+      success: true,
+      data: validationResult.data,
+    };
   },
 });
 

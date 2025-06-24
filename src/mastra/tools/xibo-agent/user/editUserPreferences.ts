@@ -35,7 +35,9 @@ const userOptionSchema = z.object({
  * Schema for the successful response from the API.
  * The API returns the updated user object upon success.
  */
-const responseSchema = z.object({
+const successSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
     userId: z.number(),
     userName: z.string(),
     userTypeId: z.number(),
@@ -45,8 +47,20 @@ const responseSchema = z.object({
     homeFolderId: z.number(),
     lastAccessed: z.string().nullable(),
     // Add other user fields as needed from the actual API response
+  }),
 });
 
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
 
 /**
  * A tool for editing the preferences of a specific user in the Xibo CMS.
@@ -61,73 +75,88 @@ export const editUserPreferences = createTool({
       .array(userOptionSchema)
       .describe("An array of preference objects to set."),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }) => {
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
     if (!config.cmsUrl) {
       const errorMessage = "CMS URL is not configured.";
       logger.error(errorMessage);
-      throw new Error(errorMessage);
+      return {
+        success: false,
+        message: errorMessage,
+      };
     }
 
-    // The API endpoint for setting user preferences is typically associated with a user ID.
-    // Based on setUserPreferences, the endpoint seems to be /api/user/pref.
-    // However, a more RESTful approach would be /api/user/{userId}/preferences.
-    // For now, we assume an endpoint that can be targeted with a POST request and a specific body structure.
-    // NOTE: The reference `setUserPreferences` used `/api/user/pref`. We will adapt to a more specific endpoint.
     const url = new URL(`${config.cmsUrl}/api/user/pref/${context.userId}`);
 
-    logger.info(`Editing user preferences for user ID ${context.userId} at: ${url.toString()}`);
+    logger.info(
+      `Editing user preferences for user ID ${context.userId} at: ${url.toString()}`
+    );
 
+    const response = await fetch(url.toString(), {
+      method: "PUT",
+      headers: {
+        ...(await getAuthHeaders()),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(context.preferences),
+    });
+
+    const responseText = await response.text();
+    let responseData: any;
     try {
-      const response = await fetch(url.toString(), {
-        method: "POST",
-        headers: {
-            ...(await getAuthHeaders()),
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify(context.preferences),
-      });
-
-      const responseText = await response.text();
-      let responseData: any;
-      try {
-          responseData = JSON.parse(responseText);
-      } catch (e) {
-          responseData = responseText;
-      }
-
-
-      if (!response.ok) {
-        const errorMessage = `Failed to edit user preferences: ${response.status} ${response.statusText}`;
-        logger.error(errorMessage, { response: responseData });
-        throw new Error(
-          `HTTP error! status: ${response.status}, message: ${responseData}`,
-        );
-      }
-
-      // Validate the response data against the schema
-      const validationResult = responseSchema.safeParse(responseData);
-
-      if (!validationResult.success) {
-        const errorMessage = "Zod validation error editing user preferences.";
-        logger.error(errorMessage, { error: validationResult.error.issues, data: responseData });
-        throw new Error(errorMessage, { cause: validationResult.error });
-      }
-
-      const successMessage = `Successfully edited preferences for user ID ${context.userId}.`;
-      logger.info(successMessage, { data: validationResult.data });
-
-      return validationResult.data;
-    } catch (error: any) {
-      if (error instanceof Error && !(error instanceof z.ZodError)) {
-        throw error;
-      }
-
-      const errorMessage =
-        "An unexpected error occurred while editing user preferences.";
-      logger.error(errorMessage, { error });
-      throw new Error(errorMessage);
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      responseData = responseText;
     }
+
+    if (!response.ok) {
+      const errorMessage = `Failed to edit user preferences: ${response.status} ${response.statusText}`;
+      logger.error(errorMessage, { response: responseData });
+      return {
+        success: false,
+        message: `${errorMessage} - ${
+          typeof responseData === "string"
+            ? responseData
+            : JSON.stringify(responseData)
+        }`,
+        error: {
+          statusCode: response.status,
+          responseBody: responseData,
+        },
+      };
+    }
+
+    // Validate the response data against the schema
+    const validationResult = successSchema.shape.data.safeParse(responseData);
+
+    if (!validationResult.success) {
+      const errorMessage =
+        "User preferences edit response validation failed.";
+      logger.error(errorMessage, {
+        error: validationResult.error.issues,
+        data: responseData,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationIssues: validationResult.error.issues,
+          receivedData: responseData,
+        },
+      };
+    }
+
+    const successMessage = `Successfully edited preferences for user ID ${context.userId}.`;
+    logger.info(successMessage, { data: validationResult.data });
+
+    return {
+      success: true,
+      data: validationResult.data,
+    };
   },
 });
 

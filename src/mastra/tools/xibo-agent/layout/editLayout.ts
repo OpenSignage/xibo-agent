@@ -266,6 +266,23 @@ export function layoutToTree(layout: any): TreeNode[] {
 }
 
 /**
+ * Defines the schema for a successful response.
+ */
+const successSchema = z.any();
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * Tool to update an existing layout
  * Implements the layout/{id} PUT endpoint from Xibo API
  * Allows updating various properties of a layout and supports tree view visualization
@@ -282,131 +299,184 @@ export const editLayout = createTool({
     enableStat: z.number().optional().describe('Flag indicating whether the Layout stat is enabled (0-1)'),
     code: z.string().optional().describe('Layout identification code'),
     folderId: z.number().optional().describe('Folder ID to which this object should be assigned to'),
-    includeTree: z.boolean().optional().default(false).describe('Include the layout structure as a tree view')
+    includeTree: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Include the layout structure as a tree view"),
   }),
 
-  outputSchema: z.any(),
-  execute: async ({ context }) => {
-    try {
-      if (!config.cmsUrl) {
-        logger.error("putLayout: CMS URL is not configured");
-        throw new Error("CMS URL is not configured");
-      }
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured";
+      logger.error(`editLayout: ${errorMessage}`);
+      return { success: false, message: errorMessage };
+    }
 
-      logger.info(`Updating layout ${context.layoutId} with parameters: ${JSON.stringify({
+    logger.info(
+      `Updating layout ${context.layoutId} with parameters: ${JSON.stringify({
         name: context.name,
         description: context.description,
         tags: context.tags,
         retired: context.retired,
         enableStat: context.enableStat,
         code: context.code,
-        folderId: context.folderId
-      })}`);
+        folderId: context.folderId,
+      })}`
+    );
 
-      const headers = await getAuthHeaders();
+    const headers = await getAuthHeaders();
 
-      // Build form data
-      const formData = new URLSearchParams();
-      formData.append('name', context.name);
-      if (context.description) formData.append('description', context.description);
-      if (context.tags) formData.append('tags', context.tags);
-      if (context.retired !== undefined) formData.append('retired', context.retired.toString());
-      if (context.enableStat !== undefined) formData.append('enableStat', context.enableStat.toString());
-      if (context.code) formData.append('code', context.code);
-      if (context.folderId) formData.append('folderId', context.folderId.toString());
+    // Build form data
+    const formData = new URLSearchParams();
+    formData.append("name", context.name);
+    if (context.description) formData.append("description", context.description);
+    if (context.tags) formData.append("tags", context.tags);
+    if (context.retired !== undefined)
+      formData.append("retired", context.retired.toString());
+    if (context.enableStat !== undefined)
+      formData.append("enableStat", context.enableStat.toString());
+    if (context.code) formData.append("code", context.code);
+    if (context.folderId)
+      formData.append("folderId", context.folderId.toString());
 
-      const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
+    const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
 
-      // Send the update request
-      logger.debug(`Sending PUT request to ${url}`);
-      const response = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: formData.toString()
+    // Send the update request
+    logger.debug(`Sending PUT request to ${url}`);
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        ...headers,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formData.toString(),
+    });
+
+    // Handle error response
+    if (!response.ok) {
+      const responseText = await response.text();
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to update layout. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        layoutId: context.layoutId,
+        response: decodedText,
       });
 
-      // Handle error response
-      if (!response.ok) {
-        const responseText = await response.text();
-        const errorMessage = decodeErrorMessage(responseText);
-        logger.error(`Failed to update layout ${context.layoutId}: ${errorMessage}`, {
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
           statusCode: response.status,
-          response: responseText
+          responseBody: decodedText,
+        },
+      };
+    }
+
+    // Parse and validate the response
+    let validatedData;
+    try {
+      const data = await response.json();
+      validatedData = layoutResponseSchema.parse(data);
+      logger.info(`Successfully updated layout ${context.layoutId}`);
+    } catch (validationError) {
+      const errorMessage = "Response data validation failed after update.";
+      logger.error(errorMessage, {
+        error:
+          validationError instanceof Error
+            ? validationError.message
+            : "Unknown validation error",
+        layoutId: context.layoutId,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error:
+          validationError instanceof Error
+            ? validationError.message
+            : "Unknown validation error",
+      };
+    }
+
+    // Generate tree view if requested
+    if (context.includeTree) {
+      logger.info(`Generating tree view for layout ${context.layoutId}`);
+
+      // Fetch detailed layout data including regions and widgets
+      const detailUrl = `${config.cmsUrl}/api/layout/${context.layoutId}?embed=regions,playlists,widgets`;
+      logger.debug(`Fetching detailed layout data from ${detailUrl}`);
+
+      const detailResponse = await fetch(detailUrl, {
+        method: "GET",
+        headers: headers,
+      });
+
+      if (!detailResponse.ok) {
+        const responseText = await detailResponse.text();
+        const errorMessage = `Failed to fetch detailed layout data for tree view: ${decodeErrorMessage(responseText)}`;
+        logger.warn(errorMessage, {
+          statusCode: detailResponse.status,
         });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
+        // Return basic layout data without tree view as a fallback
+        return {
+          success: true,
+          message:
+            "Layout updated, but failed to fetch details for tree view.",
+          data: validatedData,
+          warning: errorMessage,
+        };
       }
 
-      // Parse and validate the response
-      const data = await response.json();
-      const validatedData = layoutResponseSchema.parse(data);
-      logger.info(`Successfully updated layout ${context.layoutId}`);
+      const detailData = await detailResponse.json();
 
-      // Generate tree view if requested
-      if (context.includeTree) {
-        logger.info(`Generating tree view for layout ${context.layoutId}`);
-        
-        // Fetch detailed layout data including regions and widgets
-        const detailUrl = `${config.cmsUrl}/api/layout/${context.layoutId}?embed=regions,playlists,widgets`;
-        logger.debug(`Fetching detailed layout data from ${detailUrl}`);
-        
-        const detailResponse = await fetch(detailUrl, {
-          method: 'GET',
-          headers: headers
-        });
+      // Convert layout to tree structure
+      const layoutTree = layoutToTree(detailData);
+      logger.debug(
+        `Generated tree structure with ${
+          layoutTree[0].children?.length || 0
+        } regions`
+      );
 
-        if (!detailResponse.ok) {
-          const responseText = await detailResponse.text();
-          const errorMessage = decodeErrorMessage(responseText);
-          logger.warn(`Failed to fetch detailed layout data for tree view: ${errorMessage}`, {
-            statusCode: detailResponse.status,
-            response: responseText
-          });
-          // Return basic layout data without tree view
-          return validatedData;
-        }
-
-        const detailData = await detailResponse.json();
-        
-        // Convert layout to tree structure
-        const layoutTree = layoutToTree(detailData);
-        logger.debug(`Generated tree structure with ${layoutTree[0].children?.length || 0} regions`);
-        
-        // Create tree view response with visual formatting
-        const treeResponse = createTreeViewResponse(validatedData, layoutTree, (node) => {
+      // Create tree view response with visual formatting
+      const treeResponse = createTreeViewResponse(
+        validatedData,
+        layoutTree,
+        (node) => {
           let displayText = `${node.name}`;
-          
-          if (node.type === 'layout') {
+
+          if (node.type === "layout") {
             displayText += ` (${node.width}×${node.height})`;
             if (node.duration) {
               displayText += ` [${node.duration}s]`;
             }
-          } else if (node.type === 'region') {
+          } else if (node.type === "region") {
             displayText += ` (${node.width}×${node.height} at ${node.left},${node.top})`;
             if (node.duration) {
               displayText += ` [${node.duration}s]`;
             }
-          } else if (node.type === 'widget') {
+          } else if (node.type === "widget") {
             if (node.duration) {
               displayText += ` [${node.duration}s]`;
             }
           }
-          
-          return displayText;
-        });
-        
-        logger.info(`Successfully generated tree view for layout ${context.layoutId}`);
-        return treeResponse;
-      }
 
-      // Return basic layout data without tree view
-      return validatedData;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`putLayout: An error occurred: ${errorMessage}`, { error });
-      throw error;
+          return displayText;
+        }
+      );
+
+      logger.info(
+        `Successfully generated tree view for layout ${context.layoutId}`
+      );
+      return treeResponse;
     }
+
+    // Return basic layout data without tree view
+    return validatedData;
   },
-}); 
+});

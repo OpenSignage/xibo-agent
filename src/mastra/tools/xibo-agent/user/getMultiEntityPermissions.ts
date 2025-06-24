@@ -2,6 +2,8 @@ import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { logger } from "../../../index";
+import { decodeErrorMessage } from "../utility/error";
 
 const permissionSchema = z.object({
   groupId: z.number(),
@@ -11,9 +13,18 @@ const permissionSchema = z.object({
   delete: z.number(),
 });
 
-const apiResponseSchema = z.object({
-  success: z.boolean(),
+const successSchema = z.object({
+  success: z.literal(true),
   data: z.array(permissionSchema),
+});
+
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
 });
 
 export const getMultiEntityPermissions = createTool({
@@ -23,30 +34,83 @@ export const getMultiEntityPermissions = createTool({
     entity: z.string(),
     ids: z.string(),
   }),
-  outputSchema: apiResponseSchema,
-  execute: async ({ context }) => {
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      const errorMessage = "CMS URL is not configured.";
+      logger.error(errorMessage);
+      return {
+        success: false,
+        message: errorMessage,
+      };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/user/permissions/${context.entity}`);
+    const url = new URL(
+      `${config.cmsUrl}/api/user/permissions/${context.entity}`
+    );
     url.searchParams.append("ids", context.ids);
-    
-    console.log(`Requesting URL: ${url.toString()}`);
+
+    logger.info(`Requesting multi-entity permissions from: ${url.toString()}`);
 
     const response = await fetch(url.toString(), {
       method: "GET",
       headers: await getAuthHeaders(),
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    const responseText = await response.text();
+    let responseData: any;
+
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      responseData = responseText;
     }
 
-    const rawData = await response.json();
-    const validatedData = apiResponseSchema.parse(rawData);
-    console.log("Multi-entity permissions retrieved successfully");
-    return validatedData;
+    if (!response.ok) {
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to get multi-entity permissions. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        response: decodedText,
+      });
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: decodedText,
+        },
+      };
+    }
+
+    const validationResult = successSchema.safeParse({
+      success: true, // Assuming success if response is ok
+      data: responseData,
+    });
+
+    if (!validationResult.success) {
+      const errorMessage =
+        "Multi-entity permissions response validation failed.";
+      logger.error(errorMessage, {
+        error: validationResult.error.issues,
+        data: responseData,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationIssues: validationResult.error.issues,
+          receivedData: responseData,
+        },
+      };
+    }
+
+    logger.info("Multi-entity permissions retrieved successfully");
+    return validationResult.data;
   },
 });
 

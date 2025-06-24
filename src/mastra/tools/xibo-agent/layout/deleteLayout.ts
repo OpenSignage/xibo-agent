@@ -24,65 +24,95 @@ import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
 
 /**
+ * Defines the schema for a successful response.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  message: z.string().optional(),
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * Tool for deleting layouts in Xibo CMS
  * Makes a DELETE request to the CMS API to remove an existing layout
  */
 export const deleteLayout = createTool({
-  id: 'delete-layout',
-  description: 'Deletes a layout from Xibo CMS',
+  id: "delete-layout",
+  description: "Deletes a layout from Xibo CMS",
   inputSchema: z.object({
-    layoutId: z.number().describe('Layout ID to delete')
+    layoutId: z.number().describe("Layout ID to delete"),
   }),
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
+    logger.info(`Deleting layout with ID: ${context.layoutId}`);
 
-  outputSchema: z.object({
-    success: z.boolean(),
-    message: z.string()
-  }),
-  execute: async ({ context }) => {
-    try {
-      logger.info(`Deleting layout with ID: ${context.layoutId}`);
-
-      if (!config.cmsUrl) {
-        logger.error("CMS URL is not configured");
-        throw new Error("CMS URL is not configured");
-      }
-
-      // Get authentication headers for the API request
-      const headers = await getAuthHeaders();
-
-      // Construct the API endpoint URL for the layout deletion
-      const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
-      logger.debug(`Sending DELETE request to ${url}`);
-
-      // Make a DELETE request to the Xibo CMS API
-      const response = await fetch(url, {
-        method: 'DELETE',
-        headers: headers
-      });
-
-      // Handle error responses from the API
-      if (!response.ok) {
-        const errorText = await response.text();
-        const decodedError = decodeErrorMessage(errorText);
-        logger.error(`Failed to delete layout: ${decodedError}`, {
-          status: response.status,
-          layoutId: context.layoutId
-        });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
-      }
-
-      logger.info(`Layout ID ${context.layoutId} deleted successfully`);
-      return { success: true, message: "Layout deleted successfully" };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`Error in deleteLayout: ${errorMessage}`, {
-        error,
-        layoutId: context.layoutId
-      });
-      return { 
-        success: false, 
-        message: `Error occurred: ${errorMessage}`
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured";
+      logger.error(`deleteLayout: ${errorMessage}`);
+      return {
+        success: false,
+        message: errorMessage,
       };
     }
+
+    // Get authentication headers for the API request
+    const headers = await getAuthHeaders();
+
+    // Construct the API endpoint URL for the layout deletion
+    const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
+    logger.debug(`Sending DELETE request to ${url}`);
+
+    // Make a DELETE request to the Xibo CMS API
+    const response = await fetch(url, {
+      method: "DELETE",
+      headers: headers,
+    });
+
+    // Handle 204 No Content response for successful deletion
+    if (response.status === 204) {
+      logger.info(`Layout ID ${context.layoutId} deleted successfully`);
+      return { success: true, message: "Layout deleted successfully" };
+    }
+    
+    // Handle error responses from the API
+    if (!response.ok) {
+      const responseText = await response.text();
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to delete layout. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        layoutId: context.layoutId,
+        response: decodedText,
+      });
+
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: decodedText,
+        },
+      };
+    }
+
+    // This part might not be reached if API always returns 204 on success,
+    // but it's here for completeness.
+    logger.info(`Layout ID ${context.layoutId} deleted successfully with status ${response.status}`);
+    return { success: true, message: "Layout deleted successfully" };
   },
-}); 
+});

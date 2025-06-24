@@ -26,6 +26,27 @@ import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
 
 /**
+ * Defines the schema for a successful response, containing the cleared layout data.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  message: z.string().optional(),
+  data: z.any().optional(), // Using z.any() as the layout structure is complex.
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * Permission schema for layout, region, and widget permissions
  */
 const permissionSchema = z.object({
@@ -206,90 +227,95 @@ export const clearLayout = createTool({
   id: 'clear-layout',
   description: 'Clear all content from a layout canvas',
   inputSchema: z.object({
-    layoutId: z.number().describe('ID of the layout to clear')
+    layoutId: z.number().describe("ID of the layout to clear"),
   }),
-  outputSchema: z.object({
-    success: z.boolean(),
-    message: z.string().optional(),
-    data: layoutClearResponseSchema.optional(),
-    error: z.object({
-      status: z.number().optional(),
-      message: z.string(),
-      details: z.any().optional(),
-      help: z.string().optional()
-    }).optional()
-  }),
-  execute: async ({ context }) => {
-    try {
-      if (!config.cmsUrl) {
-        logger.error("clearLayout: CMS URL is not configured");
-        throw new Error("CMS URL is not configured");
-      }
-
-      logger.info(`Clearing layout with ID: ${context.layoutId}`);
-      
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
-
-      logger.info(`Sending POST request to ${url} to clear layout`);
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
-      });
-
-      // Parse response data
-      const data = await response.json();
-
-      if (!response.ok) {
-        const errorMessage = decodeErrorMessage(JSON.stringify(data));
-        logger.error(`Failed to clear layout ${context.layoutId}: ${errorMessage}`, {
-          status: response.status,
-          layoutId: context.layoutId
-        });
-
-        return {
-          success: false,
-          error: {
-            status: response.status,
-            message: errorMessage,
-            details: data
-          }
-        };
-      }
-
-      // Validate response data
-      try {
-        const validatedData = layoutClearResponseSchema.parse(data);
-        logger.info(`Successfully cleared layout ${context.layoutId}`);
-        return {
-          success: true,
-          data: validatedData
-        };
-      } catch (validationError) {
-        logger.error(`Layout data validation failed`, {
-          error: validationError,
-          layoutId: context.layoutId
-        });
-        return {
-          success: false,
-          error: {
-            message: "Layout data validation failed",
-            details: validationError
-          }
-        };
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`clearLayout: An error occurred: ${errorMessage}`, { error });
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured";
+      logger.error(`clearLayout: ${errorMessage}`);
       return {
         success: false,
+        message: errorMessage,
+      };
+    }
+
+    logger.info(`Clearing layout with ID: ${context.layoutId}`);
+
+    const headers = await getAuthHeaders();
+    const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
+
+    logger.info(`Sending POST request to ${url} to clear layout`);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        ...headers,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    });
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to clear layout. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        layoutId: context.layoutId,
+        response: decodedText,
+      });
+
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
         error: {
-          message: errorMessage,
-          type: error instanceof Error ? error.constructor.name : 'Unknown'
-        }
+          statusCode: response.status,
+          responseBody: decodedText,
+        },
+      };
+    }
+    
+    // Successful response might have a body or not (e.g. 204 No Content)
+    const responseText = await response.text();
+    if (!responseText) {
+        logger.info(`Successfully cleared layout ${context.layoutId} (No Content)`);
+        return {
+          success: true,
+          message: "Layout cleared successfully.",
+        };
+    }
+
+    try {
+      const data = JSON.parse(responseText);
+      const validatedData = layoutClearResponseSchema.parse(data);
+      logger.info(`Successfully cleared layout ${context.layoutId}`);
+      return {
+        success: true,
+        data: validatedData,
+      };
+    } catch (validationError) {
+      const errorMessage = "Response data validation failed after clearing layout.";
+      logger.error(errorMessage, {
+        error:
+          validationError instanceof Error
+            ? validationError.message
+            : "Unknown validation error",
+        layoutId: context.layoutId,
+        receivedData: responseText
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationError:
+            validationError instanceof Error
+              ? validationError.message
+              : "Unknown validation error",
+          receivedData: responseText
+        },
       };
     }
   },

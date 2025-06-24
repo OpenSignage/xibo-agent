@@ -26,6 +26,27 @@ import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
 
 /**
+ * Defines the schema for a successful response, containing the checked-out layout data.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  message: z.string().optional(),
+  data: z.any().optional(), // Using z.any() as the layout structure is complex.
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * Permission schema for layout, region, and widget permissions
  */
 const permissionSchema = z.object({
@@ -206,95 +227,96 @@ export const checkoutLayout = createTool({
   id: 'checkout-layout',
   description: 'Checkout a layout for editing',
   inputSchema: z.object({
-    layoutId: z.number().describe('ID of the layout to checkout')
+    layoutId: z.number().describe("ID of the layout to checkout"),
   }),
-  outputSchema: z.object({
-    success: z.boolean(),
-    message: z.string().optional(),
-    data: layoutCheckoutResponseSchema.optional(),
-    error: z.object({
-      status: z.number().optional(),
-      message: z.string(),
-      details: z.any().optional(),
-      help: z.string().optional()
-    }).optional()
-  }),
-  execute: async ({ context }) => {
-    try {
-      // Check CMS URL configuration
-      if (!config.cmsUrl) {
-        logger.error('checkoutLayout: CMS URL is not configured');
-        throw new Error("CMS URL is not configured");
-      }
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
+    // Check CMS URL configuration
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured";
+      logger.error(`checkoutLayout: ${errorMessage}`);
+      return {
+        success: false,
+        message: errorMessage,
+      };
+    }
 
-      // Log checkout operation start
-      logger.info(`Checking out layout ${context.layoutId}`);
+    // Log checkout operation start
+    logger.info(`Checking out layout ${context.layoutId}`);
 
-      // Prepare request
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/checkout/${context.layoutId}`;
+    // Prepare request
+    const headers = await getAuthHeaders();
+    const url = `${config.cmsUrl}/api/layout/checkout/${context.layoutId}`;
 
-      // Send checkout request to CMS
-      const response = await fetch(url, {
-        method: 'PUT',
-        headers
-      });
-
-      // Parse response data
-      const data = await response.json();
-
-      // Handle error response
-      if (!response.ok) {
-        const errorMessage = decodeErrorMessage(JSON.stringify(data));
-        logger.error(`Failed to checkout layout: ${errorMessage}`, {
-          status: response.status,
-          layoutId: context.layoutId
+    // Send checkout request to CMS
+    const response = await fetch(url, {
+      method: "PUT",
+      headers,
+    });
+    
+    if (!response.ok) {
+        const responseText = await response.text();
+        const decodedText = decodeErrorMessage(responseText);
+        const errorMessage = `Failed to checkout layout. API responded with status ${response.status}.`;
+        logger.error(errorMessage, {
+            status: response.status,
+            layoutId: context.layoutId,
+            response: decodedText,
         });
 
         return {
-          success: false,
-          error: {
-            status: response.status,
-            message: errorMessage,
-            details: data
-          }
+            success: false,
+            message: `${errorMessage} Message: ${decodedText}`,
+            error: {
+                statusCode: response.status,
+                responseBody: decodedText,
+            },
         };
-      }
-
-      // Validate response data
-      try {
-        const validatedData = layoutCheckoutResponseSchema.parse(data);
-        logger.info(`Successfully checked out layout ${context.layoutId}`);
+    }
+    
+    // Successful response might have a body or not (e.g. 204 No Content)
+    const responseText = await response.text();
+    if (!responseText) {
+        logger.info(`Successfully checked out layout ${context.layoutId} (No Content)`);
         return {
           success: true,
-          data: validatedData
+          message: "Layout checked out successfully.",
         };
-      } catch (validationError) {
-        logger.error(`Layout data validation failed`, {
-          error: validationError,
-          layoutId: context.layoutId
-        });
-        return {
-          success: false,
-          error: {
-            message: "Layout data validation failed",
-            details: validationError
-          }
-        };
-      }
-    } catch (error) {
-      // Handle unexpected errors
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`Error in checkoutLayout: ${errorMessage}`, {
-        error,
-        layoutId: context.layoutId
+    }
+
+    // Validate response data
+    try {
+      const data = JSON.parse(responseText);
+      const validatedData = layoutCheckoutResponseSchema.parse(data);
+      logger.info(`Successfully checked out layout ${context.layoutId}`);
+      return {
+        success: true,
+        data: validatedData,
+      };
+    } catch (validationError) {
+      const errorMessage = "Response data validation failed after checkout.";
+      logger.error(errorMessage, {
+        error:
+          validationError instanceof Error
+            ? validationError.message
+            : "Unknown validation error",
+        layoutId: context.layoutId,
+        receivedData: responseText
       });
       return {
         success: false,
+        message: errorMessage,
         error: {
-          message: errorMessage,
-          type: error instanceof Error ? error.constructor.name : 'Unknown'
-        }
+          validationError:
+            validationError instanceof Error
+              ? validationError.message
+              : "Unknown validation error",
+          receivedData: responseText
+        },
       };
     }
   },
