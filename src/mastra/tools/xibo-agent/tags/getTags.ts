@@ -192,6 +192,16 @@ export const getTags = createTool({
       };
     }
 
+    // On success, check if any tags were actually found.
+    if (validationResult.data.length === 0) {
+      const errorMessage = "Tag not found.";
+      logger.info(errorMessage, { context });
+      return {
+        success: false,
+        message: errorMessage,
+      };
+    }
+
     // On success, log and return the validated data.
     logger.info(
       `Successfully retrieved ${validationResult.data.length} tag records.`
