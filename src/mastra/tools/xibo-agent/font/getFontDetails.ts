@@ -26,33 +26,32 @@ import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for font details data structure
- * Supports both array and object formats for details
+ * Schema for the structure of font details.
  */
 const fontDetailsSchema = z.object({
-  details: z.union([
-    z.array(z.any()), 
-    z.record(z.any())  // オブジェクト形式もサポート
-  ]),
+  details: z.union([z.array(z.any()), z.record(z.any())])
+    .describe("The detailed information about the font, which can be an array or an object."),
 });
 
 /**
- * Schema for API response validation with multiple possible formats
- * Handles different response structures that the API might return:
- * 1. Standard format: { success: boolean, data: { details: [...] } }
- * 2. Direct details object: { details: [...] }
- * 3. Direct array format: [...]
- * 4. Object with details as object: { details: {...} }
+ * Defines the schema for a successful response.
  */
-const apiResponseSchema = z.union([
-  z.object({
-    success: z.boolean(),
-    data: fontDetailsSchema,
-  }),
-  fontDetailsSchema,
-  z.array(z.any()),
-  z.record(z.any()),  // 任意のオブジェクト形式も許可
-]);
+const successSchema = z.object({
+  success: z.literal(true),
+  data: fontDetailsSchema,
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
 
 /**
  * Tool for retrieving detailed information about a specific font from Xibo CMS
@@ -61,67 +60,91 @@ export const getFontDetails = createTool({
   id: "get-font-details",
   description: "Retrieve detailed information about a specific font",
   inputSchema: z.object({
-    id: z.number().describe("The Font ID to retrieve details for"),
+    fontId: z.number().describe("The Font ID to retrieve details for"),
   }),
-  outputSchema: apiResponseSchema,
-  execute: async ({ context }) => {
-    try {
-      if (!config.cmsUrl) {
-        logger.error("getFontDetails: CMS URL is not set");
-        throw new Error("CMS URL is not set");
-      }
-
-      const url = new URL(`${config.cmsUrl}/api/fonts/details/${context.id}`);
-      logger.info(`Requesting font details for ID: ${context.id}`);
-      logger.debug(`Request URL: ${url.toString()}`);
-
-      const headers = await getAuthHeaders();
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers,
-      });
-
-      if (!response.ok) {
-        const responseText = await response.text();
-        const errorMessage = decodeErrorMessage(responseText);
-        logger.error(`Failed to retrieve font details: ${errorMessage}`, {
-          status: response.status,
-          url: url.toString()
-        });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
-      }
-
-      // Log raw response for debugging
-      const rawData = await response.json();
-      logger.debug(`Raw API response: ${JSON.stringify(rawData)}`);
-      
-      const validatedData = apiResponseSchema.parse(rawData);
-      
-      // Standardize different response formats to ensure consistent return structure
-      if (Array.isArray(validatedData)) {
-        logger.info("Font details retrieved successfully (array format)");
-        return { success: true, data: { details: validatedData } };
-      } else if ('details' in validatedData) {
-        logger.info("Font details retrieved successfully (details object format)");
-        return { success: true, data: validatedData };
-      } else if ('data' in validatedData && 'success' in validatedData) {
-        logger.info("Font details retrieved successfully (standard format)");
-        return validatedData;
-      }
-      
-      // Fallback for unexpected formats - convert to standard format to ensure compatibility
-      logger.info("Font details retrieved successfully (generic object format)");
-      return { 
-        success: true, 
-        data: { 
-          details: validatedData 
-        } 
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({ context: input }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured.";
+      logger.error(`getFontDetails: ${errorMessage}`);
+      return {
+        success: false,
+        message: errorMessage,
       };
-    } catch (error) {
-      logger.error(`getFontDetails: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      throw error;
     }
+
+    const url = `${config.cmsUrl}/api/fonts/details/${input.fontId}`;
+    logger.info(`Requesting font details for ID: ${input.fontId} from ${url}`);
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: await getAuthHeaders(),
+    });
+
+    // Safely parse the JSON response, falling back to raw text if parsing fails.
+    const responseText = await response.text();
+    let responseData: any;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      responseData = responseText;
+    }
+
+    // Handle non-successful HTTP responses.
+    if (!response.ok) {
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to get font details. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        response: decodedText,
+      });
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: responseData,
+        },
+      };
+    }
+
+    // The API can return data in multiple formats. This block standardizes the response
+    // into a consistent { details: ... } structure for reliable validation.
+    let standardizedData;
+    if (Array.isArray(responseData)) {
+      standardizedData = { details: responseData };
+    } else if (responseData && typeof responseData === 'object' && 'details' in responseData) {
+      standardizedData = responseData;
+    } else {
+        // Fallback for other unexpected but valid JSON objects.
+        standardizedData = { details: responseData };
+    }
+
+    // Validate the standardized data against the schema.
+    const validationResult = fontDetailsSchema.safeParse(standardizedData);
+
+    if (!validationResult.success) {
+      const errorMessage = "Font details response validation failed.";
+      logger.error(errorMessage, {
+        error: validationResult.error.issues,
+        data: responseData,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationIssues: validationResult.error.issues,
+          receivedData: responseData,
+        },
+      };
+    }
+    
+    logger.info(`Successfully retrieved font details for ID: ${input.fontId}`);
+    return {
+      success: true,
+      data: validationResult.data,
+    };
   },
 });
 
-export default getFontDetails; 
+export default getFontDetails;
