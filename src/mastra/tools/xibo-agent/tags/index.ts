@@ -10,6 +10,12 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
+/**
+ * @module tags
+ * @description This module serves as the entry point for all tag-related tools,
+ * re-exporting them for easy consumption by other parts of the application.
+ */
+
 export { getTags } from "./getTags";
 export { addTag } from "./addTag";
 export { editTag } from "./editTag";

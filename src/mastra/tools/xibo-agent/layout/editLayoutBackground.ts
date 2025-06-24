@@ -26,6 +26,27 @@ import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
 
 /**
+ * Defines the schema for a successful response, containing the updated layout data.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  message: z.string().optional(),
+  data: z.any().optional(), // Using z.any() as the layout structure is complex.
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * Permission schema for layout, region, and widget permissions
  */
 const permissionSchema = z.object({
@@ -211,103 +232,100 @@ export const editLayoutBackground = createTool({
     backgroundzIndex: z.number().describe('The Layer Number to use for the background'),
     resolutionId: z.number().optional().describe('The Resolution ID to use on this Layout')
   }),
-
-  outputSchema: z.object({
-    success: z.boolean(),
-    message: z.string().optional(),
-    data: layoutBackgroundResponseSchema.optional(),
-    error: z.object({
-      status: z.number().optional(),
-      message: z.string(),
-      details: z.any().optional(),
-      help: z.string().optional()
-    }).optional()
-  }),
-
-  execute: async ({ context }) => {
-    try {
-      if (!config.cmsUrl) {
-        logger.error("editLayoutBackground: CMS URL is not configured");
-        throw new Error("CMS URL is not configured");
-      }
-
-      logger.info(`Updating background for layout ${context.layoutId}`, {
-        backgroundColor: context.backgroundColor,
-        backgroundImageId: context.backgroundImageId
-      });
-
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/background/${context.layoutId}`;
-
-      // Build form data with required and optional parameters
-      const formData = new URLSearchParams();
-      formData.append('backgroundColor', context.backgroundColor);
-      formData.append('backgroundzIndex', context.backgroundzIndex.toString());
-      if (context.backgroundImageId) formData.append('backgroundImageId', context.backgroundImageId.toString());
-      if (context.resolutionId) formData.append('resolutionId', context.resolutionId.toString());
-      console.log(formData.toString())
-      // Send PUT request to update layout background
-      const response = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: formData.toString()
-      });
-
-      // Parse response data
-      const data = await response.json();
-
-      // Handle error response
-      if (!response.ok) {
-        const errorMessage = decodeErrorMessage(JSON.stringify(data));
-        logger.error(`Failed to update layout background ${context.layoutId}: ${errorMessage}`, {
-          status: response.status,
-          layoutId: context.layoutId
-        });
-
-        return {
-          success: false,
-          error: {
-            status: response.status,
-            message: errorMessage,
-            details: data
-          }
-        };
-      }
-
-      // Validate response data
-      try {
-        const validatedData = layoutBackgroundResponseSchema.parse(data);
-        logger.info(`Successfully updated background for layout ${context.layoutId}`);
-        return {
-          success: true,
-          data: validatedData
-        };
-      } catch (validationError) {
-        logger.error(`Layout data validation failed`, {
-          error: validationError,
-          layoutId: context.layoutId
-        });
-        return {
-          success: false,
-          error: {
-            message: "Layout data validation failed",
-            details: validationError
-          }
-        };
-      }
-    } catch (error) {
-      // Handle unexpected errors
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`editLayoutBackground: An error occurred: ${errorMessage}`, { error });
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured";
+      logger.error(`editLayoutBackground: ${errorMessage}`);
       return {
         success: false,
+        message: errorMessage,
+      };
+    }
+
+    logger.info(`Updating background for layout ${context.layoutId}`, {
+      backgroundColor: context.backgroundColor,
+      backgroundImageId: context.backgroundImageId,
+    });
+
+    const headers = await getAuthHeaders();
+    const url = `${config.cmsUrl}/api/layout/background/${context.layoutId}`;
+
+    // Build form data with required and optional parameters
+    const formData = new URLSearchParams();
+    formData.append("backgroundColor", context.backgroundColor);
+    formData.append("backgroundzIndex", context.backgroundzIndex.toString());
+    if (context.backgroundImageId)
+      formData.append("backgroundImageId", context.backgroundImageId.toString());
+    if (context.resolutionId)
+      formData.append("resolutionId", context.resolutionId.toString());
+    console.log(formData.toString());
+    // Send PUT request to update layout background
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        ...headers,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formData.toString(),
+    });
+
+    // Handle error response
+    if (!response.ok) {
+      const responseText = await response.text();
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to update layout background. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        layoutId: context.layoutId,
+        response: decodedText,
+      });
+
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
         error: {
-          message: errorMessage,
-          type: error instanceof Error ? error.constructor.name : 'Unknown'
-        }
+          statusCode: response.status,
+          responseBody: decodedText,
+        },
+      };
+    }
+
+    // Parse and validate successful response
+    const data = await response.json();
+    try {
+      const validatedData = layoutBackgroundResponseSchema.parse(data);
+      logger.info(
+        `Successfully updated background for layout ${context.layoutId}`
+      );
+      return {
+        success: true,
+        data: validatedData,
+      };
+    } catch (validationError) {
+      const errorMessage = "Response data validation failed.";
+      logger.error(errorMessage, {
+        error:
+          validationError instanceof Error
+            ? validationError.message
+            : "Unknown validation error",
+        layoutId: context.layoutId,
+        receivedData: data,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationError:
+            validationError instanceof Error
+              ? validationError.message
+              : "Unknown validation error",
+          receivedData: data,
+        },
       };
     }
   },

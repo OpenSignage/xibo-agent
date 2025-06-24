@@ -11,112 +11,195 @@
  */
 
 /**
- * Xibo CMS Tag Management Tool
- * 
- * This module provides functionality to retrieve and search tags from the Xibo CMS system.
- * It implements the tag API endpoint and handles the necessary validation
- * and data transformation for tag operations.
+ * @module getTags
+ * @description Provides a tool to retrieve and search for tags within the Xibo CMS.
+ * It implements the tag API endpoint and handles validation and error handling for tag operations.
  */
-
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { logger } from '../../../index';
+import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for tag data validation
- * Defines the structure and validation rules for tag data in the Xibo CMS system
+ * Defines the schema for a single tag record.
+ * This ensures that data received from the Xibo API conforms to the expected structure.
  */
 const tagSchema = z.object({
-  tagId: z.number(),
-  tag: z.string(),
-  isSystem: z.number(),
-  isRequired: z.number(),
-  options: z.string().nullable().optional(),  // Allow null values for options
+  tagId: z.number().describe("The unique ID of the tag."),
+  tag: z.string().describe("The name or value of the tag."),
+  isSystem: z
+    .number()
+    .describe("A flag indicating if the tag is a system tag (1 for yes, 0 for no)."),
+  isRequired: z
+    .number()
+    .describe("A flag indicating if the tag is required (1 for yes, 0 for no)."),
+  options: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("Optional predefined values for the tag, if any."),
 });
 
 /**
- * Schema for API response validation
- * Expected response format from the Xibo CMS API
+ * Defines the schema for a successful response, containing an array of tags and a success flag.
  */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.array(tagSchema),
-  error: z.object({
-    status: z.number(),
-    message: z.string()
-  }).optional()
+const successSchema = z.object({
+  success: z.literal(true),
+  data: z.array(tagSchema).describe("An array of tag records."),
 });
 
 /**
- * Tool for retrieving tags from Xibo CMS
- * 
- * This tool provides functionality to:
- * - Search tags by various criteria (ID, name, system status, etc.)
- * - Filter tags based on different parameters
- * - Handle tag data validation and transformation
+ * Defines the schema for a failed operation, including a success flag, a message, and optional error details.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
+ * A tool for retrieving tags from the Xibo CMS.
+ * It supports filtering tags by various criteria such as ID, name, or system status.
  */
 export const getTags = createTool({
   id: "get-tags",
-  description: "Search and retrieve tags from Xibo CMS",
+  description: "Search and retrieve tags from Xibo CMS.",
   inputSchema: z.object({
-    tagId: z.number().optional().describe("Filter by tag ID"),
-    tag: z.string().optional().describe("Filter by tag name (partial match)"),
-    exactTag: z.string().optional().describe("Filter by exact tag name match"),
-    isSystem: z.number().optional().describe("Filter by system tag status (0: non-system, 1: system)"),
-    isRequired: z.number().optional().describe("Filter by required tag status (0: optional, 1: required)"),
-    haveOptions: z.number().optional().describe("Filter by tags with options (0: no options, 1: has options)"),
+    tagId: z.number().optional().describe("Filter by a specific tag ID."),
+    tag: z
+      .string()
+      .optional()
+      .describe("Filter by a partial match on the tag name."),
+    exactTag: z
+      .string()
+      .optional()
+      .describe("Filter by an exact match on the tag name."),
+    isSystem: z
+      .number()
+      .optional()
+      .describe("Filter by system tag status (0 for non-system, 1 for system)."),
+    isRequired: z
+      .number()
+      .optional()
+      .describe("Filter by required tag status (0 for optional, 1 for required)."),
+    haveOptions: z
+      .number()
+      .optional()
+      .describe(
+        "Filter for tags that have predefined options (1 for yes, 0 for no)."
+      ),
   }),
-  outputSchema: z.array(tagSchema),
-  execute: async ({ context }) => {
+  outputSchema: z
+    .union([successSchema, errorSchema])
+    .describe("The result of the get operation."),
+  execute: async ({
+    context,
+  }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
+    // Ensure the CMS URL is configured before proceeding.
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      const errorMessage = "CMS URL is not configured.";
+      logger.error(errorMessage);
+      return {
+        success: false,
+        message: errorMessage,
+      };
     }
 
+    // Construct the API endpoint URL for tags.
     const url = new URL(`${config.cmsUrl}/api/tag`);
-    
-    // Add query parameters
-    if (context.tagId) url.searchParams.append("tagId", context.tagId.toString());
-    if (context.tag) url.searchParams.append("tag", context.tag);
-    if (context.exactTag) url.searchParams.append("exactTag", context.exactTag);
-    if (context.isSystem) url.searchParams.append("isSystem", context.isSystem.toString());
-    if (context.isRequired) url.searchParams.append("isRequired", context.isRequired.toString());
-    if (context.haveOptions) url.searchParams.append("haveOptions", context.haveOptions.toString());
 
+    // Helper function to append a query parameter to the URL only if it has a value.
+    const appendIfExists = (key: string, value: any) => {
+      if (value !== undefined && value !== null) {
+        const stringValue = String(value);
+        if (stringValue !== "") {
+          url.searchParams.append(key, stringValue);
+        }
+      }
+    };
+
+    // Dynamically build the query string from the tool's input context.
+    appendIfExists("tagId", context.tagId);
+    appendIfExists("tag", context.tag);
+    appendIfExists("exactTag", context.exactTag);
+    appendIfExists("isSystem", context.isSystem);
+    appendIfExists("isRequired", context.isRequired);
+    appendIfExists("haveOptions", context.haveOptions);
+
+    logger.info(`Requesting tags from: ${url.toString()}`);
+
+    // Perform the GET request to the Xibo CMS API.
     const response = await fetch(url.toString(), {
       method: "GET",
       headers: await getAuthHeaders(),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      const decodedError = decodeErrorMessage(errorText);
-      logger.error('HTTP error occurred:', {
-        status: response.status,
-        error: decodedError
-      });
-      throw new Error(decodedError);
-    }
+    // Read the response body as text to handle various response formats.
+    const responseText = await response.text();
+    let responseData: any;
 
-    const rawData = await response.json();
-    
-    // Convert array response to appropriate format
-    const responseData = Array.isArray(rawData) ? rawData : rawData.data;
-    
     try {
-      // Validate the response data
-      const validatedData = apiResponseSchema.parse({
-        success: true,
-        data: responseData
-      });
-
-      return validatedData.data;
-    } catch (error) {
-      logger.error('Validation error:', { error: error instanceof Error ? error.message : String(error) });
-      throw error;
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      responseData = responseText;
     }
+
+    // Handle non-successful HTTP responses.
+    if (!response.ok) {
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to get tags. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        response: decodedText,
+      });
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: responseData,
+        },
+      };
+    }
+
+    // The Xibo API can return tags as a direct array or wrapped in a data object.
+    // This handles both cases by extracting the array if it's nested.
+    const dataToValidate = Array.isArray(responseData)
+      ? responseData
+      : responseData?.data;
+
+    // Validate the structure of the successful response data.
+    const validationResult = z.array(tagSchema).safeParse(dataToValidate);
+
+    if (!validationResult.success) {
+      const errorMessage = "Tags response validation failed.";
+      logger.error(errorMessage, {
+        error: validationResult.error.issues,
+        data: dataToValidate,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationIssues: validationResult.error.issues,
+          receivedData: dataToValidate,
+        },
+      };
+    }
+
+    // On success, log and return the validated data.
+    logger.info(
+      `Successfully retrieved ${validationResult.data.length} tag records.`
+    );
+    return {
+      success: true,
+      data: validationResult.data,
+    };
   },
 });
 

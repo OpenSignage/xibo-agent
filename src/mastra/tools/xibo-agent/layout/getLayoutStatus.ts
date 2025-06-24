@@ -27,6 +27,23 @@ import { TreeNode, createTreeViewResponse } from "../utility/treeView";
 import { logger } from '../../../index';
 
 /**
+ * Defines the schema for a successful response.
+ */
+const successSchema = z.any();
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * Permission schema
  */
 const permissionSchema = z.object({
@@ -324,81 +341,87 @@ export const getLayoutStatus = createTool({
     layoutId: z.number().describe('ID of the layout to check status for'),
     treeView: z.boolean().optional().describe('Whether to display the layout structure as a tree view')
   }),
-  outputSchema: z.object({
-    success: z.boolean(),
-    message: z.string().optional(),
-    data: z.any().optional(),
-    error: z.object({
-      status: z.number().optional(),
-      message: z.string(),
-      details: z.any().optional(),
-      help: z.string().optional()
-    }).optional()
-  }),
-  execute: async ({ context }) => {
-    try {
-      if (!config.cmsUrl) {
-        logger.error('getLayoutStatus: CMS URL is not configured');
-        throw new Error("CMS URL is not configured");
-      }
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured";
+      logger.error(`getLayoutStatus: ${errorMessage}`);
+      return {
+        success: false,
+        message: errorMessage,
+      };
+    }
 
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/status/${context.layoutId}`;
+    const headers = await getAuthHeaders();
+    const url = `${config.cmsUrl}/api/layout/status/${context.layoutId}`;
 
-      const response = await fetch(url, {
-        headers,
+    const response = await fetch(url, {
+      headers,
+    });
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to retrieve layout status. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        layoutId: context.layoutId,
+        response: decodedText,
       });
 
-      if (!response.ok) {
-        const responseText = await response.text();
-        const errorMessage = decodeErrorMessage(responseText);
-        logger.error(`Failed to retrieve layout status: ${errorMessage}`, {
-          status: response.status,
-          layoutId: context.layoutId
-        });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: decodedText,
+        },
+      };
+    }
+
+    const data = await response.json();
+
+    try {
+      const validatedData = layoutStatusSchema.parse(data);
+
+      // Generate tree view if requested
+      if (context.treeView) {
+        const layoutTree = buildLayoutTree(validatedData);
+        return createTreeViewResponse(
+          validatedData,
+          layoutTree,
+          layoutNodeFormatter
+        );
       }
 
-      const data = await response.json();
-      
-      try {
-        const validatedData = layoutStatusSchema.parse(data);
-        
-        // Generate tree view if requested
-        if (context.treeView) {
-          const layoutTree = buildLayoutTree(validatedData);
-          return createTreeViewResponse(validatedData, layoutTree, layoutNodeFormatter);
-        }
-        
-        return {
-          success: true,
-          data: data
-        };
-      } catch (validationError) {
-        logger.error(`Layout data validation failed`, {
-          error: validationError,
-          layoutId: context.layoutId
-        });
-        return {
-          success: false,
-          error: {
-            message: "Layout data validation failed",
-            details: validationError
-          }
-        };
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`Error in getLayoutStatus: ${errorMessage}`, {
-        error,
-        layoutId: context.layoutId
+      return {
+        success: true,
+        data: validatedData,
+      };
+    } catch (validationError) {
+      const errorMessage = "Layout status data validation failed.";
+      logger.error(errorMessage, {
+        error:
+          validationError instanceof Error
+            ? validationError.message
+            : "Unknown validation error",
+        layoutId: context.layoutId,
+        receivedData: data,
       });
       return {
         success: false,
+        message: errorMessage,
         error: {
-          status: 500,
-          message: errorMessage
-        }
+          validationError:
+            validationError instanceof Error
+              ? validationError.message
+              : "Unknown validation error",
+          receivedData: data,
+        },
       };
     }
   },

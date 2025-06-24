@@ -23,6 +23,23 @@ import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
 
+/**
+ * Defines the schema for a successful response, containing the new layout data.
+ */
+const successSchema = z.any();
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
 // Response schema for layout validation
 const layoutResponseSchema = z.object({
   layoutId: z.union([z.number(), z.string().transform(Number)]),
@@ -50,8 +67,9 @@ const layoutResponseSchema = z.object({
   statusMessage: z.string().nullable(),
   enableStat: z.union([z.number(), z.string().transform(Number)]),
   autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
-  code: z.string().nullable(),
-  isLocked: z.union([z.boolean(), z.array(z.any())]).transform(val => Array.isArray(val) ? false : val).nullable()
+  code: z.string().optional().describe("Layout identification code"),
+  isLocked: z.union([z.boolean(), z.array(z.any())]).transform(val => Array.isArray(val) ? false : val).nullable(),
+  folderId: z.number().optional().describe("Folder ID to assign the layout to"),
 });
 
 /**
@@ -69,74 +87,99 @@ export const addLayout = createTool({
     code: z.string().optional().describe('Layout identification code'),
     folderId: z.number().optional().describe('Folder ID to assign the layout to')
   }),
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured";
+      logger.error(`addLayout: ${errorMessage}`);
+      return {
+        success: false,
+        message: errorMessage,
+      };
+    }
 
-  outputSchema: layoutResponseSchema,
-  execute: async ({ context }) => {
-    try {
-      logger.info(`Creating new layout "${context.name}"`, {
-        templateId: context.layoutId,
-        resolutionId: context.resolutionId,
-        folderId: context.folderId
-      });
+    logger.info(`Creating new layout "${context.name}"`, {
+      templateId: context.layoutId,
+      resolutionId: context.resolutionId,
+      folderId: context.folderId,
+    });
 
-      if (!config.cmsUrl) {
-        logger.error("CMS URL is not configured");
-        throw new Error("CMS URL is not configured");
+    const headers = await getAuthHeaders();
+
+    const formData = new URLSearchParams();
+    Object.entries(context).forEach(([key, value]) => {
+      if (value !== undefined) {
+        formData.append(key, value.toString());
       }
+    });
 
-      const headers = await getAuthHeaders();
+    const url = `${config.cmsUrl}/api/layout`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        ...headers,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formData.toString(),
+    });
 
-      // Build form data
-      const formData = new URLSearchParams();
-      Object.entries(context).forEach(([key, value]) => {
-        if (value !== undefined) {
-          formData.append(key, value.toString());
-        }
+    if (!response.ok) {
+      const responseText = await response.text();
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to create layout. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        name: context.name,
+        response: decodedText,
       });
 
-      const url = `${config.cmsUrl}/api/layout`;
-      logger.debug(`Sending request to ${url}`);
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/x-www-form-urlencoded'
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: decodedText,
         },
-        body: formData.toString()
-      });
+      };
+    }
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        const decodedError = decodeErrorMessage(errorText);
-        logger.error(`Failed to create layout: ${decodedError}`, {
-          status: response.status, 
-          name: context.name
-        });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
-      }
+    const data = await response.json();
 
-      const data = await response.json();
-      
-      try {
-        const validatedData = layoutResponseSchema.parse(data);
-        logger.info(`Layout created successfully with ID: ${validatedData.layoutId}`, {
+    try {
+      const validatedData = layoutResponseSchema.parse(data);
+      logger.info(
+        `Layout created successfully with ID: ${validatedData.layoutId}`,
+        {
           layoutId: validatedData.layoutId,
-          name: validatedData.layout
-        });
-        return validatedData;
-      } catch (validationError) {
-        logger.warn(`Response validation failed`, {
-          error: validationError,
-          responseData: data
-        });
-        // Return raw data even if validation fails
-        return data;
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`Error in addLayout: ${errorMessage}`, { error });
-      throw error;
+          name: validatedData.layout,
+        }
+      );
+      return validatedData;
+    } catch (validationError) {
+      const errorMessage =
+        "Response data validation failed after creating layout.";
+      logger.error(errorMessage, {
+        error:
+          validationError instanceof Error
+            ? validationError.message
+            : "Unknown validation error",
+        responseData: data,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationError:
+            validationError instanceof Error
+              ? validationError.message
+              : "Unknown validation error",
+          receivedData: data,
+        },
+      };
     }
   },
 }); 

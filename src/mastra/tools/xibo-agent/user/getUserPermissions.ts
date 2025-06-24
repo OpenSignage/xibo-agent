@@ -50,6 +50,28 @@ const permissionSchema = z.object({
 });
 
 /**
+ * Defines the schema for a successful response, containing an array of permissions and a success flag.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  data: z
+    .array(permissionSchema)
+    .describe("An array of permission objects."),
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * A tool designed to get user permissions for a specific entity from the Xibo CMS.
  * It takes an entity type and an object ID as input and returns a list of permission objects.
  */
@@ -63,69 +85,89 @@ export const getUserPermissions = createTool({
     objectId: z.number().describe("The ID of the object."),
   }),
   outputSchema: z
-    .array(permissionSchema)
+    .union([successSchema, errorSchema])
     .describe("An array of permission objects."),
 
-  execute: async ({ context }) => {
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
     // Ensure the CMS URL is configured before proceeding.
     if (!config.cmsUrl) {
       const errorMessage = "CMS URL is not configured.";
       logger.error(errorMessage);
-      throw new Error(errorMessage);
+      return {
+        success: false,
+        message: errorMessage,
+      };
     }
 
     // Construct the request URL for the user permissions API endpoint.
     const url = new URL(
-      `${config.cmsUrl}/api/user/permissions/${context.entity}/${context.objectId}`,
+      `${config.cmsUrl}/api/user/permissions/${context.entity}/${context.objectId}`
     );
 
     logger.info(`Requesting user permissions from: ${url.toString()}`);
 
+    // Perform the GET request to the Xibo CMS API.
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: await getAuthHeaders(),
+    });
+
+    const responseText = await response.text();
+    let responseData: any;
+
     try {
-      // Perform the GET request to the Xibo CMS API.
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: await getAuthHeaders(),
-      });
-      console.log(response);
-      // Handle non-successful HTTP responses.
-      if (!response.ok) {
-        const errorText = await response.text();
-        const errorMessage = `Failed to get user permissions: ${response.status} ${response.statusText} - ${errorText}`;
-        logger.error(errorMessage);
-        throw new Error(
-          `HTTP error! status: ${response.status}, message: ${errorText}`,
-        );
-      }
-
-      // Parse the JSON response from the API.
-      const rawData = await response.json();
-      // Validate the received data against the permission schema.
-      const permissions = z.array(permissionSchema).parse(rawData);
-
-      const successMessage = "Successfully retrieved user permissions.";
-      logger.info(successMessage, { permissions });
-
-      return permissions;
-    } catch (error: any) {
-      // Handle Zod validation errors specifically.
-      if (error instanceof z.ZodError) {
-        const errorMessage = "Zod validation error getting user permissions.";
-        logger.error(errorMessage, error.issues);
-        throw new Error(errorMessage, { cause: error });
-      }
-
-      // Re-throw known errors to be handled by the caller.
-      if (error instanceof Error) {
-        throw error;
-      }
-
-      // Catch any other unexpected errors.
-      const errorMessage =
-        "An unexpected error occurred while getting user permissions.";
-      logger.error(errorMessage, error);
-      throw new Error(errorMessage);
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      responseData = responseText;
     }
+
+    // Handle non-successful HTTP responses.
+    if (!response.ok) {
+      const errorMessage = `Failed to get user permissions: ${response.status} ${response.statusText}`;
+      logger.error(errorMessage, {
+        status: response.status,
+        response: responseData,
+      });
+      return {
+        success: false,
+        message: `${errorMessage} - ${responseText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: responseData,
+        },
+      };
+    }
+
+    // Validate the received data against the permission schema.
+    const validationResult = z.array(permissionSchema).safeParse(responseData);
+
+    if (!validationResult.success) {
+      const errorMessage = "User permissions response validation failed.";
+      logger.error(errorMessage, {
+        error: validationResult.error.issues,
+        data: responseData,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationIssues: validationResult.error.issues,
+          receivedData: responseData,
+        },
+      };
+    }
+
+    const successMessage = "Successfully retrieved user permissions.";
+    logger.info(successMessage, { permissions: validationResult.data });
+
+    return {
+      success: true,
+      data: validationResult.data,
+    };
   },
 });
 

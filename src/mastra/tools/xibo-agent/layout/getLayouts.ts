@@ -31,6 +31,27 @@ import {
   createTreeViewResponse 
 } from "../utility/treeView";
 
+/**
+ * Defines the schema for a successful response.
+ */
+const successSchema = z.union([
+  z.string(),
+  treeResponseSchema,
+  z.lazy(() => layoutResponseSchema), // Use z.lazy for recursive schemas
+]);
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
 // Schema definition for layout response validation
 const layoutResponseSchema = z.array(z.object({
   layoutId: z.union([z.number(), z.string().transform(Number)]),
@@ -192,7 +213,7 @@ const layoutResponseSchema = z.array(z.object({
     value: z.string().nullable()
   })),
   folderId: z.union([z.number(), z.string().transform(Number)]),
-  permissionsFolderId: z.union([z.number(), z.string().transform(Number)])
+  permissionsFolderId: z.union([z.number(), z.string().transform(Number)]),
 }));
 
 /**
@@ -557,164 +578,127 @@ export const getLayouts = createTool({
   id: 'get-layouts',
   description: 'Retrieves a list of Xibo layouts with optional filtering',
   inputSchema: z.object({
-    layoutId: z.number().optional().describe('Filter by layout ID'),
-    parentId: z.number().optional().describe('Filter by parent ID'),
-    showDrafts: z.number().optional().describe('Show drafts (0-1)'),
-    layout: z.string().optional().describe('Filter by layout name (partial match)'),
-    userId: z.number().optional().describe('Filter by user ID'),
-    retired: z.number().optional().describe('Filter by retired status (0-1)'),
-    tags: z.string().optional().describe('Filter by tags'),
-    exactTags: z.number().optional().describe('Use exact tag matching (0-1)'),
-    logicalOperator: z.enum(['AND', 'OR']).optional().describe('Logical operator for multiple tags'),
-    ownerUserGroupId: z.number().optional().describe('Filter by user group ID'),
-    publishedStatusId: z.number().optional().describe('Filter by publish status (1: Published, 2: Draft)'),
-    embed: z.union([
-      z.string().describe('Include related data as comma-separated values (e.g. "regions,playlists,widgets,tags,campaigns,permissions")'),
-      z.array(z.string()).describe('Include related data as array of values')
-    ]).optional(),
-    campaignId: z.number().optional().describe('Get layouts belonging to campaign ID'),
-    folderId: z.number().optional().describe('Filter by folder ID'),
-    treeView: z.boolean().optional().describe('Set to true to return layouts in tree structure')
+    folderId: z.number().optional().describe("Folder ID for which to get layouts"),
+    layoutId: z.string().optional().describe("A comma-separated list of Layout IDs to filter on"),
+    layout: z.string().optional().describe("The name of the layout to filter on"),
+    tags: z.string().optional().describe("A comma-separated list of tags to filter on"),
+    treeView: z.boolean().optional().describe("Set to true to return layouts in tree structure"),
   }),
-  outputSchema: z.union([
-    z.string(),
-    treeResponseSchema,
-    layoutResponseSchema
-  ]),
-  execute: async ({ context }) => {
-    try {
-      // Log the request with relevant filter criteria
-      const logContext = { ...context };
-      logger.info(`Retrieving layouts with filters`, logContext);
-      
-      if (!config.cmsUrl) {
-        logger.error("CMS URL is not configured");
-        throw new Error("CMS URL is not configured");
-      }
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    | z.infer<typeof successSchema>
+    | z.infer<typeof errorSchema>
+  > => {
+    // Log the request with relevant filter criteria
+    const logContext = { ...context };
+    logger.info(`Retrieving layouts with filters`, logContext);
 
-      const headers = await getAuthHeaders();
-      
-      // Build query parameters
-      const queryParams = new URLSearchParams();
-      Object.entries(context).forEach(([key, value]) => {
-        if (value !== undefined) {
-          // Skip internal processing parameters from API request
-          if (key === 'treeView') {
-            return;
-          }
-          
-          // Special handling for embed parameter
-          if (key === 'embed') {
-            // Format according to Xibo API specification
-            let embedValue: string;
-            
-            if (Array.isArray(value)) {
-              // Convert array to comma-separated string
-              embedValue = value.join(',');
-            } else {
-              // Use string as is
-              embedValue = value.toString();
-            }
-            
-            queryParams.append(key, embedValue);
-            logger.debug(`Using embed parameter: ${embedValue}`);
-          } else {
-            queryParams.append(key, value.toString());
-          }
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured";
+      logger.error(`getLayouts: ${errorMessage}`);
+      return {
+        success: false,
+        message: errorMessage,
+      };
+    }
+
+    const headers = await getAuthHeaders();
+
+    // Build query parameters
+    const queryParams = new URLSearchParams();
+    Object.entries(context).forEach(([key, value]) => {
+      if (value !== undefined) {
+        // Skip internal processing parameters from API request
+        if (key === "treeView") {
+          return;
         }
+
+        queryParams.append(key, value.toString());
+      }
+    });
+
+    // If treeView is enabled, ensure all necessary data is embedded
+    if (context.treeView && !queryParams.has("embed")) {
+      const embedValue = "regions,playlists,widgets,tags,campaigns,permissions";
+      queryParams.append("embed", embedValue);
+      logger.debug(`Added default embed parameter for treeView: ${embedValue}`);
+    }
+
+    // Build URL
+    let url = `${config.cmsUrl}/api/layout`;
+    if (queryParams.toString()) {
+      url = `${url}?${queryParams.toString()}`;
+    }
+
+    logger.debug(`Requesting layouts from: ${url}`);
+
+    const response = await fetch(url, { headers });
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to retrieve layouts. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        filters: logContext,
+        response: decodedText,
       });
 
-      // If treeView is enabled, ensure all necessary data is embedded
-      if (context.treeView && !queryParams.has('embed')) {
-        const embedValue = 'regions,playlists,widgets,tags,campaigns,permissions';
-        queryParams.append('embed', embedValue);
-        logger.debug(`Added default embed parameter for treeView: ${embedValue}`);
-      }
-      
-      // Build URL
-      let url = `${config.cmsUrl}/api/layout`;
-      if (queryParams.toString()) {
-        url = `${url}?${queryParams.toString()}`;
-      }
-      
-      logger.debug(`Requesting layouts from: ${url}`);
-      
-      try {
-        const response = await fetch(url, { headers });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          logger.error(`Failed to retrieve layouts: ${errorText}`, {
-            status: response.status,
-            filters: logContext
-          });
-          return errorText;
-        }
-
-        // Parse CMS response data
-        const data = await response.json();
-        
-        // Handle empty response (layout not found)
-        if (Array.isArray(data) && data.length === 0) {
-          const errorResponse = {
-            success: false,
-            error: 'Layout not found'
-          };
-          return errorResponse;
-        }
-
-        // JSON文字列をパース
-        const parsedData = parseJsonStrings(data);
-        
-        // Generate hierarchical tree view if requested
-        if (context.treeView) {
-          const layoutTree = buildLayoutTree(parsedData);
-          return createTreeViewResponse(parsedData, layoutTree, layoutNodeFormatter);
-        }
-        
-        try {
-          // Validate and return the response data
-          if (Array.isArray(parsedData)) {
-            layoutResponseSchema.parse(parsedData);
-            return parsedData;
-          } else {
-            treeResponseSchema.parse(parsedData);
-            return parsedData;
-          }
-        } catch (validationError) {
-          // Handle validation errors
-          // This occurs when the CMS response doesn't match our expected schema
-          const errorResponse = {
-            success: false,
-            error: validationError instanceof Error ? validationError.message : 'Validation error'
-          };
-          logger.warn(`Layout data validation failed`, {
-            error: validationError,
-            dataSize: Array.isArray(parsedData) ? parsedData.length : 'unknown',
-            dataPreview: Array.isArray(parsedData) && parsedData.length > 0 ? 
-              { layoutId: parsedData[0].layoutId, type: typeof parsedData[0] } : 'No data'
-          });
-          return errorResponse;
-        }
-      } catch (error) {
-        // Handle network or parsing errors
-        const errorMessage = error instanceof Error ? error.message : "Unknown error";
-        const errorResponse = {
-          success: false,
-          error: errorMessage
-        };
-        logger.error(`Error fetching layouts: ${errorMessage}`, { error, url });
-        return errorResponse;
-      }
-    } catch (error) {
-      // Handle any other unexpected errors
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      const errorResponse = {
+      return {
         success: false,
-        error: errorMessage
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: decodedText,
+        },
       };
-      logger.error(`Error in getLayouts: ${errorMessage}`, { error });
-      return errorResponse;
+    }
+
+    // Parse CMS response data
+    const data = await response.json();
+
+    // Handle empty response (layout not found)
+    if (Array.isArray(data) && data.length === 0) {
+      const message = "Layout not found";
+      logger.info(message);
+      return []; // Return an empty array for "not found" cases
+    }
+
+    // JSON文字列をパース
+    const parsedData = parseJsonStrings(data);
+
+    // Generate hierarchical tree view if requested
+    if (context.treeView) {
+      const layoutTree = buildLayoutTree(parsedData);
+      return createTreeViewResponse(parsedData, layoutTree, layoutNodeFormatter);
+    }
+
+    try {
+      // Validate and return the response data
+      if (Array.isArray(parsedData)) {
+        return layoutResponseSchema.parse(parsedData);
+      } else {
+        return treeResponseSchema.parse(parsedData);
+      }
+    } catch (validationError) {
+      const errorMessage = "Layout data validation failed.";
+      logger.error(errorMessage, {
+        error:
+          validationError instanceof Error ? validationError.message : "Unknown validation error",
+        dataSize: Array.isArray(parsedData) ? parsedData.length : "unknown",
+        dataPreview:
+          Array.isArray(parsedData) && parsedData.length > 0
+            ? { layoutId: parsedData[0].layoutId, type: typeof parsedData[0] }
+            : "No data",
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error:
+          validationError instanceof Error ? validationError.message : "Unknown validation error",
+      };
     }
   },
 });

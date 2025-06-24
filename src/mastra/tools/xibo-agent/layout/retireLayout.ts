@@ -26,6 +26,26 @@ import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
 
 /**
+ * Defines the schema for a successful response.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * Tool to retire a layout
  * Implements the layout/{id}/retire endpoint from Xibo API
  * Retiring a layout makes it unavailable for scheduling but preserves it in the system
@@ -37,51 +57,62 @@ export const retireLayout = createTool({
     layoutId: z.number().describe('ID of the layout to retire')
   }),
 
-  outputSchema: z.string(),
-  execute: async ({ context }) => {
-    try {
-      // Log the start of layout retirement process
-      logger.info(`Retiring layout with ID: ${context.layoutId}`);
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
+    // Log the start of layout retirement process
+    logger.info(`Retiring layout with ID: ${context.layoutId}`);
 
-      // Validate CMS URL configuration
-      if (!config.cmsUrl) {
-        logger.error("CMS URL is not configured");
-        throw new Error("CMS URL is not configured");
-      }
-
-      // Prepare API request
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/retire/${context.layoutId}`;
-      logger.debug(`Sending PUT request to ${url}`);
-
-      // Send retirement request to CMS
-      const response = await fetch(url, {
-        method: 'PUT',
-        headers,
-      });
-
-      // Handle error response
-      if (!response.ok) {
-        const responseText = await response.text();
-        const errorMessage = decodeErrorMessage(responseText);
-        logger.error(`Failed to retire layout: ${errorMessage}`, {
-          status: response.status,
-          layoutId: context.layoutId
-        });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
-      }
-
-      // Log successful retirement
-      logger.info(`Layout ID ${context.layoutId} retired successfully`);
-      return "Layout retired successfully";
-    } catch (error) {
-      // Handle unexpected errors
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`Error in retireLayout: ${errorMessage}`, {
-        error,
-        layoutId: context.layoutId
-      });
-      return `Error: ${errorMessage}`;
+    // Validate CMS URL configuration
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured";
+      logger.error(`retireLayout: ${errorMessage}`);
+      return { success: false, message: errorMessage };
     }
+
+    // Prepare API request
+    const headers = await getAuthHeaders();
+    const url = `${config.cmsUrl}/api/layout/retire/${context.layoutId}`;
+    logger.debug(`Sending PUT request to ${url}`);
+
+    // Send retirement request to CMS
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers,
+    });
+
+    // Handle 204 No Content for successful retirement
+    if (response.status === 204) {
+      logger.info(`Layout ID ${context.layoutId} retired successfully`);
+      return { success: true, message: "Layout retired successfully" };
+    }
+
+    // Handle other non-ok responses
+    if (!response.ok) {
+      const responseText = await response.text();
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to retire layout. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        layoutId: context.layoutId,
+        response: decodedText,
+      });
+
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: decodedText,
+        },
+      };
+    }
+
+    // Handle successful responses that are not 204
+    logger.info(`Layout ID ${context.layoutId} retired successfully with status ${response.status}`);
+    return { success: true, message: "Layout retired successfully" };
   },
 }); 

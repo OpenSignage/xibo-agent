@@ -45,6 +45,28 @@ const folderSchema = z.object({
 });
 
 /**
+ * Defines the schema for a successful response, containing an array with the new folder and a success flag.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  data: z
+    .array(folderSchema)
+    .describe("An array containing the newly created folder object."),
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * A tool to create a new folder in the Xibo CMS.
  * It takes a folder name and an optional parent ID as input.
  */
@@ -59,77 +81,101 @@ export const addFolder = createTool({
       .describe("The ID of the parent folder. If omitted, it will be a root folder."),
   }),
   outputSchema: z
-    .array(folderSchema)
+    .union([successSchema, errorSchema])
     .describe("An array containing the newly created folder object."),
-  execute: async ({ context }) => {
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
     if (!config.cmsUrl) {
       const errorMessage = "CMS URL is not configured.";
       logger.error(errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    try {
-      // Construct the API URL for creating folders.
-      const url = new URL(`${config.cmsUrl}/api/folders`);
-      logger.info(`Creating folder '${context.text}'...`);
-
-      // Prepare the form data with the new folder's name and optional parent ID.
-      const formData = new URLSearchParams();
-      formData.append("text", context.text);
-      if (context.parentId) {
-        formData.append("parentId", String(context.parentId));
-      }
-
-      // Set up the request headers, including authorization and content type.
-      const headers = {
-        ...(await getAuthHeaders()),
-        "Content-Type": "application/x-www-form-urlencoded",
+      return {
+        success: false,
+        message: errorMessage,
       };
-
-      // Perform the POST request to create the folder.
-      const response = await fetch(url.toString(), {
-        method: "POST",
-        headers: headers,
-        body: formData.toString(),
-      });
-
-      const responseText = await response.text();
-      let responseData: any;
-
-      // Try to parse the response as JSON, but fall back to text if it fails.
-      try {
-        responseData = JSON.parse(responseText);
-      } catch (e) {
-        responseData = responseText;
-      }
-      
-      // Handle non-successful HTTP responses.
-      if (!response.ok) {
-        const decodedText = decodeErrorMessage(responseText);
-        const errorMessage = `Failed to create folder. API responded with status ${response.status}.`;
-        logger.error(errorMessage, { status: response.status, response: decodedText });
-        throw new Error(`${errorMessage} Message: ${decodedText}`);
-      }
-      
-      // Validate the structure of the successful response.
-      const validationResult = z.array(folderSchema).safeParse(responseData);
-
-      if (!validationResult.success) {
-        const errorMessage = "Folder creation response validation failed.";
-        logger.error(errorMessage, { error: validationResult.error.issues, data: responseData });
-        throw new Error(errorMessage, { cause: validationResult.error });
-      }
-
-      // Log the success and return the validated data.
-      logger.info(`Folder '${validationResult.data[0].text}' created successfully with ID: ${validationResult.data[0].id}.`);
-      return validationResult.data;
-
-    } catch (error: any) {
-        // Catch and log any unexpected errors during the process.
-        const errorMessage = `An unexpected error occurred in addFolder: ${error.message}`;
-        logger.error(errorMessage, { error });
-        throw error;
     }
+
+    // Construct the API URL for creating folders.
+    const url = new URL(`${config.cmsUrl}/api/folders`);
+    logger.info(`Creating folder '${context.text}'...`);
+
+    // Prepare the form data with the new folder's name and optional parent ID.
+    const formData = new URLSearchParams();
+    formData.append("text", context.text);
+    if (context.parentId) {
+      formData.append("parentId", String(context.parentId));
+    }
+
+    // Set up the request headers, including authorization and content type.
+    const headers = {
+      ...(await getAuthHeaders()),
+      "Content-Type": "application/x-www-form-urlencoded",
+    };
+
+    // Perform the POST request to create the folder.
+    const response = await fetch(url.toString(), {
+      method: "POST",
+      headers: headers,
+      body: formData.toString(),
+    });
+
+    const responseText = await response.text();
+    let responseData: any;
+
+    // Try to parse the response as JSON, but fall back to text if it fails.
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      responseData = responseText;
+    }
+
+    // Handle non-successful HTTP responses.
+    if (!response.ok) {
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to create folder. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        response: decodedText,
+      });
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: decodedText,
+        },
+      };
+    }
+
+    // Validate the structure of the successful response.
+    const validationResult = z.array(folderSchema).safeParse(responseData);
+
+    if (!validationResult.success) {
+      const errorMessage = "Folder creation response validation failed.";
+      logger.error(errorMessage, {
+        error: validationResult.error.issues,
+        data: responseData,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationIssues: validationResult.error.issues,
+          receivedData: responseData,
+        },
+      };
+    }
+
+    // Log the success and return the validated data.
+    logger.info(
+      `Folder '${validationResult.data[0].text}' created successfully with ID: ${validationResult.data[0].id}.`
+    );
+    return {
+      success: true,
+      data: validationResult.data,
+    };
   },
 });
 

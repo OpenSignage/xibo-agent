@@ -45,6 +45,28 @@ const folderSchema = z.object({
 });
 
 /**
+ * Defines the schema for a successful response, containing an array with the updated folder and a success flag.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  data: z
+    .array(folderSchema)
+    .describe("An array containing the updated folder object."),
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * A tool to edit an existing folder in the Xibo CMS.
  * It primarily allows for changing the folder's name.
  */
@@ -56,74 +78,98 @@ export const editFolder = createTool({
     text: z.string().describe("The new name for the folder. This is required."),
   }),
   outputSchema: z
-    .array(folderSchema)
+    .union([successSchema, errorSchema])
     .describe("An array containing the updated folder object."),
-  execute: async ({ context }) => {
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
     if (!config.cmsUrl) {
       const errorMessage = "CMS URL is not configured.";
       logger.error(errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    try {
-      // Construct the API URL for the specific folder.
-      const url = new URL(`${config.cmsUrl}/api/folders/${context.folderId}`);
-      logger.info(`Editing folder with ID ${context.folderId}...`);
-
-      // Prepare the form data with the new folder name.
-      const formData = new URLSearchParams();
-      formData.append("text", context.text);
-
-      // Set up the request headers, including authorization and content type.
-      const headers = {
-        ...(await getAuthHeaders()),
-        "Content-Type": "application/x-www-form-urlencoded",
+      return {
+        success: false,
+        message: errorMessage,
       };
-
-      // Perform the PUT request to update the folder.
-      const response = await fetch(url.toString(), {
-        method: "PUT",
-        headers: headers,
-        body: formData.toString(),
-      });
-
-      const responseText = await response.text();
-      let responseData: any;
-
-      // Try to parse the response as JSON, but fall back to text if it fails.
-      try {
-        responseData = JSON.parse(responseText);
-      } catch (e) {
-        responseData = responseText;
-      }
-
-      // Handle non-successful HTTP responses.
-      if (!response.ok) {
-        const decodedText = decodeErrorMessage(responseText);
-        const errorMessage = `Failed to edit folder. API responded with status ${response.status}.`;
-        logger.error(errorMessage, { status: response.status, response: decodedText });
-        throw new Error(`${errorMessage} Message: ${decodedText}`);
-      }
-
-      // Validate the structure of the successful response.
-      const validationResult = z.array(folderSchema).safeParse(responseData);
-
-      if (!validationResult.success) {
-        const errorMessage = "Folder edit response validation failed.";
-        logger.error(errorMessage, { error: validationResult.error.issues, data: responseData });
-        throw new Error(errorMessage, { cause: validationResult.error });
-      }
-
-      // Log the success and return the validated data.
-      logger.info(`Folder with ID ${context.folderId} updated successfully to name '${validationResult.data[0].text}'.`);
-      return validationResult.data;
-
-    } catch (error: any) {
-      // Catch and log any unexpected errors during the process.
-      const errorMessage = `An unexpected error occurred in editFolder: ${error.message}`;
-      logger.error(errorMessage, { error });
-      throw error;
     }
+
+    // Construct the API URL for the specific folder.
+    const url = new URL(`${config.cmsUrl}/api/folders/${context.folderId}`);
+    logger.info(`Editing folder with ID ${context.folderId}...`);
+
+    // Prepare the form data with the new folder name.
+    const formData = new URLSearchParams();
+    formData.append("text", context.text);
+
+    // Set up the request headers, including authorization and content type.
+    const headers = {
+      ...(await getAuthHeaders()),
+      "Content-Type": "application/x-www-form-urlencoded",
+    };
+
+    // Perform the PUT request to update the folder.
+    const response = await fetch(url.toString(), {
+      method: "PUT",
+      headers: headers,
+      body: formData.toString(),
+    });
+
+    const responseText = await response.text();
+    let responseData: any;
+
+    // Try to parse the response as JSON, but fall back to text if it fails.
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      responseData = responseText;
+    }
+
+    // Handle non-successful HTTP responses.
+    if (!response.ok) {
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to edit folder. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        response: decodedText,
+      });
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: decodedText,
+        },
+      };
+    }
+
+    // Validate the structure of the successful response.
+    const validationResult = z.array(folderSchema).safeParse(responseData);
+
+    if (!validationResult.success) {
+      const errorMessage = "Folder edit response validation failed.";
+      logger.error(errorMessage, {
+        error: validationResult.error.issues,
+        data: responseData,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+        error: {
+          validationIssues: validationResult.error.issues,
+          receivedData: responseData,
+        },
+      };
+    }
+
+    // Log the success and return the validated data.
+    logger.info(
+      `Folder with ID ${context.folderId} updated successfully to name '${validationResult.data[0].text}'.`
+    );
+    return {
+      success: true,
+      data: validationResult.data,
+    };
   },
 });
 

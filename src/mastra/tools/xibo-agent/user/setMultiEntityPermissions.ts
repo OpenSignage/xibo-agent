@@ -2,10 +2,21 @@ import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { logger } from "../../../index";
+import { decodeErrorMessage } from "../utility/error";
 
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.null(),
+const successSchema = z.object({
+  success: z.literal(true),
+  message: z.string().describe("A confirmation message."),
+});
+
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
 });
 
 export const setMultiEntityPermissions = createTool({
@@ -17,25 +28,37 @@ export const setMultiEntityPermissions = createTool({
     groupIds: z.array(z.string()),
     ownerId: z.number().optional(),
   }),
-  outputSchema: apiResponseSchema,
-  execute: async ({ context }) => {
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({
+    context,
+  }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      const errorMessage = "CMS URL is not configured.";
+      logger.error(errorMessage);
+      return {
+        success: false,
+        message: errorMessage,
+      };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/user/permissions/${context.entity}/multiple`);
-    
+    const url = new URL(
+      `${config.cmsUrl}/api/user/permissions/${context.entity}/multiple`
+    );
+
     // フォームデータの作成
     const formData = new FormData();
-    context.ids.forEach(id => {
+    context.ids.forEach((id) => {
       formData.append("ids[]", id.toString());
     });
-    context.groupIds.forEach(groupId => {
+    context.groupIds.forEach((groupId) => {
       formData.append("groupIds[]", groupId);
     });
-    if (context.ownerId) formData.append("ownerId", context.ownerId.toString());
+    if (context.ownerId)
+      formData.append("ownerId", context.ownerId.toString());
 
-    console.log(`Requesting URL: ${url.toString()}`);
+    logger.info(`Setting multi-entity permissions at: ${url.toString()}`);
 
     const response = await fetch(url.toString(), {
       method: "POST",
@@ -44,13 +67,28 @@ export const setMultiEntityPermissions = createTool({
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const responseText = await response.text();
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to set multi-entity permissions. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        response: decodedText,
+      });
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: decodedText,
+        },
+      };
     }
 
-    console.log("Multi-entity permissions set successfully");
+    const successMessage = "Multi-entity permissions set successfully";
+    logger.info(successMessage);
     return {
       success: true,
-      data: null
+      message: successMessage,
     };
   },
 });

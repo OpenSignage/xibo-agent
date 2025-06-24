@@ -18,6 +18,27 @@ import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
 
 /**
+ * Defines the schema for a successful response.
+ */
+const successSchema = z.object({
+  success: z.literal(true),
+  message: z.string().optional(),
+  data: z.any().optional(),
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
  * Tool to enable or disable statistics collection for a layout
  * Implements the layout/setenablestat endpoint from Xibo API
  * Statistics tracking helps monitor how often and when layouts are displayed
@@ -29,76 +50,82 @@ export const setLayoutEnableStat = createTool({
     layoutId: z.number().describe('ID of the layout to change statistics setting for'),
     enableStat: z.number().min(0).max(1).describe('Enable statistics collection (0: disabled, 1: enabled)')
   }),
-  outputSchema: z.object({
-    success: z.boolean(),
-    message: z.string(),
-    error: z.string().optional(),
-    data: z.any().optional()
-  }),
-  execute: async ({ context }) => {
-    try {
-      if (!config.cmsUrl) {
-        logger.error("setLayoutEnableStat: CMS URL is not configured");
-        throw new Error("CMS URL is not configured");
-      }
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({ context }): Promise<
+    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+  > => {
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured";
+      logger.error(`setLayoutEnableStat: ${errorMessage}`);
+      return {
+        success: false,
+        message: errorMessage,
+      };
+    }
 
-      logger.info(`Updating layout statistics setting for layout ${context.layoutId}`, {
-        enableStat: context.enableStat
+    logger.info(`Updating layout statistics setting for layout ${context.layoutId}`, {
+      enableStat: context.enableStat
+    });
+
+    const headers = await getAuthHeaders();
+    const url = `${config.cmsUrl}/api/layout/setenablestat/${context.layoutId}`;
+
+    // Prepare form data for statistics setting update
+    const formData = new URLSearchParams();
+    formData.append('enableStat', context.enableStat.toString());
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: formData
+    });
+
+    // Handle 204 No Content response first
+    if (response.status === 204) {
+      return {
+        success: true,
+        message: "Layout statistics setting updated successfully",
+        data: null
+      };
+    }
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      const decodedText = decodeErrorMessage(responseText);
+      const errorMessage = `Failed to update layout statistics setting. API responded with status ${response.status}.`;
+      logger.error(errorMessage, {
+        status: response.status,
+        layoutId: context.layoutId,
+        response: decodedText,
       });
 
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/setenablestat/${context.layoutId}`;
-
-      // Prepare form data for statistics setting update
-      const formData = new URLSearchParams();
-      formData.append('enableStat', context.enableStat.toString());
-
-      const response = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/x-www-form-urlencoded'
+      return {
+        success: false,
+        message: `${errorMessage} Message: ${decodedText}`,
+        error: {
+          statusCode: response.status,
+          responseBody: decodedText,
         },
-        body: formData
-      });
+      };
+    }
 
-      // Handle 204 No Content response first
-      if (response.status === 204) {
-        return {
-          success: true,
-          message: "Layout statistics setting updated successfully",
-          data: null
-        };
-      }
-
-      if (!response.ok) {
-        const responseText = await response.text();
-        logger.error("setLayoutEnableStat: API error response", {
-          status: response.status,
-          responseText
-        });
-        const errorMessage = decodeErrorMessage(responseText);
-        return {
-          success: false,
-          message: "Failed to update layout statistics setting",
-          error: `HTTP error! status: ${response.status}, message: ${errorMessage}`,
-          data: null
-        };
-      }
-
-      // For other successful responses, try to parse JSON
+    // For other successful responses, try to parse JSON
+    try {
       const data = await response.json();
       return {
         success: true,
         message: "Layout statistics setting updated successfully",
         data
       };
-    } catch (error) {
+    } catch (e) {
+      // If parsing fails but the request was OK, it might be an empty body for other success codes
       return {
-        success: false,
-        message: "Failed to update layout statistics setting",
-        error: error instanceof Error ? error.message : "Unknown error",
-        data: null
+        success: true,
+        message: "Layout statistics setting updated successfully (no content)",
+        data: null,
       };
     }
   },
