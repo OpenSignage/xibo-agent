@@ -34,7 +34,7 @@ import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
 import { getNews, getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles } from './etc';
-import { getFonts, getFontDetails, uploadFont } from './font';
+import { getFonts, getFontDetails, uploadFont, downloadFont, deleteFont } from './font';
 import { getUserGroups, addUserGroup } from './usergroup';
 import { getPlaylists, addPlaylist, editPlaylist } from './playlist';
 import { getStats, getTimeDisconnected, getExportStatsCount } from './statistics';
@@ -120,7 +120,7 @@ export function getTools() {
     // Etc
     getNews,getGoogleFonts,uploadGoogleFonts,getUploadFiles,deleteUploadFiles,
     // Font
-    getFonts,getFontDetails,uploadFont,
+    getFonts,getFontDetails,uploadFont,downloadFont,deleteFont,
     // User group
     getUserGroups,addUserGroup,
     // Playlist

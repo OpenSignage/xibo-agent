@@ -33,201 +33,140 @@ import * as path from 'path';
 import * as os from 'os';
 
 /**
- * Schema definition for font data returned after successful upload
+ * Schema for the uploaded font data, which is a specific type of library media.
  */
-const fontSchema = z.object({
-  id: z.number().describe("The Font ID"),
-  createdAt: z.string().describe("The Font created date"),
-  modifiedAt: z.string().describe("The Font modified date"),
-  modifiedBy: z.string().describe("The name of the user that modified this font last"),
-  name: z.string().describe("The Font name"),
-  fileName: z.string().describe("The Font file name"),
-  familyName: z.string().describe("The Font family name"),
-  size: z.number().describe("The Font file size in bytes"),
-  md5: z.string().describe("A MD5 checksum of the stored font file"),
+const fontUploadResponseSchema = z.object({
+    files: z.array(z.object({
+        mediaId: z.number().describe("The new Media ID for the uploaded font."),
+        name: z.string().describe("The name of the uploaded file."),
+        fileName: z.string().describe("The file name of the uploaded font."),
+        mediaType: z.literal("font").describe("The media type."),
+        size: z.number().describe("The size of the file in bytes."),
+        md5: z.string().describe("The MD5 checksum of the file."),
+    })),
 });
 
 /**
- * Schema for API response validation
- * Supports multiple response formats that the API might return
+ * Defines the schema for a successful response.
  */
-const apiResponseSchema = z.union([
-  z.object({
-    success: z.boolean(),
-    data: fontSchema,
-  }),
-  fontSchema,
-]);
+const successSchema = z.object({
+  success: z.literal(true),
+  data: fontUploadResponseSchema,
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
 
 /**
  * Tool for uploading font files to Xibo CMS
- * Supports multiple input methods for flexibility across different environments
  */
 export const uploadFont = createTool({
   id: "upload-font",
-  description: "Upload a font file to Xibo CMS",
+  description: "Upload a font file to Xibo CMS.",
   inputSchema: z.object({
-    // Support multiple file source methods
-    file: z.instanceof(File).optional().describe("The font file to upload (browser environment only)"),
-    fileContent: z.string().optional().describe("Base64 encoded file content"),
-    filePath: z.string().optional().describe("Path to font file on the agent server"),
-    fileName: z.string().optional().describe("Original filename (required with fileContent)"),
-    name: z.string().optional().describe("Custom name for the font (optional)"),
-  }).refine(data => data.file || data.fileContent || data.filePath, {
-    message: "At least one of file, fileContent, or filePath must be provided",
+    fileContent: z.string().describe("Base64 encoded file content."),
+    fileName: z.string().describe("Original filename (e.g., 'my-font.ttf')."),
+    name: z.string().optional().describe("A custom name for the font in the library."),
+    oldMediaId: z.number().optional().describe("The ID of an existing font to replace."),
   }),
-  outputSchema: apiResponseSchema,
-  execute: async ({ context }) => {
-    try {
-      if (!config.cmsUrl) {
-        logger.error("uploadFont: CMS URL is not set");
-        throw new Error("CMS URL is not set");
-      }
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({ context: input }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
+    if (!config.cmsUrl) {
+      const errorMessage = "CMS URL is not configured.";
+      logger.error(`uploadFont: ${errorMessage}`);
+      return { success: false, message: errorMessage };
+    }
 
-      const url = new URL(`${config.cmsUrl}/api/fonts`);
-      const formData = new FormData();
-      let tempFilePath = null;
-      
-      // Handle different file sources
-      if (context.file) {
-        // Direct file upload (browser environment)
-        logger.info(`Using direct File object for upload: ${context.file.name}`);
-        formData.append("files", context.file);
-      } 
-      else if (context.fileContent) {
-        // Base64 encoded content - decode and save to temp file
-        if (!context.fileName) {
-          throw new Error("fileName is required when using fileContent");
-        }
-        
-        logger.info(`Processing Base64 encoded file content for ${context.fileName}`);
-        
-        // Create temporary file
+    const { fileContent, fileName, name, oldMediaId } = input;
+    let tempFilePath: string | null = null;
+    
+    try {
+        const fileBuffer = Buffer.from(fileContent, 'base64');
         const tmpDir = os.tmpdir();
-        tempFilePath = path.join(tmpDir, `xibo-upload-${Date.now()}-${context.fileName}`);
-        
-        // Decode and write Base64 content to temp file
-        const fileBuffer = Buffer.from(context.fileContent, 'base64');
+        tempFilePath = path.join(tmpDir, `xibo-upload-${Date.now()}-${path.basename(fileName)}`);
         fs.writeFileSync(tempFilePath, fileBuffer);
         logger.debug(`Temporary file created at: ${tempFilePath}`);
         
-        // Create file object from temp file
-        const fileStream = fs.createReadStream(tempFilePath);
-        const fileBlob = new Blob([await streamToBuffer(fileStream)]);
-        const fileName = context.fileName;
-        
-        // Add to form data
-        formData.append("files", new File([fileBlob], fileName));
-      }
-      else if (context.filePath) {
-        // Local file path on agent server
-        logger.info(`Using local file for upload: ${context.filePath}`);
-        
-        if (!fs.existsSync(context.filePath)) {
-          throw new Error(`File not found: ${context.filePath}`);
-        }
-        
-        // Create file object from local file
-        const fileStream = fs.createReadStream(context.filePath);
-        const fileBlob = new Blob([await streamToBuffer(fileStream)]);
-        const fileName = context.fileName || path.basename(context.filePath);
-        
-        // Add to form data
-        formData.append("files", new File([fileBlob], fileName));
-      }
-      
-      // Add optional custom name
-      if (context.name) {
-        formData.append("name", context.name);
-        logger.info(`Using custom font name: ${context.name}`);
-      }
-      
-      logger.debug(`Request URL: ${url.toString()}`);
+        const fileBlob = new Blob([fileBuffer]);
+        const uploadFile = new File([fileBlob], fileName);
 
-      // Get auth headers and make the request
-      const headers = await getAuthHeaders();
-      const response = await fetch(url.toString(), {
-        method: "POST",
-        headers,
-        body: formData,
-      });
+        const formData = new FormData();
+        formData.append("files", uploadFile);
+        if (name) formData.append("name", name);
+        if (oldMediaId) formData.append("oldMediaId", oldMediaId.toString());
 
-      // Cleanup any temporary file
-      if (tempFilePath && fs.existsSync(tempFilePath)) {
-        try {
-          fs.unlinkSync(tempFilePath);
-          logger.debug(`Temporary file deleted: ${tempFilePath}`);
-        } catch (cleanupError) {
-          logger.warn(`Failed to delete temporary file: ${tempFilePath}`, { error: cleanupError });
-        }
-      }
+        const url = `${config.cmsUrl}/api/fonts`;
+        logger.info(`Uploading font '${fileName}' to ${url}.`);
 
-      // Handle error responses
-      if (!response.ok) {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: await getAuthHeaders(),
+            body: formData,
+        });
+
         const responseText = await response.text();
-        const errorMessage = decodeErrorMessage(responseText);
-        logger.error(`Failed to upload font: ${errorMessage}`, {
-          status: response.status,
-          url: url.toString()
-        });
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
-      }
-
-      // Parse and validate the response
-      const rawData = await response.json();
-      logger.debug(`Raw upload response: ${JSON.stringify(rawData)}`);
-      
-      // Handle different response formats
-      try {
-        const validatedData = apiResponseSchema.parse(rawData);
-        
-        // Standardize the response format and extract font ID safely
-        let result;
-        let fontId: number;
-        
-        if ('success' in validatedData && 'data' in validatedData) {
-          // Standard format: { success: boolean, data: fontSchema }
-          result = validatedData;
-          fontId = validatedData.data.id;
-        } else {
-          // Direct font object format
-          result = { success: true, data: validatedData };
-          fontId = validatedData.id;
+        let responseData: any;
+        try {
+            responseData = JSON.parse(responseText);
+        } catch (e) {
+            responseData = responseText;
         }
-        
-        logger.info(`Font uploaded successfully with ID: ${fontId}`);
-        return result;
-      } catch (validationError) {
-        logger.error(`Response validation error: ${validationError instanceof Error ? validationError.message : "Unknown validation error"}`, {
-          rawData,
-          error: validationError
-        });
-        
-        // Fallback: Return raw data with success flag if validation fails
-        logger.warn("Returning unvalidated response due to schema mismatch");
-        return { 
-          success: true, 
-          data: rawData.data || rawData 
+
+        if (!response.ok) {
+            const decodedText = decodeErrorMessage(responseText);
+            const errorMessage = `Failed to upload font. API responded with status ${response.status}.`;
+            logger.error(errorMessage, { status: response.status, response: decodedText });
+            return {
+                success: false,
+                message: `${errorMessage} Message: ${decodedText}`,
+                error: { statusCode: response.status, responseBody: responseData },
+            };
+        }
+
+        const validationResult = fontUploadResponseSchema.safeParse(responseData);
+        if (!validationResult.success) {
+            const errorMessage = "Font upload response validation failed.";
+            logger.error(errorMessage, { error: validationResult.error.issues, data: responseData });
+            return {
+                success: false,
+                message: errorMessage,
+                error: { validationIssues: validationResult.error.issues, receivedData: responseData },
+            };
+        }
+
+        logger.info(`Font '${fileName}' uploaded successfully.`);
+        return {
+            success: true,
+            data: validationResult.data,
         };
-      }
-    } catch (error) {
-      logger.error(`uploadFont: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      throw error;
+
+    } catch (error: any) {
+        logger.error(`An unexpected error occurred during font upload: ${error.message}`, { error });
+        return {
+            success: false,
+            message: `An unexpected error occurred: ${error.message}`,
+            error,
+        };
+    } finally {
+        if (tempFilePath && fs.existsSync(tempFilePath)) {
+            try {
+                fs.unlinkSync(tempFilePath);
+                logger.debug(`Temporary file deleted: ${tempFilePath}`);
+            } catch (cleanupError: any) {
+                logger.warn(`Failed to delete temporary file '${tempFilePath}': ${cleanupError.message}`);
+            }
+        }
     }
   },
 });
 
-/**
- * Helper function to convert a readable stream to a buffer
- */
-async function streamToBuffer(stream: fs.ReadStream): Promise<Buffer> {
-  return new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    
-    stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on('error', (err) => reject(err));
-    stream.on('end', () => resolve(Buffer.concat(chunks)));
-  });
-}
-
-export default uploadFont; 
+export default uploadFont;
