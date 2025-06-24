@@ -48,6 +48,7 @@ import { getLogs } from './log';
 import { getTransition } from './transition';
 import { getDayParts, addDayPart, editDayPart, deleteDayPart } from './dayPart';
 import { changePassword } from './compound';
+import { getDisplayVenues } from './displayVenue';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -80,6 +81,7 @@ export * from './generate';     // Image and Video generate
 export * from './log';          // Log management
 export * from './transition';   // Transition management
 export * from './compound';     // Compound tools
+export * from './displayVenue'; // Display venue management
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -140,6 +142,8 @@ export function getTools() {
     // Day part
     getDayParts,addDayPart,editDayPart,deleteDayPart,
     // Compound
-    changePassword
+    changePassword,
+    // Display venue
+    getDisplayVenues,
   };
 }
