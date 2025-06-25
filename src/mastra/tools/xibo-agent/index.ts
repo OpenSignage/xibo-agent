@@ -33,7 +33,7 @@ import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
   addDrawerRegion,saveDrawerRegion,deleteRegion,positionAllRegions } from './layout';
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
-import { getNews, getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles } from './etc';
+import { getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles } from './etc';
 import { getFonts, getFontDetails, uploadFont, downloadFont, deleteFont } from './font';
 import { getUserGroups, addUserGroup } from './usergroup';
 import { getPlaylists, addPlaylist, editPlaylist } from './playlist';
@@ -49,6 +49,7 @@ import { getTransition } from './transition';
 import { getDayParts, addDayPart, editDayPart, deleteDayPart } from './dayPart';
 import { changePassword } from './compound';
 import { getDisplayVenues } from './displayVenue';
+import { getXiboNews, getGoogleNews } from './news';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -82,6 +83,7 @@ export * from './log';          // Log management
 export * from './transition';   // Transition management
 export * from './compound';     // Compound tools
 export * from './displayVenue'; // Display venue management
+export * from './news';         // News management
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -118,7 +120,7 @@ export function getTools() {
     // Resolution
     getResolutions,addResolution,editResolution,deleteResolution,
     // Etc
-    getNews,getGoogleFonts,uploadGoogleFonts,getUploadFiles,deleteUploadFiles,
+    getGoogleFonts,uploadGoogleFonts,getUploadFiles,deleteUploadFiles,
     // Font
     getFonts,getFontDetails,uploadFont,downloadFont,deleteFont,
     // User group
@@ -145,5 +147,7 @@ export function getTools() {
     changePassword,
     // Display venue
     getDisplayVenues,
+    // News
+    getXiboNews,getGoogleNews,
   };
 }
