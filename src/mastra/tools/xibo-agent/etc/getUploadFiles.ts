@@ -37,15 +37,23 @@ const fileInfoSchema = z.object({
 });
 
 /**
- * Schema for API response validation
+ * Defines the schema for a successful response.
  */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.array(fileInfoSchema),
-  error: z.object({
-    status: z.number(),
-    message: z.string()
-  }).optional()
+const successSchema = z.object({
+  success: z.literal(true),
+  data: z.array(fileInfoSchema).describe("An array of objects containing file information."),
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+    error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
 });
 
 /**
@@ -57,83 +65,60 @@ export const getUploadFiles = createTool({
   inputSchema: z.object({
     pattern: z.string().optional().describe("Filter files by pattern (e.g., *.png, image-*.jpg)"),
   }),
-  outputSchema: apiResponseSchema,
-  execute: async ({ context }) => {
-    try {
-      const uploadDir = config.uploadDir;
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({ context: input }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
+    const uploadDir = config.uploadDir;
 
-      // Create directory if it doesn't exist
-      if (!fs.existsSync(uploadDir)) {
-        try {
-          await fs.promises.mkdir(uploadDir, { recursive: true });
-          logger.info(`Created directory: ${uploadDir}`);
-        } catch (mkdirError) {
-          logger.error(`Failed to create directory: ${uploadDir}`, { error: mkdirError });
-          return {
-            success: false,
-            data: [],
-            error: {
-              status: 500,
-              message: `Failed to create directory: ${uploadDir}`
-            }
-          };
+    // If the upload directory doesn't exist, return an empty list as there are no files.
+    if (!fs.existsSync(uploadDir)) {
+      logger.warn(`Upload directory '${uploadDir}' does not exist. Returning empty list.`);
+      return { success: true, data: [] };
+    }
+
+    try {
+      const allFiles = await fs.promises.readdir(uploadDir, { withFileTypes: true });
+      const filesInfo: z.infer<typeof fileInfoSchema>[] = [];
+
+      for (const item of allFiles) {
+        if (item.isFile()) {
+          // If a pattern is provided, skip files that don't match.
+          if (input.pattern && !matchPattern(item.name, input.pattern)) {
+            continue;
+          }
+
+          const fullPath = path.join(uploadDir, item.name);
+          const stats = await fs.promises.stat(fullPath);
+          
+          filesInfo.push({
+            name: item.name,
+            path: item.name, // Path is relative to the upload directory
+            size: stats.size,
+            type: path.extname(item.name).slice(1) || 'unknown',
+            modifiedAt: stats.mtime.toISOString(),
+            createdAt: stats.birthtime.toISOString(),
+          });
         }
       }
-
-      const files = await getFiles(uploadDir, context.pattern);
       
+      logger.info(`Found ${filesInfo.length} file(s) in '${uploadDir}'${input.pattern ? ` matching pattern '${input.pattern}'` : ''}.`);
       return {
         success: true,
-        data: files
+        data: filesInfo,
       };
-    } catch (error) {
-      logger.error(`getUploadFiles: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
+    } catch (error: any) {
+      const message = `Failed to read or stat files in upload directory: ${error.message}`;
+      logger.error(message, { error });
       return {
         success: false,
-        data: [],
-        error: {
-          status: 500,
-          message: error instanceof Error ? error.message : "Unknown error"
-        }
+        message,
+        error,
       };
     }
   },
 });
 
 /**
- * Helper function to get files from directory
- */
-async function getFiles(dir: string, pattern?: string): Promise<z.infer<typeof fileInfoSchema>[]> {
-  const files: z.infer<typeof fileInfoSchema>[] = [];
-  
-  const items = await fs.promises.readdir(dir, { withFileTypes: true });
-  
-  for (const item of items) {
-    if (item.isFile()) {
-      // Skip if pattern is provided and file doesn't match
-      if (pattern && !matchPattern(item.name, pattern)) {
-        continue;
-      }
-
-      const fullPath = path.join(dir, item.name);
-      const stats = await fs.promises.stat(fullPath);
-      
-      files.push({
-        name: item.name,
-        path: item.name,
-        size: stats.size,
-        type: path.extname(item.name).slice(1) || 'unknown',
-        modifiedAt: stats.mtime.toISOString(),
-        createdAt: stats.birthtime.toISOString()
-      });
-    }
-  }
-  
-  return files;
-}
-
-/**
- * Helper function to match file pattern
+ * Helper function to match filename against a simple glob-like pattern.
  */
 function matchPattern(filename: string, pattern: string): boolean {
   // Convert glob pattern to regex

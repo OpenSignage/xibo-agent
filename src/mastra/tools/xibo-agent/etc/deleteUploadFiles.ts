@@ -11,10 +11,9 @@
  */
 
 /**
- * Delete Upload Files Tool
- * 
- * This module provides functionality to delete files from the upload directory.
- * It supports deleting files by pattern or specific paths.
+ * @module deleteUploadFiles
+ * @description Provides a tool to delete files from the 'persistent_data/upload' directory
+ * either by a specific list of paths or by a glob-like pattern.
  */
 
 import { z } from "zod";
@@ -25,131 +24,115 @@ import fs from 'fs';
 import path from 'path';
 
 /**
- * Schema for API response validation
+ * Defines the schema for a successful response.
  */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.object({
-    deleted: z.array(z.string()),
-    failed: z.array(z.object({
-      path: z.string(),
-      error: z.string()
-    }))
-  }),
-  error: z.object({
-    status: z.number(),
-    message: z.string()
-  }).optional()
+const successSchema = z.object({
+  success: z.literal(true),
+  deleted: z.array(z.string()).describe("A list of successfully deleted file paths."),
+  failed: z.array(z.object({
+    path: z.string().describe("The path of the file that failed to be deleted."),
+    error: z.string().describe("The reason for the deletion failure."),
+  })).describe("A list of files that failed to be deleted, with reasons."),
 });
 
 /**
- * Tool for deleting files from the upload directory
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z
+    .any()
+    .optional()
+    .describe("Optional technical details about the error."),
+});
+
+/**
+ * Tool for deleting files from the upload directory.
  */
 export const deleteUploadFiles = createTool({
   id: "delete-upload-files",
-  description: "Delete files from the upload directory",
+  description: "Deletes files from the 'persistent_data/upload' directory.",
   inputSchema: z.object({
-    pattern: z.string().optional().describe("Pattern to match files (e.g., *.png, image-*.jpg)"),
-    paths: z.array(z.string()).optional().describe("Array of specific file paths to delete"),
-    force: z.boolean().optional().describe("Force deletion without checking if file exists")
+    pattern: z.string().optional().describe("Pattern to match files (e.g., '*.png', 'image-*.jpg')."),
+    paths: z.array(z.string()).optional().describe("Array of specific file paths to delete relative to the upload directory."),
+  }).refine(data => data.pattern || data.paths, {
+    message: "Either 'pattern' or 'paths' must be provided.",
   }),
-  outputSchema: apiResponseSchema,
-  execute: async ({ context }) => {
-    try {
-      const deleted: string[] = [];
-      const failed: { path: string; error: string }[] = [];
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({ context: input }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
+    const deleted: string[] = [];
+    const failed: { path: string; error: string }[] = [];
+    const uploadDir = config.uploadDir;
 
-      // Ensure upload directory exists
-      if (!fs.existsSync(config.uploadDir)) {
-        try {
-          await fs.promises.mkdir(config.uploadDir, { recursive: true });
-          logger.info(`Created upload directory: ${config.uploadDir}`);
-        } catch (mkdirError) {
-          logger.error(`Failed to create upload directory: ${config.uploadDir}`, { error: mkdirError });
-          return {
-            success: false,
-            data: {
-              deleted: [],
-              failed: []
-            },
-            error: {
-              status: 500,
-              message: `Failed to create upload directory: ${config.uploadDir}`
-            }
-          };
-        }
-      }
+    // Ensure upload directory exists.
+    if (!fs.existsSync(uploadDir)) {
+      logger.warn(`Upload directory '${uploadDir}' does not exist. Nothing to delete.`);
+      return { success: true, deleted, failed };
+    }
 
-      // Get files to delete
-      const filesToDelete = context.paths || [];
-      
-      // If pattern is provided, add matching files
-      if (context.pattern) {
-        const items = await fs.promises.readdir(config.uploadDir, { withFileTypes: true });
+    // Gather all files to be deleted.
+    const filesToDelete = new Set<string>();
+    if (input.paths) {
+      input.paths.forEach(p => filesToDelete.add(p));
+    }
+
+    if (input.pattern) {
+      try {
+        const items = await fs.promises.readdir(uploadDir, { withFileTypes: true });
         for (const item of items) {
-          if (item.isFile() && matchPattern(item.name, context.pattern)) {
-            filesToDelete.push(item.name);
+          if (item.isFile() && matchPattern(item.name, input.pattern)) {
+            filesToDelete.add(item.name);
           }
         }
+      } catch (error: any) {
+        const message = `Failed to read upload directory: ${error.message}`;
+        logger.error(message, { error });
+        return { success: false, message, error };
       }
-
-      // Delete files
-      for (const filePath of filesToDelete) {
-        const fullPath = path.join(config.uploadDir, filePath);
-
-        // Check if file exists unless force is true
-        if (!context.force && !fs.existsSync(fullPath)) {
-          failed.push({
-            path: filePath,
-            error: "File not found"
-          });
-          continue;
-        }
-
-        try {
-          await fs.promises.unlink(fullPath);
-          deleted.push(filePath);
-        } catch (error) {
-          failed.push({
-            path: filePath,
-            error: error instanceof Error ? error.message : "Unknown error"
-          });
-        }
-      }
-
-      return {
-        success: true,
-        data: {
-          deleted,
-          failed
-        }
-      };
-    } catch (error) {
-      logger.error(`deleteUploadFiles: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      return {
-        success: false,
-        data: {
-          deleted: [],
-          failed: []
-        },
-        error: {
-          status: 500,
-          message: error instanceof Error ? error.message : "Unknown error"
-        }
-      };
     }
+
+    if (filesToDelete.size === 0) {
+      logger.info("No files matched the criteria for deletion.");
+      return { success: true, deleted, failed };
+    }
+
+    // Delete the files.
+    for (const file of filesToDelete) {
+      const fullPath = path.join(uploadDir, file);
+      try {
+        if (fs.existsSync(fullPath)) {
+            await fs.promises.unlink(fullPath);
+            deleted.push(file);
+            logger.info(`Successfully deleted file: ${fullPath}`);
+        } else {
+            const errorMsg = "File not found.";
+            failed.push({ path: file, error: errorMsg });
+            logger.warn(`${errorMsg}: ${fullPath}`);
+        }
+      } catch (error: any) {
+        failed.push({ path: file, error: error.message });
+        logger.error(`Failed to delete file '${fullPath}': ${error.message}`, { error });
+      }
+    }
+
+    return {
+      success: true,
+      deleted,
+      failed,
+    };
   },
 });
 
 /**
- * Helper function to match file pattern
+ * Helper function to match filename against a simple glob-like pattern.
  */
 function matchPattern(filename: string, pattern: string): boolean {
-  // Convert glob pattern to regex
+  // Convert glob pattern to regex.
   const regexPattern = pattern
-    .replace(/\./g, '\\.')  // Escape dots
-    .replace(/\*/g, '.*')   // Convert * to .*
-    .replace(/\?/g, '.');   // Convert ? to .
+    .replace(/\./g, '\\.')  // Escape dots.
+    .replace(/\*/g, '.*')   // Convert * to .*.
+    .replace(/\?/g, '.');   // Convert ? to ..
   
   const regex = new RegExp(`^${regexPattern}$`);
   return regex.test(filename);

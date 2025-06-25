@@ -11,9 +11,8 @@
  */
 
 /**
- * getGoogleFonts.ts
- * 
- * Xibo Agent Tool to fetch Google Fonts metadata from the Google Fonts Developer API
+ * @module getGoogleFonts
+ * @description Provides a tool to fetch Google Fonts metadata from the Google Fonts Developer API.
  * API specification: https://developers.google.com/fonts/docs/developer_api
  */
 
@@ -31,6 +30,39 @@ const CATEGORY_OPTIONS = ['serif', 'sans-serif', 'monospace', 'display', 'handwr
 const CAPABILITY_OPTIONS = ['VF', 'WOFF2'] as const;
 
 /**
+ * Schema for a single font item from the Google Fonts API.
+ */
+const googleFontItemSchema = z.object({
+  family: z.string(),
+  variants: z.array(z.string()),
+  subsets: z.array(z.string()),
+  version: z.string(),
+  lastModified: z.string(),
+  files: z.record(z.string().url()),
+  category: z.string(),
+  kind: z.string(),
+});
+
+/**
+ * Defines the schema for a successful response.
+ */
+const successSchema = z.object({
+    success: z.literal(true),
+    total: z.number().int().describe("The total number of fonts returned."),
+    fonts: z.array(googleFontItemSchema).describe("An array of font metadata objects."),
+    kind: z.string().optional().describe("The kind of resource, typically 'webfonts#webfontList'."),
+});
+
+/**
+ * Defines the schema for a failed operation.
+ */
+const errorSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe("A human-readable error message."),
+  error: z.any().optional().describe("Optional technical details about the error."),
+});
+
+/**
  * Tool to retrieve font information from Google Fonts API
  * 
  * This tool fetches metadata about available fonts from the Google Fonts Developer API.
@@ -46,76 +78,63 @@ export const getGoogleFonts = createTool({
     category: z.enum(CATEGORY_OPTIONS).optional().describe('Filter by font category (serif, sans-serif, monospace, display, handwriting)'),
     capability: z.enum(CAPABILITY_OPTIONS).array().optional().default(['VF']).describe('Filter by font capability (VF for variable fonts, WOFF2 for WOFF2 format)'),
     sort: z.enum(SORT_OPTIONS).optional().describe('Sort order for results (alpha, date, popularity, style, trending)'),
-    limit: z.number().optional().describe('Maximum number of fonts to return (default: 20)'),
+    limit: z.number().int().positive().optional().describe('Maximum number of fonts to return (default: 20)'),
   }),
-  outputSchema: z.any(),
-  execute: async ({ context }) => {
+  outputSchema: z.union([successSchema, errorSchema]),
+  execute: async ({ context: input }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
+    const apiKey = process.env.GOOGLE_FONTS_API_KEY;
+    if (!apiKey) {
+      const message = 'Google Fonts API Key is not set in environment variables (GOOGLE_FONTS_API_KEY).';
+      logger.error(`getGoogleFonts: ${message}`);
+      return { success: false, message };
+    }
+
+    const limit = input.limit || 20;
+
+    const params = new URLSearchParams({ key: apiKey });
+    if (input.family) params.append('family', input.family);
+    if (input.subset) params.append('subset', input.subset);
+    if (input.category) params.append('category', input.category);
+    if (input.sort) params.append('sort', input.sort);
+    if (input.capability && input.capability.length > 0) {
+      input.capability.forEach(cap => params.append('capability', cap));
+    }
+
+    const apiUrl = `https://www.googleapis.com/webfonts/v1/webfonts?${params.toString()}`;
+    logger.info(`Fetching Google Fonts data with filters: ${params.toString().replace(/key=[^&]+/, 'key=***')}`);
+    
     try {
-      // Get API key from environment variables
-      const apiKey = process.env.GOOGLE_FONTS_API_KEY;
-      
-      if (!apiKey) {
-        throw new Error('Google Fonts API Key is not set in environment variables (GOOGLE_FONTS_API_KEY)');
-      }
-
-      // Extract parameters from context with defaults
-      const family = context?.family;
-      const subset = context?.subset || 'japanese';
-      const category = context?.category;
-      const capability = context?.capability || ['VF'];
-      const sort = context?.sort;
-      const limit = context?.limit || 20;
-
-      // Build URL parameters
-      const params = new URLSearchParams();
-      params.append('key', apiKey);
-      
-      if (family) params.append('family', family);
-      if (subset) params.append('subset', subset);
-      if (category) params.append('category', category);
-      if (sort) params.append('sort', sort);
-      
-      // Add capability parameters (can be multiple)
-      if (capability && capability.length > 0) {
-        capability.forEach(cap => params.append('capability', cap));
-      }
-
-      const apiUrl = `https://www.googleapis.com/webfonts/v1/webfonts?${params.toString()}`;
-      
-      // Log request with masked API key for security
-      logger.info(`Fetching Google Fonts data with filters: ${params.toString().replace(/key=[^&]+/, 'key=***')}`);
-      
-      // Call the Google Fonts API
       const response = await fetch(apiUrl);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Google Fonts API returned an error: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-      
       const data = await response.json();
-      
-      // Limit the number of results if needed
-      if (data.items && data.items.length > limit) {
-        data.items = data.items.slice(0, limit);
+
+      if (!response.ok) {
+        const message = `Google Fonts API Error: ${data.error?.message || response.statusText}`;
+        logger.error(message, { error: data.error });
+        return { success: false, message, error: data.error };
       }
+
+      const validationResult = z.object({ items: z.array(googleFontItemSchema), kind: z.string().optional() }).safeParse(data);
+
+      if(!validationResult.success){
+        const message = "Google Fonts API response validation failed.";
+        logger.error(message, { error: validationResult.error.issues, data });
+        return { success: false, message, error: { validationIssues: validationResult.error.issues, receivedData: data } };
+      }
+
+      const fonts = validationResult.data.items.slice(0, limit);
       
-      logger.info(`Retrieved ${data.items?.length || 0} fonts from Google Fonts API`);
+      logger.info(`Successfully retrieved ${fonts.length} fonts from Google Fonts API.`);
       
-      // Return structured response
       return {
         success: true,
-        total: data.items?.length || 0,
-        fonts: data.items || [],
-        kind: data.kind,
+        total: fonts.length,
+        fonts: fonts,
+        kind: validationResult.data.kind,
       };
-    } catch (error) {
-      // Log and return error information
-      logger.error('Error fetching Google Fonts data:', { error: error instanceof Error ? error.message : 'Unknown error' });
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Failed to fetch Google Fonts data',
-      };
+    } catch (error: any) {
+      const message = `Failed to fetch or parse Google Fonts data: ${error.message}`;
+      logger.error(message, { error });
+      return { success: false, message, error };
     }
   }
 }); 

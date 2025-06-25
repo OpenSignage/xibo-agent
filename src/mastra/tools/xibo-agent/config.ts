@@ -26,7 +26,7 @@ export const config = {
 
   // Define directories relative to the project root for stability.
   projectRoot: projectRoot,
-  uploadDir: process.env.XIBO_UPLOAD_DIR || path.join(projectRoot, 'persistent_data', 'upload'),
+  uploadDir: process.env.XIBO_UPLOAD_DIR || path.join(projectRoot, 'persistent_data', 'uploads'),
   downloadsDir: path.join(projectRoot, 'persistent_data', 'downloads'),
   generatedDir: path.join(projectRoot, 'persistent_data', 'generated'),
   logsDir: path.join(projectRoot, 'logs'),
