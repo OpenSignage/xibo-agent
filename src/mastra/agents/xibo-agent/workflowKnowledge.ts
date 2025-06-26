@@ -16,6 +16,24 @@
  * This module defines the knowledge base for various workflows in the Xibo Agent.
  * Each workflow is defined as a string template that can be included in the agent's instructions.
  */
+export const weatherWorkflow = `
+weatherワークフロー：
+1. ユーザーから天気情報を取得する地域を指定してもらいます。
+2. 指定された地域が英語以外の言語で入力された場合、英語に変換します。
+    例：「東京」→「Tokyo」
+3.指定された地域の天気情報を取得します。
+4. 取得した天気情報をテーブル形式で表示します。ただしユーザーからの表示形式の指定があれば、その形式で表示します。
+    例：「東京の天気を解説してください。」→「東京の天気は晴れです。気温が高くなるので、熱中症に注意してください。」
+`;
+export const googleNewsWorkflow = `
+Google Newsワークフロー：
+1. ユーザーからGoogle News検索タイプをtopicなのか、geoなのか、queryなのかを指定してもらい、のちの実行時にそのタイプをsearchTypeに指定して実行します
+2. typeがtopicならば、WORLD,NATION ,BUSINES,TECHNOLOGY,ENTERTEAIMENT,SPOTS,SCIENCE,HELTHのどのtopicなのかを聞き、topicに指定して実行します
+3. typeがgeoならば、入力された情報をlocationに指定して実行します
+4. typeがqueryならば、入力された情報をqueryに指定して実行します
+5. ユーザーから取得件数の指定があれば、その数値をlimitパラメータに指定して実行します。指定がなければデフォルト値が使用されます。
+6. 取得したデータはデフォルトではテーブル形式で、pubDateとtitleを表示します。pubDateもデフォルトでは日本時間で表示します。
+`;
 
 export const imageGenerationWorkflow = `
 画像生成ワークフロー：

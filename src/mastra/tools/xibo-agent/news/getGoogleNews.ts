@@ -92,22 +92,16 @@ const topicEnum = z.enum(['WORLD', 'NATION', 'BUSINESS', 'TECHNOLOGY', 'ENTERTAI
 
 /**
  * Input schema for the getGoogleNews tool, allowing search by topic, geo, or query.
+ * This schema is intentionally relaxed to avoid issues with the tool framework.
+ * Validation is performed inside the execute function.
  */
 const inputSchema = z.object({
-  searchType: z.enum(['topic', 'geo', 'query']).describe("The type of search to perform."),
-  topic: topicEnum.optional().describe("The news topic to search for (required if searchType is 'topic')."),
-  location: z.string().optional().describe("The geographic location to search for (required if searchType is 'geo')."),
-  query: z.string().optional().describe("A keyword query to search for (required if searchType is 'query')."),
+  searchType: z.string().optional().describe("The type of search to perform. Must be one of 'topic', 'geo', or 'query'."),
+  topic: z.string().optional().describe("The news topic to search for (used when searchType is 'topic'). Examples: 'WORLD', 'NATION', 'BUSINESS'."),
+  location: z.string().optional().describe("The geographic location to search for (used when searchType is 'geo')."),
+  query: z.string().optional().describe("A keyword query to search for (used when searchType is 'query')."),
   limit: z.number().int().positive().optional().default(10).describe('Maximum number of news items to return.'),
   language: languageEnum.optional().default('ja').describe("The language and region for the news search."),
-}).refine(data => {
-    if (data.searchType === 'topic') return data.topic !== undefined;
-    if (data.searchType === 'geo') return data.location !== undefined;
-    if (data.searchType === 'query') return data.query !== undefined;
-    return false;
-}, {
-    message: "When searchType is 'topic', 'topic' must be provided. When 'geo', 'location' must be provided. When 'query', 'query' must be provided.",
-    path: ["searchType"], // Associates the error with the searchType field
 });
 
 /**
@@ -119,9 +113,34 @@ export const getGoogleNews = createTool({
   inputSchema,
   outputSchema: z.union([successSchema, errorSchema]),
   execute: async ({ context: input }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
+    logger.info('Executing getGoogleNews with input:', { input });
+    
+    // --- Manual Input Validation ---
+    if (!input.searchType || !['topic', 'geo', 'query'].includes(input.searchType)) {
+        const message = `Invalid or missing 'searchType'. It must be one of 'topic', 'geo', or 'query'. Received: ${input.searchType}`;
+        logger.error(message, { input });
+        return { success: false, message };
+    }
+    if (input.searchType === 'topic' && !input.topic) {
+        const message = "When 'searchType' is 'topic', the 'topic' parameter is required.";
+        logger.error(message, { input });
+        return { success: false, message };
+    }
+    if (input.searchType === 'geo' && !input.location) {
+        const message = "When 'searchType' is 'geo', the 'location' parameter is required.";
+        logger.error(message, { input });
+        return { success: false, message };
+    }
+    if (input.searchType === 'query' && !input.query) {
+        const message = "When 'searchType' is 'query', the 'query' parameter is required.";
+        logger.error(message, { input });
+        return { success: false, message };
+    }
+    // --- End Manual Input Validation ---
+
     const { limit, language } = input;
     
-    const langParamsMap = {
+    const langParamsMap: Record<z.infer<typeof languageEnum>, string> = {
         'ja': 'hl=ja&gl=JP&ceid=JP:ja',
         'en-US': 'hl=en-US&gl=US&ceid=US:en',
         'en-GB': 'hl=en-GB&gl=GB&ceid=GB:en',
@@ -143,6 +162,9 @@ export const getGoogleNews = createTool({
         case 'query':
             path = `/search?q=${encodeURIComponent(input.query!)}`;
             break;
+        default:
+             // This case should be unreachable due to the manual validation above.
+            return { success: false, message: `Internal error: Unhandled searchType '${input.searchType}'`};
     }
     
     const separator = path.includes('?') ? '&' : '?';
