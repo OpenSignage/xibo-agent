@@ -50,6 +50,7 @@ import { getDayParts, addDayPart, editDayPart, deleteDayPart } from './dayPart';
 import { changePassword } from './compound';
 import { getDisplayVenues } from './displayVenue';
 import { getXiboNews, getGoogleNews } from './news';
+import { getWeather, getWeeklyWeather, getWeatherByCoordinates } from './weather';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -84,6 +85,7 @@ export * from './transition';   // Transition management
 export * from './compound';     // Compound tools
 export * from './displayVenue'; // Display venue management
 export * from './news';         // News management
+export * from './weather';      // Weather management
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -149,5 +151,7 @@ export function getTools() {
     getDisplayVenues,
     // News
     getXiboNews,getGoogleNews,
+    // Weather
+    getWeather,getWeeklyWeather,getWeatherByCoordinates,
   };
 }
