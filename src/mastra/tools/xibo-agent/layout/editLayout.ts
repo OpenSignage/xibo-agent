@@ -32,8 +32,8 @@ import { logger } from '../../../index';
  */
 const regionOptionSchema = z.object({
   regionId: z.union([z.number(), z.string().transform(Number)]),
-  option: z.string(),
-  value: z.string()
+  option: z.string().nullable(),
+  value: z.string().nullable()
 });
 
 /**
@@ -46,9 +46,9 @@ const permissionSchema = z.object({
   groupId: z.union([z.number(), z.string().transform(Number)]),
   objectId: z.union([z.number(), z.string().transform(Number)]),
   isUser: z.union([z.number(), z.string().transform(Number)]),
-  entity: z.string(),
-  objectIdString: z.string(),
-  group: z.string(),
+  entity: z.string().nullable(),
+  objectIdString: z.string().nullable(),
+  group: z.string().nullable(),
   view: z.union([z.number(), z.string().transform(Number)]),
   edit: z.union([z.number(), z.string().transform(Number)]),
   delete: z.union([z.number(), z.string().transform(Number)]),
@@ -61,9 +61,9 @@ const permissionSchema = z.object({
  */
 const widgetOptionSchema = z.object({
   widgetId: z.union([z.number(), z.string().transform(Number)]),
-  type: z.string(),
-  option: z.string(),
-  value: z.string()
+  type: z.string().nullable(),
+  option: z.string().nullable(),
+  value: z.union([z.string(), z.array(z.any()), z.record(z.any())]).nullable()
 });
 
 /**
@@ -85,35 +85,35 @@ const widgetSchema = z.object({
   widgetId: z.union([z.number(), z.string().transform(Number)]),
   playlistId: z.union([z.number(), z.string().transform(Number)]),
   ownerId: z.union([z.number(), z.string().transform(Number)]),
-  type: z.string(),
+  type: z.string().nullable(),
   duration: z.union([z.number(), z.string().transform(Number)]),
   displayOrder: z.union([z.number(), z.string().transform(Number)]),
   useDuration: z.union([z.number(), z.string().transform(Number)]),
-  calculatedDuration: z.union([z.number(), z.string().transform(Number)]),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
-  fromDt: z.union([z.number(), z.string().transform(Number)]),
-  toDt: z.union([z.number(), z.string().transform(Number)]),
+  calculatedDuration: z.union([z.number(), z.string().transform(Number)]).optional(),
+  createdDt: z.union([z.string(), z.number()]).nullable(),
+  modifiedDt: z.union([z.string(), z.number()]).nullable(),
+  fromDt: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  toDt: z.union([z.number(), z.string().transform(Number)]).nullable(),
   schemaVersion: z.union([z.number(), z.string().transform(Number)]),
-  transitionIn: z.union([z.number(), z.string().transform(Number)]),
-  transitionOut: z.union([z.number(), z.string().transform(Number)]),
-  transitionDurationIn: z.union([z.number(), z.string().transform(Number)]),
-  transitionDurationOut: z.union([z.number(), z.string().transform(Number)]),
-  widgetOptions: z.array(widgetOptionSchema),
-  mediaIds: z.array(z.union([z.number(), z.string().transform(Number)])),
-  audio: z.array(audioSchema),
-  permissions: z.array(permissionSchema),
+  transitionIn: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  transitionOut: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  transitionDurationIn: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  transitionDurationOut: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  widgetOptions: z.array(widgetOptionSchema).optional(),
+  mediaIds: z.array(z.union([z.number(), z.string().transform(Number)])).optional(),
+  audio: z.array(audioSchema).optional(),
+  permissions: z.array(permissionSchema).optional(),
   playlist: z.string().nullable()
-}).nullable();
+});
 
 /**
  * Schema for tags
  * Defines metadata tags that can be applied to layouts
  */
 const tagSchema = z.object({
-  tag: z.string(),
+  tag: z.string().nullable(),
   tagId: z.union([z.number(), z.string().transform(Number)]),
-  value: z.string()
+  value: z.string().nullable()
 });
 
 /**
@@ -123,26 +123,26 @@ const tagSchema = z.object({
 const playlistSchema = z.object({
   playlistId: z.union([z.number(), z.string().transform(Number)]),
   ownerId: z.union([z.number(), z.string().transform(Number)]),
-  name: z.string(),
-  regionId: z.union([z.number(), z.string().transform(Number)]),
+  name: z.string().nullable(),
+  regionId: z.union([z.number(), z.string().transform(Number)]).optional(),
   isDynamic: z.union([z.number(), z.string().transform(Number)]),
   filterMediaName: z.string().nullable(),
   filterMediaNameLogicalOperator: z.string().nullable(),
   filterMediaTags: z.string().nullable(),
-  filterExactTags: z.union([z.number(), z.string().transform(Number)]),
+  filterExactTags: z.union([z.number(), z.string().transform(Number)]).nullable(),
   filterMediaTagsLogicalOperator: z.string().nullable(),
-  filterFolderId: z.union([z.number(), z.string().transform(Number)]),
-  maxNumberOfItems: z.union([z.number(), z.string().transform(Number)]),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
+  filterFolderId: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  maxNumberOfItems: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  createdDt: z.string().nullable(),
+  modifiedDt: z.string().nullable(),
   duration: z.union([z.number(), z.string().transform(Number)]),
   requiresDurationUpdate: z.union([z.number(), z.string().transform(Number)]),
   enableStat: z.string().nullable(),
-  tags: z.array(tagSchema),
-  widgets: z.array(widgetSchema.nullish()),
-  permissions: z.array(permissionSchema),
-  folderId: z.union([z.number(), z.string().transform(Number)]),
-  permissionsFolderId: z.union([z.number(), z.string().transform(Number)])
+  tags: z.array(tagSchema).optional(),
+  widgets: z.array(widgetSchema.nullish()).optional(),
+  permissions: z.array(permissionSchema).optional(),
+  folderId: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  permissionsFolderId: z.union([z.number(), z.string().transform(Number)]).nullable()
 });
 
 /**
@@ -154,18 +154,18 @@ const regionSchema = z.object({
   layoutId: z.union([z.number(), z.string().transform(Number)]),
   ownerId: z.union([z.number(), z.string().transform(Number)]),
   type: z.string().nullable(),
-  name: z.string(),
+  name: z.string().nullable(),
   width: z.union([z.number(), z.string().transform(Number)]),
   height: z.union([z.number(), z.string().transform(Number)]),
   top: z.union([z.number(), z.string().transform(Number)]),
   left: z.union([z.number(), z.string().transform(Number)]),
   zIndex: z.union([z.number(), z.string().transform(Number)]),
   syncKey: z.string().nullable(),
-  regionOptions: z.array(regionOptionSchema),
-  permissions: z.array(permissionSchema),
+  regionOptions: z.array(regionOptionSchema).optional(),
+  permissions: z.array(permissionSchema).optional(),
   duration: z.union([z.number(), z.string().transform(Number)]),
-  isDrawer: z.union([z.number(), z.string().transform(Number)]),
-  regionPlaylist: playlistSchema
+  isDrawer: z.union([z.number(), z.string().transform(Number)]).optional(),
+  regionPlaylist: playlistSchema.optional()
 });
 
 /**
@@ -200,7 +200,17 @@ const layoutResponseSchema = z.object({
   enableStat: z.union([z.number(), z.string().transform(Number)]),
   autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
   code: z.string().nullable(),
-  isLocked: z.any().transform(v => v === true),
+  isLocked: z.union([
+    z.object({
+      layoutId: z.number(),
+      userId: z.number(),
+      entryPoint: z.string(),
+      expires: z.string(),
+      lockedUser: z.boolean()
+    }),
+    z.boolean(),
+    z.array(z.any()).length(0)
+  ]).nullable(),
   regions: z.array(regionSchema).optional(),
   tags: z.array(tagSchema).optional(),
   folderId: z.union([z.number(), z.string().transform(Number)]).nullable(),

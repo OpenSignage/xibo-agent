@@ -67,8 +67,18 @@ const layoutResponseSchema = z.object({
   statusMessage: z.string().nullable(),
   enableStat: z.union([z.number(), z.string().transform(Number)]),
   autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
-  code: z.string().optional().describe("Layout identification code"),
-  isLocked: z.union([z.boolean(), z.array(z.any())]).transform(val => Array.isArray(val) ? false : val).nullable(),
+  code: z.string().nullable().describe("Layout identification code"),
+  isLocked: z.union([
+    z.object({
+      layoutId: z.number(),
+      userId: z.number(),
+      entryPoint: z.string(),
+      expires: z.string(),
+      lockedUser: z.boolean()
+    }),
+    z.boolean(),
+    z.array(z.any()).length(0)
+  ]).nullable(),
   folderId: z.number().optional().describe("Folder ID to assign the layout to"),
 });
 
