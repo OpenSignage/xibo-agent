@@ -80,12 +80,17 @@ const layoutResponseSchema = z.array(z.object({
   enableStat: z.union([z.number(), z.string().transform(Number)]),
   autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
   code: z.string().nullable(),
-  isLocked: z.any().transform(val => {
-    if (typeof val === 'boolean') return val;
-    if (Array.isArray(val)) return false;
-    if (typeof val === 'object') return false;
-    return false;
-  }),
+  isLocked: z.union([
+    z.object({
+      layoutId: z.number(),
+      userId: z.number(),
+      entryPoint: z.string(),
+      expires: z.string(),
+      lockedUser: z.boolean()
+    }),
+    z.boolean(),
+    z.array(z.any()).length(0)
+  ]).nullable(),
   regions: z.array(z.object({
     regionId: z.union([z.number(), z.string().transform(Number)]),
     layoutId: z.union([z.number(), z.string().transform(Number)]),
@@ -578,11 +583,21 @@ export const getLayouts = createTool({
   id: 'get-layouts',
   description: 'Retrieves a list of Xibo layouts with optional filtering',
   inputSchema: z.object({
-    folderId: z.number().optional().describe("Folder ID for which to get layouts"),
-    layoutId: z.string().optional().describe("A comma-separated list of Layout IDs to filter on"),
-    layout: z.string().optional().describe("The name of the layout to filter on"),
-    tags: z.string().optional().describe("A comma-separated list of tags to filter on"),
-    treeView: z.boolean().optional().describe("Set to true to return layouts in tree structure"),
+    layoutId: z.string().optional().describe("Filter by Layout ID. Can be a comma-separated list of IDs."),
+    parentId: z.number().optional().describe("Filter by parent ID."),
+    showDrafts: z.number().optional().describe("Flag indicating whether to show drafts. Use 1 for true."),
+    layout: z.string().optional().describe("Filter by partial Layout name."),
+    userId: z.number().optional().describe("Filter by user ID."),
+    retired: z.number().optional().describe("Filter by retired flag. Use 1 for true."),
+    tags: z.string().optional().describe("Filter by a comma-separated list of tags."),
+    exactTags: z.number().optional().describe("Flag to treat the tags filter as an exact match. Use 1 for true."),
+    logicalOperator: z.enum(['AND', 'OR']).optional().describe("Logical operator for multiple tags (AND or OR)."),
+    ownerUserGroupId: z.number().optional().describe("Filter by users in this User Group ID."),
+    publishedStatusId: z.number().optional().describe("Filter by published status ID (1 for Published, 2 for Draft)."),
+    embed: z.string().optional().describe("Embed related data, e.g., 'regions,playlists,widgets'."),
+    campaignId: z.number().optional().describe("Get all layouts for a given Campaign ID."),
+    folderId: z.number().optional().describe("Filter by Folder ID."),
+    treeView: z.boolean().optional().describe("Set to true to return layouts in a tree structure."),
   }),
   outputSchema: z.union([successSchema, errorSchema]),
   execute: async ({

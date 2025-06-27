@@ -57,14 +57,18 @@ const layoutResponseSchema = z.object({
   autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
   code: z.string().nullable(),
   isLocked: z.union([
+    z.object({
+      layoutId: z.number(),
+      userId: z.number(),
+      entryPoint: z.string(),
+      expires: z.string(),
+      lockedUser: z.boolean()
+    }),
     z.boolean(),
-    z.array(z.any()),
-    z.null()
-  ]).transform(val => {
-    if (val === null) return false;
-    if (Array.isArray(val)) return false;
-    return val;
-  })
+    z.array(z.any()).length(0)
+  ]).nullable(),
+  folderId: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  permissionsFolderId: z.union([z.number(), z.string().transform(Number)]).nullable()
 });
 
 /**

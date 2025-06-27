@@ -50,133 +50,133 @@ const errorSchema = z.object({
  * Permission schema for layout, region, and widget permissions
  */
 const permissionSchema = z.object({
-  permissionId: z.number(),
-  entityId: z.number(),
-  groupId: z.number(),
-  objectId: z.number(),
-  isUser: z.number(),
-  entity: z.string(),
-  objectIdString: z.string(),
-  group: z.string(),
-  view: z.number(),
-  edit: z.number(),
-  delete: z.number(),
-  modifyPermissions: z.number()
+  permissionId: z.union([z.number(), z.string().transform(Number)]),
+  entityId: z.union([z.number(), z.string().transform(Number)]),
+  groupId: z.union([z.number(), z.string().transform(Number)]),
+  objectId: z.union([z.number(), z.string().transform(Number)]),
+  isUser: z.union([z.number(), z.string().transform(Number)]),
+  entity: z.string().nullable(),
+  objectIdString: z.string().nullable(),
+  group: z.string().nullable(),
+  view: z.union([z.number(), z.string().transform(Number)]),
+  edit: z.union([z.number(), z.string().transform(Number)]),
+  delete: z.union([z.number(), z.string().transform(Number)]),
+  modifyPermissions: z.union([z.number(), z.string().transform(Number)])
 });
 
 /**
  * Tag schema for layout and playlist tags
  */
 const tagSchema = z.object({
-  tag: z.string(),
-  tagId: z.number(),
-  value: z.string()
+  tag: z.string().nullable(),
+  tagId: z.union([z.number(), z.string().transform(Number)]),
+  value: z.string().nullable()
 });
 
 /**
  * Region option schema
  */
 const regionOptionSchema = z.object({
-  regionId: z.number(),
-  option: z.string(),
-  value: z.string()
+  regionId: z.union([z.number(), z.string().transform(Number)]),
+  option: z.string().nullable(),
+  value: z.string().nullable()
 });
 
 /**
  * Widget option schema
  */
 const widgetOptionSchema = z.object({
-  widgetId: z.number(),
-  type: z.string(),
-  option: z.string(),
-  value: z.string()
+  widgetId: z.union([z.number(), z.string().transform(Number)]),
+  type: z.string().nullable(),
+  option: z.string().nullable(),
+  value: z.union([z.string(), z.array(z.any()), z.record(z.any())]).nullable()
 });
 
 /**
  * Audio schema for widget audio settings
  */
 const audioSchema = z.object({
-  widgetId: z.number(),
-  mediaId: z.number(),
-  volume: z.number(),
-  loop: z.number()
+  widgetId: z.union([z.number(), z.string().transform(Number)]),
+  mediaId: z.union([z.number(), z.string().transform(Number)]),
+  volume: z.union([z.number(), z.string().transform(Number)]),
+  loop: z.union([z.number(), z.string().transform(Number)])
 });
 
 /**
  * Widget schema for playlist widgets
  */
 const widgetSchema = z.object({
-  widgetId: z.number(),
-  playlistId: z.number(),
-  ownerId: z.number(),
-  type: z.string(),
-  duration: z.number(),
-  displayOrder: z.number(),
-  useDuration: z.number(),
-  calculatedDuration: z.number().optional(),
-  createdDt: z.number(),
-  modifiedDt: z.number(),
-  fromDt: z.number().nullable(),
-  toDt: z.number().nullable(),
-  schemaVersion: z.number(),
-  transitionIn: z.number().nullable(),
-  transitionOut: z.number().nullable(),
-  transitionDurationIn: z.number().nullable(),
-  transitionDurationOut: z.number().nullable(),
+  widgetId: z.union([z.number(), z.string().transform(Number)]),
+  playlistId: z.union([z.number(), z.string().transform(Number)]),
+  ownerId: z.union([z.number(), z.string().transform(Number)]),
+  type: z.string().nullable(),
+  duration: z.union([z.number(), z.string().transform(Number)]),
+  displayOrder: z.union([z.number(), z.string().transform(Number)]),
+  useDuration: z.union([z.number(), z.string().transform(Number)]),
+  calculatedDuration: z.union([z.number(), z.string().transform(Number)]).optional(),
+  createdDt: z.union([z.string(), z.number()]).nullable(),
+  modifiedDt: z.union([z.string(), z.number()]).nullable(),
+  fromDt: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  toDt: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  schemaVersion: z.union([z.number(), z.string().transform(Number)]),
+  transitionIn: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  transitionOut: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  transitionDurationIn: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  transitionDurationOut: z.union([z.number(), z.string().transform(Number)]).nullable(),
   widgetOptions: z.array(widgetOptionSchema).optional(),
-  mediaIds: z.array(z.number()).optional(),
+  mediaIds: z.array(z.union([z.number(), z.string().transform(Number)])).optional(),
   audio: z.array(audioSchema).optional(),
   permissions: z.array(permissionSchema).optional(),
-  playlist: z.string().optional()
+  playlist: z.string().nullable()
 });
 
 /**
  * Playlist schema for region playlists
  */
 const playlistSchema = z.object({
-  playlistId: z.number(),
-  ownerId: z.number(),
-  name: z.string(),
-  regionId: z.number().optional(),
-  isDynamic: z.number(),
+  playlistId: z.union([z.number(), z.string().transform(Number)]),
+  ownerId: z.union([z.number(), z.string().transform(Number)]),
+  name: z.string().nullable(),
+  regionId: z.union([z.number(), z.string().transform(Number)]).optional(),
+  isDynamic: z.union([z.number(), z.string().transform(Number)]),
   filterMediaName: z.string().nullable(),
   filterMediaNameLogicalOperator: z.string().nullable(),
   filterMediaTags: z.string().nullable(),
-  filterExactTags: z.number().nullable(),
+  filterExactTags: z.union([z.number(), z.string().transform(Number)]).nullable(),
   filterMediaTagsLogicalOperator: z.string().nullable(),
-  filterFolderId: z.number().nullable(),
-  maxNumberOfItems: z.number().nullable(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
-  duration: z.number(),
-  requiresDurationUpdate: z.number(),
+  filterFolderId: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  maxNumberOfItems: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  createdDt: z.string().nullable(),
+  modifiedDt: z.string().nullable(),
+  duration: z.union([z.number(), z.string().transform(Number)]),
+  requiresDurationUpdate: z.union([z.number(), z.string().transform(Number)]),
   enableStat: z.string().nullable(),
   tags: z.array(tagSchema).optional(),
   widgets: z.array(widgetSchema).optional(),
   permissions: z.array(permissionSchema).optional(),
-  folderId: z.number().nullable(),
-  permissionsFolderId: z.number().nullable()
+  folderId: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  permissionsFolderId: z.union([z.number(), z.string().transform(Number)]).nullable()
 });
 
 /**
  * Region schema for layout regions
  */
 const regionSchema = z.object({
-  regionId: z.number(),
-  layoutId: z.number(),
-  ownerId: z.number(),
+  regionId: z.union([z.number(), z.string().transform(Number)]),
+  layoutId: z.union([z.number(), z.string().transform(Number)]),
+  ownerId: z.union([z.number(), z.string().transform(Number)]),
   type: z.string().nullable(),
-  name: z.string(),
-  width: z.number(),
-  height: z.number(),
-  top: z.number(),
-  left: z.number(),
-  zIndex: z.number(),
+  name: z.string().nullable(),
+  width: z.union([z.number(), z.string().transform(Number)]),
+  height: z.union([z.number(), z.string().transform(Number)]),
+  top: z.union([z.number(), z.string().transform(Number)]),
+  left: z.union([z.number(), z.string().transform(Number)]),
+  zIndex: z.union([z.number(), z.string().transform(Number)]),
   syncKey: z.string().nullable(),
   regionOptions: z.array(regionOptionSchema).optional(),
   permissions: z.array(permissionSchema).optional(),
-  duration: z.number(),
-  isDrawer: z.number().optional(),
+  duration: z.union([z.number(), z.string().transform(Number)]),
+  isDrawer: z.union([z.number(), z.string().transform(Number)]).optional(),
   regionPlaylist: playlistSchema.optional()
 });
 
@@ -185,37 +185,47 @@ const regionSchema = z.object({
  * Contains the complete layout information after checkout
  */
 const layoutCheckoutResponseSchema = z.object({
-  layoutId: z.number(),
-  ownerId: z.number(),
-  campaignId: z.number(),
-  parentId: z.number().nullable(),
-  publishedStatusId: z.number(),
-  publishedStatus: z.string(),
+  layoutId: z.union([z.number(), z.string().transform(Number)]),
+  ownerId: z.union([z.number(), z.string().transform(Number)]),
+  campaignId: z.union([z.number(), z.string().transform(Number)]),
+  parentId: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  publishedStatusId: z.union([z.number(), z.string().transform(Number)]),
+  publishedStatus: z.string().nullable(),
   publishedDate: z.string().nullable(),
-  backgroundImageId: z.number().nullable(),
-  schemaVersion: z.number(),
-  layout: z.string(),
+  backgroundImageId: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  schemaVersion: z.union([z.number(), z.string().transform(Number)]),
+  layout: z.string().nullable(),
   description: z.string().nullable(),
-  backgroundColor: z.string(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
-  status: z.number(),
-  retired: z.number(),
-  backgroundzIndex: z.number(),
-  width: z.number(),
-  height: z.number(),
-  orientation: z.string(),
-  displayOrder: z.number().nullable(),
-  duration: z.number(),
+  backgroundColor: z.string().nullable(),
+  createdDt: z.string().nullable(),
+  modifiedDt: z.string().nullable(),
+  status: z.union([z.number(), z.string().transform(Number)]),
+  retired: z.union([z.number(), z.string().transform(Number)]),
+  backgroundzIndex: z.union([z.number(), z.string().transform(Number)]),
+  width: z.union([z.number(), z.string().transform(Number)]),
+  height: z.union([z.number(), z.string().transform(Number)]),
+  orientation: z.string().nullable(),
+  displayOrder: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  duration: z.union([z.number(), z.string().transform(Number)]),
   statusMessage: z.string().nullable(),
-  enableStat: z.number(),
-  autoApplyTransitions: z.number(),
+  enableStat: z.union([z.number(), z.string().transform(Number)]),
+  autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
   code: z.string().nullable(),
-  isLocked: z.boolean().nullable(),
+  isLocked: z.union([
+    z.object({
+      layoutId: z.number(),
+      userId: z.number(),
+      entryPoint: z.string(),
+      expires: z.string(),
+      lockedUser: z.boolean()
+    }),
+    z.boolean(),
+    z.array(z.any()).length(0)
+  ]).nullable(),
   regions: z.array(regionSchema),
   tags: z.array(tagSchema),
-  folderId: z.number(),
-  permissionsFolderId: z.number()
+  folderId: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  permissionsFolderId: z.union([z.number(), z.string().transform(Number)]).nullable()
 });
 
 /**
