@@ -31,7 +31,7 @@ import { logger } from '../../../index';
 const regionOptionSchema = z.object({
   regionId: z.number().nullable(),
   option: z.string().nullable(),
-  value: z.string().nullable()
+  value: z.union([z.string(), z.number()]).nullable()
 });
 
 /**
@@ -164,16 +164,18 @@ const regionSchema = z.object({
  * Implements the PUT /api/region/{id} endpoint from the Xibo API.
  */
 export const editRegion = createTool({
+  
   id: 'edit-region',
   description: 'Edit an existing region in a layout',
   inputSchema: z.object({
     regionId: z.number().describe('The ID of the Region to edit'),
-    name: z.string().optional().describe('The new name for the region'),
-    width: z.number().optional().describe('The new width for the region'),
-    height: z.number().optional().describe('The new height for the region'),
+    name: z.string().describe('The name for the region. Due to a potential bug in the CMS, this is currently required for all edits.'),
+    type: z.enum(['zone', 'frame', 'playlist', 'canvas', 'drawer']).describe('The type of the region. This is also required due to a CMS bug.'),
+    width: z.number().positive().describe('The new width for the region. Required due to a CMS bug.'),
+    height: z.number().positive().describe('The new height for the region. Required due to a CMS bug.'),
     top: z.number().optional().describe('The new top coordinate for the region'),
     left: z.number().optional().describe('The new left coordinate for the region'),
-    zIndex: z.number().optional().describe('The Layer zIndex for this Region'),
+    zIndex: z.number().describe('The Layer zIndex for this Region. Required due to a CMS bug.'),
     transitionType: z.string().optional().describe('The Transition Type. Must be a valid transition code as returned by /transition'),
     transitionDuration: z.number().optional().describe('The transition duration in milliseconds if required by the transition type'),
     transitionDirection: z.string().optional().describe('The transition direction if required by the transition type'),
@@ -210,6 +212,10 @@ export const editRegion = createTool({
           formData.append(key, value.toString());
         }
       }
+
+      logger.info("editRegion: Sending request with body", {
+        body: formData.toString()
+      });
 
       logger.debug("editRegion: Sending PUT request", {
         url,

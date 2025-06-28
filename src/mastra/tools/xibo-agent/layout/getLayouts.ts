@@ -77,8 +77,8 @@ const layoutResponseSchema = z.array(z.object({
   displayOrder: z.union([z.number(), z.string().transform(Number)]).nullable(),
   duration: z.union([z.number(), z.string().transform(Number)]),
   statusMessage: z.union([z.string(), z.array(z.any())]).nullable(),
-  enableStat: z.union([z.number(), z.string().transform(Number)]),
-  autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
+  enableStat: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]).nullable(),
   code: z.string().nullable(),
   isLocked: z.union([
     z.object({
@@ -594,7 +594,7 @@ export const getLayouts = createTool({
     logicalOperator: z.enum(['AND', 'OR']).optional().describe("Logical operator for multiple tags (AND or OR)."),
     ownerUserGroupId: z.number().optional().describe("Filter by users in this User Group ID."),
     publishedStatusId: z.number().optional().describe("Filter by published status ID (1 for Published, 2 for Draft)."),
-    embed: z.string().optional().describe("Embed related data, e.g., 'regions,playlists,widgets'."),
+    embed: z.string().optional().default('regions,playlists,widgets,tags,campaigns,permissions').describe("Embed related data, e.g., 'regions,playlists,widgets'."),
     campaignId: z.number().optional().describe("Get all layouts for a given Campaign ID."),
     folderId: z.number().optional().describe("Filter by Folder ID."),
     treeView: z.boolean().optional().describe("Set to true to return layouts in a tree structure."),
@@ -633,13 +633,6 @@ export const getLayouts = createTool({
         queryParams.append(key, value.toString());
       }
     });
-
-    // If treeView is enabled, ensure all necessary data is embedded
-    if (context.treeView && !queryParams.has("embed")) {
-      const embedValue = "regions,playlists,widgets,tags,campaigns,permissions";
-      queryParams.append("embed", embedValue);
-      logger.debug(`Added default embed parameter for treeView: ${embedValue}`);
-    }
 
     // Build URL
     let url = `${config.cmsUrl}/api/layout`;
