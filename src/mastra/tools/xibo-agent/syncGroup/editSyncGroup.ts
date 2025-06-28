@@ -122,5 +122,3 @@ export const editSyncGroup = createTool({
     }
   },
 });
-
-export default editSyncGroup; 

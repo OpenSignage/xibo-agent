@@ -154,7 +154,4 @@ export const getSyncGroupDisplays = createTool({
     }
   },
 });
-
-export default getSyncGroupDisplays;
-
  

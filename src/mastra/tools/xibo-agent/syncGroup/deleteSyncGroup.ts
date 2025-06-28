@@ -82,6 +82,4 @@ export const deleteSyncGroup = createTool({
       return { success: false, message, error };
     }
   },
-});
-
-export default deleteSyncGroup; 
+}); 

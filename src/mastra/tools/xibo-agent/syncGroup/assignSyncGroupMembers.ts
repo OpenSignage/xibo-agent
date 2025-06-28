@@ -94,6 +94,4 @@ export const assignSyncGroupMembers = createTool({
       return { success: false, message, error };
     }
   },
-});
-
-export default assignSyncGroupMembers; 
+}); 
