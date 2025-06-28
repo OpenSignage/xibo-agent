@@ -71,10 +71,10 @@ export const deleteFont = createTool({
     });
 
     if (response.status === 204) {
-      logger.info(`Font with ID ${input.fontId} deleted successfully.`);
+      logger.info(`Font with ID ${input.id} deleted successfully.`);
       return {
         success: true,
-        message: `Font with ID ${input.fontId} deleted successfully.`,
+        message: `Font with ID ${input.id} deleted successfully.`,
       };
     }
     

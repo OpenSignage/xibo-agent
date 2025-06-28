@@ -115,5 +115,3 @@ export const addSyncGroup = createTool({
     }
   },
 });
-
-export default addSyncGroup; 

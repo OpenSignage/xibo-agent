@@ -139,7 +139,7 @@ export const uploadGoogleFonts = createTool({
         formData.append("files", fileBlob, `${fontNameForXibo}-${selectedVariant}.ttf`);
         formData.append("name", fontNameForXibo);
 
-        const uploadUrl = `${config.cmsUrl}/api/library`;
+        const uploadUrl = `${config.cmsUrl}/api/fonts`;
         const uploadResponse = await fetch(uploadUrl, {
             method: "POST",
             headers: await getAuthHeaders(),
