@@ -51,6 +51,8 @@ import { changePassword } from './compound';
 import { getDisplayVenues } from './displayVenue';
 import { getXiboNews, getGoogleNews } from './news';
 import { getWeather, getWeeklyWeather, getWeatherByCoordinates } from './weather';
+import { getSyncGroups, addSyncGroup, editSyncGroup, deleteSyncGroup, getSyncGroupDisplays,
+  assignSyncGroupMembers } from './syncGroup';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -86,6 +88,7 @@ export * from './compound';     // Compound tools
 export * from './displayVenue'; // Display venue management
 export * from './news';         // News management
 export * from './weather';      // Weather management
+export * from './syncGroup';    // Synchronization group management
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -153,5 +156,8 @@ export function getTools() {
     getXiboNews,getGoogleNews,
     // Weather
     getWeather,getWeeklyWeather,getWeatherByCoordinates,
+    // Sync group
+    getSyncGroups,addSyncGroup,editSyncGroup,deleteSyncGroup,getSyncGroupDisplays,
+    assignSyncGroupMembers,
   };
 }
