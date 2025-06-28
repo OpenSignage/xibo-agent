@@ -164,8 +164,8 @@ const layoutSchema = z.object({
     orientation: z.string().nullable(),
     displayOrder: z.union([z.number(), z.string().transform(Number)]).nullable(),
     duration: z.union([z.number(), z.string().transform(Number)]),
-    statusMessage: z.string().nullable(),
-    enableStat: z.union([z.number(), z.string().transform(Number)]),
+    statusMessage: z.union([z.string(), z.array(z.any())]).nullable(),
+    enableStat: z.union([z.number(), z.string().transform(Number)]).nullable(),
     autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
     code: z.string().nullable(),
     isLocked: z.union([
@@ -185,16 +185,6 @@ const layoutSchema = z.object({
     permissionsFolderId: z.union([z.number(), z.string().transform(Number)]).nullable()
 });
 
-// Schema for a single region's position data
-const regionPositionSchema = z.object({
-  regionId: z.number(),
-  top: z.number(),
-  left: z.number(),
-  width: z.number(),
-  height: z.number(),
-  zIndex: z.number()
-});
-
 /**
  * Tool to position specified regions in a layout.
  * This tool triggers the positioning of specified regions for a given layout
@@ -204,8 +194,8 @@ export const positionAllRegions = createTool({
   id: 'position-all-regions',
   description: 'Position specified regions in a layout',
   inputSchema: z.object({
-    id: z.number().describe('The Layout ID to position regions in.'),
-    regions: z.array(z.string()).describe('An array of JSON strings, each representing a region to position.')
+    layoutId: z.number().describe('The Layout ID to position regions in.'),
+    regions: z.array(z.string()).describe('An array of comma-separated strings, each representing a region to position. The order must be: regionId,top,left,width,height,zIndex.')
   }),
   outputSchema: z.object({
     success: z.boolean(),
@@ -215,36 +205,46 @@ export const positionAllRegions = createTool({
   }),
   execute: async ({ context }) => {
     try {
+      // Ensure the CMS URL is configured before proceeding
       if (!config.cmsUrl) {
         logger.error("positionAllRegions: CMS URL is not configured");
         return { success: false, message: "CMS URL is not configured" };
       }
 
-      logger.info(`Positioning regions in layout ${context.id}`);
-
+      // Retrieve authentication headers and construct the API endpoint URL
       const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/layout/position/${context.id}`;
+      const url = `${config.cmsUrl}/api/region/position/all/${context.layoutId}`;
 
+      // Prepare form data for the request.
+      // The API expects a single 'regions' parameter containing a JSON-encoded string of region data.
       const formData = new URLSearchParams();
-      for (const [index, regionString] of context.regions.entries()) {
-        try {
-          const region = regionPositionSchema.parse(JSON.parse(regionString));
-          Object.entries(region).forEach(([key, value]) => {
-            formData.append(`regions[${index}][${key}]`, String(value));
-          });
-        } catch (e) {
-          const errorMessage = `Invalid region data at index ${index}. Must be a valid JSON string conforming to the schema.`;
-          logger.error(errorMessage, { regionString, error: e });
-          return { success: false, message: errorMessage };
-        }
+      try {
+        const regionsArray = context.regions.map(regionString => {
+          const parts = regionString.split(',');
+          if (parts.length !== 6) {
+            throw new Error('Each region string must contain 6 comma-separated values in the order: regionId,top,left,width,height,zIndex');
+          }
+          // The CMS expects lowercase property names for all fields except for 'zIndex', which must be camelCase.
+          // This is due to an inconsistency in the CMS backend code.
+          return {
+            regionid: parseInt(parts[0], 10),
+            top: parseInt(parts[1], 10),
+            left: parseInt(parts[2], 10),
+            width: parseInt(parts[3], 10),
+            height: parseInt(parts[4], 10),
+            zIndex: parseInt(parts[5], 10),
+          };
+        });
+        
+        // The entire array of region objects is stringified and appended as a single 'regions' parameter.
+        formData.append('regions', JSON.stringify(regionsArray));
+      } catch (e) {
+        const errorMessage = `Invalid region data. ${e instanceof Error ? e.message : 'Unknown error'}`;
+        logger.error(errorMessage, { regions: context.regions, error: e });
+        return { success: false, message: errorMessage };
       }
 
-      logger.debug("positionAllRegions: Request details", {
-        url,
-        method: 'PUT',
-        body: formData.toString()
-      });
-
+      // Perform the PUT request to the Xibo API
       const response = await fetch(url, {
         method: 'PUT',
         headers: {
@@ -254,12 +254,15 @@ export const positionAllRegions = createTool({
         body: formData
       });
 
+      // Handle non-successful API responses
       if (!response.ok) {
         const responseText = await response.text();
         let parsedError: any;
         try {
+            // Try to parse the error response as JSON
             parsedError = JSON.parse(responseText);
         } catch (e) {
+            // Fallback to the raw text if parsing fails
             parsedError = responseText;
         }
         logger.error("positionAllRegions: API error response", {
@@ -273,14 +276,17 @@ export const positionAllRegions = createTool({
         };
       }
 
+      // Parse the successful JSON response and validate it against the layout schema
       const data = await response.json();
       const validatedData = layoutSchema.parse(data);
 
+      // Return a successful response with the validated data
       return {
         success: true,
         data: validatedData
       };
     } catch (error) {
+      // Handle Zod validation errors specifically for detailed logging
       if (error instanceof z.ZodError) {
         logger.error("positionAllRegions: Validation error", { error: error.issues });
         return {
@@ -289,6 +295,7 @@ export const positionAllRegions = createTool({
           errorData: error.issues
         };
       }
+      // Handle any other unexpected errors
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
       logger.error("positionAllRegions: An unexpected error occurred", { error: errorMessage });
       return {

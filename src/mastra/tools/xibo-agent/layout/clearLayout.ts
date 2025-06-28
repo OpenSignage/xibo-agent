@@ -55,9 +55,9 @@ const permissionSchema = z.object({
   groupId: z.union([z.number(), z.string().transform(Number)]),
   objectId: z.union([z.number(), z.string().transform(Number)]),
   isUser: z.union([z.number(), z.string().transform(Number)]),
-  entity: z.string().nullable(),
-  objectIdString: z.string().nullable(),
-  group: z.string().nullable(),
+  entity: z.string(),
+  objectIdString: z.string(),
+  group: z.string(),
   view: z.union([z.number(), z.string().transform(Number)]),
   edit: z.union([z.number(), z.string().transform(Number)]),
   delete: z.union([z.number(), z.string().transform(Number)]),
@@ -68,9 +68,9 @@ const permissionSchema = z.object({
  * Tag schema for layout and playlist tags
  */
 const tagSchema = z.object({
-  tag: z.string().nullable(),
+  tag: z.string(),
   tagId: z.union([z.number(), z.string().transform(Number)]),
-  value: z.string().nullable()
+  value: z.string()
 });
 
 /**
@@ -78,8 +78,8 @@ const tagSchema = z.object({
  */
 const regionOptionSchema = z.object({
   regionId: z.union([z.number(), z.string().transform(Number)]),
-  option: z.string().nullable(),
-  value: z.string().nullable()
+  option: z.string(),
+  value: z.union([z.string(), z.number()])
 });
 
 /**
@@ -87,9 +87,9 @@ const regionOptionSchema = z.object({
  */
 const widgetOptionSchema = z.object({
   widgetId: z.union([z.number(), z.string().transform(Number)]),
-  type: z.string().nullable(),
-  option: z.string().nullable(),
-  value: z.union([z.string(), z.array(z.any()), z.record(z.any())]).nullable()
+  type: z.string(),
+  option: z.string(),
+  value: z.string()
 });
 
 /**
@@ -109,25 +109,25 @@ const widgetSchema = z.object({
   widgetId: z.union([z.number(), z.string().transform(Number)]),
   playlistId: z.union([z.number(), z.string().transform(Number)]),
   ownerId: z.union([z.number(), z.string().transform(Number)]),
-  type: z.string().nullable(),
+  type: z.string(),
   duration: z.union([z.number(), z.string().transform(Number)]),
   displayOrder: z.union([z.number(), z.string().transform(Number)]),
   useDuration: z.union([z.number(), z.string().transform(Number)]),
-  calculatedDuration: z.union([z.number(), z.string().transform(Number)]).optional(),
-  createdDt: z.union([z.string(), z.number()]).nullable(),
-  modifiedDt: z.union([z.string(), z.number()]).nullable(),
-  fromDt: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  toDt: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  calculatedDuration: z.union([z.number(), z.string().transform(Number)]),
+  createdDt: z.string(),
+  modifiedDt: z.string(),
+  fromDt: z.union([z.number(), z.string().transform(Number)]),
+  toDt: z.union([z.number(), z.string().transform(Number)]),
   schemaVersion: z.union([z.number(), z.string().transform(Number)]),
-  transitionIn: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  transitionOut: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  transitionDurationIn: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  transitionDurationOut: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  widgetOptions: z.array(widgetOptionSchema).optional(),
-  mediaIds: z.array(z.union([z.number(), z.string().transform(Number)])).optional(),
-  audio: z.array(audioSchema).optional(),
-  permissions: z.array(permissionSchema).optional(),
-  playlist: z.string().nullable()
+  transitionIn: z.union([z.number(), z.string().transform(Number)]),
+  transitionOut: z.union([z.number(), z.string().transform(Number)]),
+  transitionDurationIn: z.union([z.number(), z.string().transform(Number)]),
+  transitionDurationOut: z.union([z.number(), z.string().transform(Number)]),
+  widgetOptions: z.array(widgetOptionSchema).nullable(),
+  mediaIds: z.array(z.union([z.number(), z.string().transform(Number)])).nullable(),
+  audio: z.array(audioSchema).nullable(),
+  permissions: z.array(permissionSchema).nullable(),
+  playlist: z.string()
 });
 
 /**
@@ -136,26 +136,26 @@ const widgetSchema = z.object({
 const playlistSchema = z.object({
   playlistId: z.union([z.number(), z.string().transform(Number)]),
   ownerId: z.union([z.number(), z.string().transform(Number)]),
-  name: z.string().nullable(),
-  regionId: z.union([z.number(), z.string().transform(Number)]).optional(),
+  name: z.string(),
+  regionId: z.union([z.number(), z.string().transform(Number)]),
   isDynamic: z.union([z.number(), z.string().transform(Number)]),
-  filterMediaName: z.string().nullable(),
-  filterMediaNameLogicalOperator: z.string().nullable(),
-  filterMediaTags: z.string().nullable(),
-  filterExactTags: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  filterMediaTagsLogicalOperator: z.string().nullable(),
-  filterFolderId: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  maxNumberOfItems: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  createdDt: z.string().nullable(),
-  modifiedDt: z.string().nullable(),
+  filterMediaName: z.string(),
+  filterMediaNameLogicalOperator: z.string(),
+  filterMediaTags: z.string(),
+  filterExactTags: z.union([z.number(), z.string().transform(Number)]),
+  filterMediaTagsLogicalOperator: z.string(),
+  filterFolderId: z.union([z.number(), z.string().transform(Number)]),
+  maxNumberOfItems: z.union([z.number(), z.string().transform(Number)]),
+  createdDt: z.string(),
+  modifiedDt: z.string(),
   duration: z.union([z.number(), z.string().transform(Number)]),
   requiresDurationUpdate: z.union([z.number(), z.string().transform(Number)]),
-  enableStat: z.string().nullable(),
-  tags: z.array(tagSchema).optional(),
-  widgets: z.array(widgetSchema).optional(),
-  permissions: z.array(permissionSchema).optional(),
-  folderId: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  permissionsFolderId: z.union([z.number(), z.string().transform(Number)]).nullable()
+  enableStat: z.string(),
+  tags: z.array(tagSchema).nullable(),
+  widgets: z.array(widgetSchema).nullable(),
+  permissions: z.array(permissionSchema).nullable(),
+  folderId: z.union([z.number(), z.string().transform(Number)]),
+  permissionsFolderId: z.union([z.number(), z.string().transform(Number)])
 });
 
 /**
@@ -165,19 +165,19 @@ const regionSchema = z.object({
   regionId: z.union([z.number(), z.string().transform(Number)]),
   layoutId: z.union([z.number(), z.string().transform(Number)]),
   ownerId: z.union([z.number(), z.string().transform(Number)]),
-  type: z.string().nullable(),
-  name: z.string().nullable(),
+  type: z.string(),
+  name: z.string(),
   width: z.union([z.number(), z.string().transform(Number)]),
   height: z.union([z.number(), z.string().transform(Number)]),
   top: z.union([z.number(), z.string().transform(Number)]),
   left: z.union([z.number(), z.string().transform(Number)]),
   zIndex: z.union([z.number(), z.string().transform(Number)]),
-  syncKey: z.string().nullable(),
-  regionOptions: z.array(regionOptionSchema).optional(),
-  permissions: z.array(permissionSchema).optional(),
+  syncKey: z.string(),
+  regionOptions: z.array(regionOptionSchema).nullable(),
+  permissions: z.array(permissionSchema).nullable(),
   duration: z.union([z.number(), z.string().transform(Number)]),
-  isDrawer: z.union([z.number(), z.string().transform(Number)]).optional(),
-  regionPlaylist: playlistSchema.optional()
+  isDrawer: z.union([z.number(), z.string().transform(Number)]),
+  regionPlaylist: playlistSchema
 });
 
 /**
@@ -193,23 +193,23 @@ const layoutClearResponseSchema = z.object({
   publishedStatus: z.string().nullable(),
   publishedDate: z.string().nullable(),
   backgroundImageId: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  schemaVersion: z.union([z.number(), z.string().transform(Number)]),
+  schemaVersion: z.union([z.number(), z.string().transform(Number)]).nullable(),
   layout: z.string().nullable(),
   description: z.string().nullable(),
   backgroundColor: z.string().nullable(),
   createdDt: z.string().nullable(),
   modifiedDt: z.string().nullable(),
   status: z.union([z.number(), z.string().transform(Number)]),
-  retired: z.union([z.number(), z.string().transform(Number)]),
+  retired: z.union([z.number(), z.string().transform(Number)]).nullable(),
   backgroundzIndex: z.union([z.number(), z.string().transform(Number)]),
   width: z.union([z.number(), z.string().transform(Number)]),
   height: z.union([z.number(), z.string().transform(Number)]),
   orientation: z.string().nullable(),
   displayOrder: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  duration: z.union([z.number(), z.string().transform(Number)]),
+  duration: z.union([z.number(), z.string().transform(Number)]).nullable(),
   statusMessage: z.string().nullable(),
-  enableStat: z.union([z.number(), z.string().transform(Number)]),
-  autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]),
+  enableStat: z.union([z.number(), z.string().transform(Number)]).nullable(),
+  autoApplyTransitions: z.union([z.number(), z.string().transform(Number)]).nullable(),
   code: z.string().nullable(),
   isLocked: z.union([
     z.object({
@@ -222,8 +222,8 @@ const layoutClearResponseSchema = z.object({
     z.boolean(),
     z.array(z.any()).length(0)
   ]).nullable(),
-  regions: z.array(regionSchema),
-  tags: z.array(tagSchema),
+  regions: z.array(regionSchema).nullable(),
+  tags: z.array(tagSchema).nullable(),
   folderId: z.union([z.number(), z.string().transform(Number)]).nullable(),
   permissionsFolderId: z.union([z.number(), z.string().transform(Number)]).nullable()
 });
@@ -257,11 +257,11 @@ export const clearLayout = createTool({
     logger.info(`Clearing layout with ID: ${context.layoutId}`);
 
     const headers = await getAuthHeaders();
-    const url = `${config.cmsUrl}/api/layout/${context.layoutId}`;
+    const url = `${config.cmsUrl}/api/layout/clear/${context.layoutId}`;
 
-    logger.info(`Sending POST request to ${url} to clear layout`);
+    logger.info(`Sending PUT request to ${url} to clear layout`);
     const response = await fetch(url, {
-      method: "POST",
+      method: "PUT",
       headers: {
         ...headers,
         "Content-Type": "application/x-www-form-urlencoded",
