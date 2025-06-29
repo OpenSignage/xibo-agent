@@ -22,13 +22,91 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
 
-// Schema for the successful response after copying a playlist.
-const copyResponseSchema = z.object({
-    // The API returns the new playlist object, so we define its basic structure.
-    playlistId: z.number(),
-    name: z.string(),
-    duration: z.number(),
-    widgets: z.array(z.any()), // Can be more specific if the widget structure is known
+// Sub-schemas for the main playlist object
+const tagSchema = z.object({
+  tag: z.string().nullable(),
+  tagId: z.number(),
+  value: z.string().nullable()
+});
+
+const permissionSchema = z.object({
+  permissionId: z.number(),
+  entityId: z.number(),
+  groupId: z.number(),
+  objectId: z.number(),
+  isUser: z.number(),
+  entity: z.string(),
+  objectIdString: z.string(),
+  group: z.string(),
+  view: z.number(),
+  edit: z.number(),
+  delete: z.number(),
+  modifyPermissions: z.number()
+});
+
+const widgetOptionSchema = z.object({
+  widgetId: z.number(),
+  type: z.string(),
+  option: z.string(),
+  value: z.string()
+});
+
+const audioSchema = z.object({
+  widgetId: z.number(),
+  mediaId: z.number(),
+  volume: z.number(),
+  loop: z.number()
+});
+
+const widgetSchema = z.object({
+  widgetId: z.number(),
+  playlistId: z.number(),
+  ownerId: z.number(),
+  type: z.string().nullable(),
+  duration: z.number(),
+  displayOrder: z.number(),
+  useDuration: z.number(),
+  calculatedDuration: z.number(),
+  createdDt: z.string().nullable(),
+  modifiedDt: z.string().nullable(),
+  fromDt: z.number().nullable(),
+  toDt: z.number().nullable(),
+  schemaVersion: z.number(),
+  transitionIn: z.number().nullable(),
+  transitionOut: z.number().nullable(),
+  transitionDurationIn: z.number().nullable(),
+  transitionDurationOut: z.number().nullable(),
+  widgetOptions: z.array(widgetOptionSchema),
+  mediaIds: z.array(z.number()),
+  audio: z.array(audioSchema),
+  permissions: z.array(permissionSchema),
+  playlist: z.string().nullable()
+});
+
+// Main schema for a playlist object, based on the API response for a copied playlist.
+const playlistSchema = z.object({
+  playlistId: z.number(),
+  ownerId: z.number(),
+  name: z.string(),
+  regionId: z.number().nullable(),
+  isDynamic: z.number(),
+  filterMediaName: z.string().nullable(),
+  filterMediaNameLogicalOperator: z.string().nullable(),
+  filterMediaTags: z.string().nullable(),
+  filterExactTags: z.number().nullable(),
+  filterMediaTagsLogicalOperator: z.string().nullable(),
+  filterFolderId: z.number().nullable(),
+  maxNumberOfItems: z.number().nullable(),
+  createdDt: z.string().nullable(),
+  modifiedDt: z.string().nullable(),
+  duration: z.number(),
+  requiresDurationUpdate: z.number(),
+  enableStat: z.string().nullable(),
+  tags: z.array(tagSchema),
+  widgets: z.array(widgetSchema),
+  permissions: z.array(permissionSchema),
+  folderId: z.number().nullable(),
+  permissionsFolderId: z.number().nullable(),
 });
 
 
@@ -45,7 +123,7 @@ export const copyPlaylist = createTool({
   }),
   outputSchema: z.object({
     success: z.boolean(),
-    data: copyResponseSchema.optional(),
+    data: playlistSchema.optional(),
     message: z.string().optional(),
     errorData: z.any().optional()
   }),
@@ -56,14 +134,17 @@ export const copyPlaylist = createTool({
         return { success: false, message: "CMS URL is not configured" };
       }
 
+      // Get authentication headers and construct the target URL for the copy operation.
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/playlist/copy/${context.playlistId}`;
       logger.debug(`copyPlaylist: Request URL = ${url}`);
 
+      // Prepare the request body with the new name and the flag for copying media.
       const formData = new URLSearchParams();
       formData.append('name', context.name);
       formData.append('copyMediaFiles', context.copyMediaFiles.toString());
 
+      // Make the POST request to the Xibo API to copy the playlist.
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -73,6 +154,7 @@ export const copyPlaylist = createTool({
         body: formData
       });
 
+      // Handle non-successful API responses.
       if (!response.ok) {
         const responseText = await response.text();
         let parsedError: any;
@@ -85,15 +167,19 @@ export const copyPlaylist = createTool({
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
+      // Parse and validate the successful response data against the schema.
       const data = await response.json();
-      const validatedData = copyResponseSchema.parse(data);
+      const validatedData = playlistSchema.parse(data);
 
+      // Return a success object with the validated data.
       return { success: true, data: validatedData };
     } catch (error) {
+      // Handle Zod validation errors specifically.
       if (error instanceof z.ZodError) {
         logger.error("copyPlaylist: Validation error", { error: error.issues });
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
+      // Handle any other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
       logger.error("copyPlaylist: An unexpected error occurred", { error: errorMessage });
       return { success: false, message: errorMessage };

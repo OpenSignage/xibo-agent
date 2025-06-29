@@ -36,12 +36,14 @@ import { getResolutions, addResolution, editResolution, deleteResolution } from 
 import { getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles } from './etc';
 import { getFonts, getFontDetails, uploadFont, downloadFont, deleteFont } from './font';
 import { getUserGroups, addUserGroup } from './usergroup';
-import { getPlaylists, addPlaylist, editPlaylist } from './playlist';
+import { getPlaylists, addPlaylist, editPlaylist, deletePlaylist, copyPlaylist,
+  assignLibraryItems, getPlaylistUsage, getPlaylistUsageByLayouts, setPlaylistEnableStat,
+   selectPlaylistFolder } from './playlist';
 import { getStats, getTimeDisconnected, getExportStatsCount } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
 import { generateImage, updateImage, getImageHistory } from './generate';
-  import { getNotifications, deleteNotification, addNotification, editNotification } from './notification';
+import { getNotifications, deleteNotification, addNotification, editNotification } from './notification';
 import { getDisplayGroups } from './displayGroup';
 import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } from './template';
 import { getLogs } from './log';
@@ -132,9 +134,11 @@ export function getTools() {
     // User group
     getUserGroups,addUserGroup,
     // Playlist
-    getPlaylists,addPlaylist,editPlaylist,
+    getPlaylists,addPlaylist,editPlaylist,deletePlaylist,copyPlaylist,
+    assignLibraryItems,getPlaylistUsage,getPlaylistUsageByLayouts,
+    setPlaylistEnableStat,selectPlaylistFolder,
     // Statistics
-    getStats,getTimeDisconnected, getExportStatsCount,
+    getStats,getTimeDisconnected,getExportStatsCount,
     // Tags
     getTags,addTag,editTag,deleteTag,
     // Library

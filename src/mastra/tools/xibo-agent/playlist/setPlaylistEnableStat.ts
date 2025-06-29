@@ -45,13 +45,16 @@ export const setPlaylistEnableStat = createTool({
         return { success: false, message: "CMS URL is not configured" };
       }
 
+      // Get authentication headers and construct the target URL.
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/playlist/setenablestat/${context.playlistId}`;
       logger.debug(`setPlaylistEnableStat: Request URL = ${url}`);
 
+      // Prepare the request body with the 'enableStat' parameter.
       const formData = new URLSearchParams();
       formData.append('enableStat', context.enableStat);
 
+      // Make the PUT request to the Xibo API.
       const response = await fetch(url, {
         method: 'PUT',
         headers: {
@@ -61,11 +64,13 @@ export const setPlaylistEnableStat = createTool({
         body: formData
       });
       
+      // A 204 No Content response indicates a successful operation.
       if (response.status === 204) {
         logger.info(`Statistics collection for playlist ${context.playlistId} set to '${context.enableStat}'.`);
         return { success: true, data: {} };
       }
 
+      // Handle any other non-2xx responses.
       if (!response.ok) {
         const responseText = await response.text();
         let parsedError: any;
@@ -78,14 +83,17 @@ export const setPlaylistEnableStat = createTool({
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
       
+      // Handle other successful (2xx) responses, though 204 is expected.
       const responseData = await response.json().catch(() => ({}));
       return { success: true, data: responseData };
 
     } catch (error) {
+      // Handle Zod validation errors.
       if (error instanceof z.ZodError) {
         logger.error("setPlaylistEnableStat: Validation error", { error: error.issues });
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
+      // Handle any other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
       logger.error("setPlaylistEnableStat: An unexpected error occurred", { error: errorMessage });
       return { success: false, message: errorMessage };

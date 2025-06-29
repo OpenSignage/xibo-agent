@@ -69,8 +69,8 @@ const playlistSchema = z.object({
   filterMediaTagsLogicalOperator: z.string().nullable(),
   filterFolderId: z.number().nullable(),
   maxNumberOfItems: z.number().nullable(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
+  createdDt: z.string().nullable(),
+  modifiedDt: z.string().nullable(),
   duration: z.number(),
   requiresDurationUpdate: z.number(),
   enableStat: z.string().nullable(),
@@ -79,7 +79,7 @@ const playlistSchema = z.object({
   permissions: z.array(z.any()),
   folderId: z.number().nullable(),
   permissionsFolderId: z.number().nullable(),
-  statusMessage: z.union([z.string(), z.array(z.any())]).nullable(),
+  statusMessage: z.union([z.string(), z.array(z.any())]).nullable().optional(),
 });
 
 /**
@@ -92,7 +92,7 @@ export const editPlaylist = createTool({
     playlistId: z.number().describe('The ID of the playlist to edit.'),
     name: z.string().describe('The new name for the playlist.'),
     tags: z.string().optional().describe('A comma-separated list of tags for the playlist.'),
-    isDynamic: z.number().optional().describe('Set to 1 for a dynamic playlist, 0 for static.'),
+    isDynamic: z.number().describe('Set to 1 for a dynamic playlist, 0 for static.'),
     filterMediaName: z.string().optional().describe('For dynamic playlists, filter media by name.'),
     logicalOperatorName: z.enum(['AND', 'OR']).optional().describe('Logical operator for name filtering (AND/OR).'),
     filterMediaTag: z.string().optional().describe('For dynamic playlists, filter media by tags.'),
@@ -114,12 +114,14 @@ export const editPlaylist = createTool({
         return { success: false, message: "CMS URL is not configured" };
       }
 
+      // Get authentication headers for the API request.
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/playlist/${context.playlistId}`;
       logger.debug(`editPlaylist: Request URL = ${url}`);
 
+      // Construct the request body from the provided context using URLSearchParams.
       const formData = new URLSearchParams();
-      // Only append fields that are actually provided in the context
+      // Only append fields that are actually provided in the context, excluding the playlistId.
       Object.entries(context).forEach(([key, value]) => {
           if (key !== 'playlistId' && value !== undefined) {
               formData.append(key, String(value));
@@ -132,6 +134,7 @@ export const editPlaylist = createTool({
         body: formData.toString()
       });
 
+      // Make the API call to the Xibo CMS to edit the playlist.
       const response = await fetch(url, {
         method: 'PUT',
         headers: {
@@ -141,6 +144,7 @@ export const editPlaylist = createTool({
         body: formData
       });
 
+      // Handle non-successful API responses.
       if (!response.ok) {
         const responseText = await response.text();
         let parsedError: any;
@@ -160,14 +164,17 @@ export const editPlaylist = createTool({
         };
       }
 
+      // Parse and validate the successful response data against the schema.
       const data = await response.json();
       const validatedData = playlistSchema.parse(data);
 
+      // Return a success object with the validated data.
       return {
         success: true,
         data: validatedData
       };
     } catch (error) {
+      // Handle Zod validation errors specifically.
       if (error instanceof z.ZodError) {
         logger.error("editPlaylist: Validation error", { error: error.issues });
         return {
@@ -176,6 +183,7 @@ export const editPlaylist = createTool({
           errorData: error.issues
         };
       }
+      // Handle any other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
       logger.error("editPlaylist: An unexpected error occurred", { error: errorMessage });
       return {

@@ -44,20 +44,24 @@ export const deletePlaylist = createTool({
         return { success: false, message: "CMS URL is not configured" };
       }
 
+      // Get authentication headers and construct the target URL.
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/playlist/${context.playlistId}`;
       logger.debug(`deletePlaylist: Request URL = ${url}`);
 
+      // Make the DELETE request to the Xibo API.
       const response = await fetch(url, {
         method: 'DELETE',
         headers
       });
 
+      // A 204 No Content response indicates successful deletion.
       if (response.status === 204) {
         logger.info(`Playlist ${context.playlistId} deleted successfully.`);
         return { success: true, data: {} };
       }
 
+      // Handle any other non-successful responses.
       if (!response.ok) {
         const responseText = await response.text();
         let parsedError: any;
@@ -70,9 +74,11 @@ export const deletePlaylist = createTool({
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
+      // This case is unlikely for a DELETE request but handles other 2xx success codes.
       // Should not happen for a 204 response, but handle other 2xx responses if they occur
       return { success: true, message: `Playlist deleted with status: ${response.status}` };
     } catch (error) {
+      // Catch and handle any unexpected errors during the execution.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
       logger.error("deletePlaylist: An unexpected error occurred", { error: errorMessage });
       return { success: false, message: errorMessage };
