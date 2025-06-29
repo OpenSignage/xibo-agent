@@ -53,6 +53,7 @@ import { getXiboNews, getGoogleNews } from './news';
 import { getWeather, getWeeklyWeather, getWeatherByCoordinates } from './weather';
 import { getSyncGroups, addSyncGroup, editSyncGroup, deleteSyncGroup, getSyncGroupDisplays,
   assignSyncGroupMembers } from './syncGroup';
+import { deletePlayerVersion, downloadPlayerVersion, editPlayerVersion, uploadPlayerSoftware } from './playerSoftware';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -159,5 +160,7 @@ export function getTools() {
     // Sync group
     getSyncGroups,addSyncGroup,editSyncGroup,deleteSyncGroup,getSyncGroupDisplays,
     assignSyncGroupMembers,
+    // Player software
+    deletePlayerVersion,downloadPlayerVersion,editPlayerVersion,uploadPlayerSoftware,
   };
 }
