@@ -57,18 +57,22 @@ export const assignLibraryItems = createTool({
         return { success: false, message: "CMS URL is not configured" };
       }
 
+      // Get authentication headers and construct the target URL.
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/playlist/library/assign/${context.playlistId}`;
       logger.debug(`assignLibraryItems: Request URL = ${url}`);
 
+      // Prepare the request body. The 'media' parameter is an array.
       const formData = new URLSearchParams();
       context.media.forEach(mediaId => {
         formData.append('media[]', mediaId.toString());
       });
+      // Append optional parameters if they are provided.
       if (context.duration !== undefined) formData.append('duration', context.duration.toString());
       if (context.useDuration !== undefined) formData.append('useDuration', context.useDuration.toString());
       if (context.displayOrder !== undefined) formData.append('displayOrder', context.displayOrder.toString());
 
+      // Make the POST request to assign the library items.
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -78,6 +82,7 @@ export const assignLibraryItems = createTool({
         body: formData
       });
 
+      // Handle non-successful API responses.
       if (!response.ok) {
         const responseText = await response.text();
         let parsedError: any;
@@ -90,15 +95,19 @@ export const assignLibraryItems = createTool({
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
+      // Parse and validate the successful response against the schema.
       const data = await response.json();
       const validatedData = assignResponseSchema.parse(data);
 
+      // Return a success object with the validated playlist data.
       return { success: true, data: validatedData };
     } catch (error) {
+      // Handle Zod validation errors specifically.
       if (error instanceof z.ZodError) {
         logger.error("assignLibraryItems: Validation error", { error: error.issues });
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
+      // Catch and handle any other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
       logger.error("assignLibraryItems: An unexpected error occurred", { error: errorMessage });
       return { success: false, message: errorMessage };

@@ -45,13 +45,16 @@ export const selectPlaylistFolder = createTool({
         return { success: false, message: "CMS URL is not configured" };
       }
 
+      // Get authentication headers and construct the target URL.
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/playlist/${context.playlistId}/selectfolder`;
       logger.debug(`selectPlaylistFolder: Request URL = ${url}`);
 
+      // Prepare the request body with the folderId.
       const formData = new URLSearchParams();
       formData.append('folderId', context.folderId.toString());
 
+      // Make the PUT request to the Xibo API.
       const response = await fetch(url, {
         method: 'PUT',
         headers: {
@@ -61,11 +64,13 @@ export const selectPlaylistFolder = createTool({
         body: formData
       });
       
+      // A 204 No Content response indicates a successful operation.
       if (response.status === 204) {
         logger.info(`Playlist ${context.playlistId} successfully assigned to folder ${context.folderId}.`);
         return { success: true, data: {} };
       }
 
+      // Handle any other non-2xx responses.
       if (!response.ok) {
         const responseText = await response.text();
         let parsedError: any;
@@ -78,15 +83,17 @@ export const selectPlaylistFolder = createTool({
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
       
-      // Handle cases where API might return 200 OK with a body
+      // Handle cases where API might return 200 OK with a body, though 204 is expected.
       const responseData = await response.json().catch(() => ({}));
       return { success: true, data: responseData };
 
     } catch (error) {
+      // Handle Zod validation errors.
       if (error instanceof z.ZodError) {
         logger.error("selectPlaylistFolder: Validation error", { error: error.issues });
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
+      // Handle any other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
       logger.error("selectPlaylistFolder: An unexpected error occurred", { error: errorMessage });
       return { success: false, message: errorMessage };

@@ -22,14 +22,14 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
 
-// Schema for tags associated with a playlist
+// Schema for tags that can be associated with a playlist
 const tagSchema = z.object({
   tag: z.string().nullable(),
   tagId: z.number(),
   value: z.string().nullable(),
 });
 
-// Schema for widgets within a playlist
+// Schema for individual widgets that can be part of a playlist
 const widgetSchema = z.object({
   widgetId: z.number(),
   playlistId: z.number(),
@@ -55,7 +55,7 @@ const widgetSchema = z.object({
   playlist: z.string().nullable(),
 });
 
-// Main schema for a playlist object returned from the API
+// Main schema for the playlist object as returned by the Xibo API after creation
 const playlistSchema = z.object({
   playlistId: z.number(),
   ownerId: z.number(),
@@ -69,8 +69,8 @@ const playlistSchema = z.object({
   filterMediaTagsLogicalOperator: z.string().nullable(),
   filterFolderId: z.number().nullable(),
   maxNumberOfItems: z.number().nullable(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
+  createdDt: z.string().nullable(),
+  modifiedDt: z.string().nullable(),
   duration: z.number(),
   requiresDurationUpdate: z.number(),
   enableStat: z.string().nullable(),
@@ -79,7 +79,7 @@ const playlistSchema = z.object({
   permissions: z.array(z.any()),
   folderId: z.number().nullable(),
   permissionsFolderId: z.number().nullable(),
-  statusMessage: z.union([z.string(), z.array(z.any())]).nullable(),
+  statusMessage: z.union([z.string(), z.array(z.any())]).nullable().optional(),
 });
 
 /**
@@ -94,7 +94,7 @@ export const addPlaylist = createTool({
   inputSchema: z.object({
     name: z.string().describe('The name of the playlist (required)'),
     tags: z.string().optional().describe('Comma-separated list of tags for the playlist'),
-    isDynamic: z.number().optional().describe('Flag indicating if the playlist is dynamic (0: No, 1: Yes)'),
+    isDynamic: z.number().describe('Flag indicating if the playlist is dynamic (0: No, 1: Yes)'),
     filterMediaName: z.string().optional().describe('Filter media by name (for dynamic playlists)'),
     logicalOperatorName: z.enum(['AND', 'OR']).optional().describe('Logical operator for multiple media name filters'),
     filterMediaTag: z.string().optional().describe('Filter media by tags (for dynamic playlists)'),
@@ -119,6 +119,7 @@ export const addPlaylist = createTool({
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/playlist`;
       
+      // Construct the request body from the provided context
       const params = new URLSearchParams();
       Object.entries(context).forEach(([key, value]) => {
           if (value !== undefined) {
@@ -128,6 +129,7 @@ export const addPlaylist = createTool({
 
       logger.debug(`addPlaylist: Sending request to ${url}`, { params: params.toString() });
 
+      // Send the POST request to create the playlist
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -138,6 +140,7 @@ export const addPlaylist = createTool({
       });
 
       if (!response.ok) {
+        // Handle non-successful API responses
         const responseText = await response.text();
         let parsedError: any;
         try {
@@ -158,6 +161,7 @@ export const addPlaylist = createTool({
 
       const data = await response.json();
       
+      // Validate the API response against the defined schema
       try {
         const validatedData = playlistSchema.parse(data);
         logger.info(`addPlaylist: Successfully added playlist with ID ${validatedData.playlistId}`);
@@ -166,6 +170,7 @@ export const addPlaylist = createTool({
           data: validatedData
         };
       } catch (validationError) {
+        // Handle cases where the API response does not match the expected schema
         logger.error('addPlaylist: Response validation failed', { 
           error: validationError, 
           data 
@@ -177,6 +182,7 @@ export const addPlaylist = createTool({
         };
       }
     } catch (error) {
+      // Catch-all for input validation errors or other unexpected issues
       if (error instanceof z.ZodError) {
         logger.error("addPlaylist: Validation error", { error: error.issues });
         return {

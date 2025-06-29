@@ -24,14 +24,14 @@ import { logger } from '../../../index';
 import { parseJsonStrings } from '../utility/jsonParser';
 import { TreeNode, treeResponseSchema, createTreeViewResponse } from '../utility/treeView';
 
-// Schema for tags
+// Schema for tags associated with a playlist
 const tagSchema = z.object({
   tag: z.string().nullable(),
   tagId: z.number(),
   value: z.string().nullable(),
 });
 
-// Schema for widgets
+// Schema for widgets within a playlist
 const widgetSchema = z.object({
   widgetId: z.number(),
   playlistId: z.number(),
@@ -57,7 +57,7 @@ const widgetSchema = z.object({
   playlist: z.string().nullable(),
 });
 
-// Main schema for a playlist
+// Main schema for a single playlist object
 const playlistSchema = z.object({
   playlistId: z.number(),
   ownerId: z.number(),
@@ -86,9 +86,9 @@ const playlistSchema = z.object({
 });
 
 /**
- * Convert playlist data to a hierarchical tree structure.
+ * Recursively builds a hierarchical tree structure from a flat array of playlists.
  * @param playlists - Array of playlist objects from the API.
- * @returns An array of TreeNode objects representing the hierarchy.
+ * @returns An array of TreeNode objects representing the playlist hierarchy.
  */
 function buildPlaylistTree(playlists: any[]): TreeNode[] {
   if (!Array.isArray(playlists)) return [];
@@ -174,7 +174,7 @@ function buildPlaylistTree(playlists: any[]): TreeNode[] {
       playlistNode.children!.push(tagsNode);
     }
 
-    // Add permissions if available
+    // Add permissions information if available in the embedded data
     if (playlist.permissions && Array.isArray(playlist.permissions) && playlist.permissions.length > 0) {
       const permissionsNode: TreeNode = {
         type: 'permissions',
@@ -196,7 +196,7 @@ function buildPlaylistTree(playlists: any[]): TreeNode[] {
 /**
  * Format node display based on node type
  * @param node - The tree node to format
- * @returns Formatted string representation of the node
+ * @returns A formatted string representation of the node for display.
  */
 function playlistNodeFormatter(node: TreeNode): string {
   switch (node.type) {
@@ -248,7 +248,7 @@ export const getPlaylists = createTool({
     embed: z.union([
       z.string().describe('Include related data as comma-separated values (e.g., "widgets,permissions,tags").'),
       z.array(z.string()).describe('Include related data as an array of values.')
-    ]).optional(),
+    ]).optional().default('regions,widgets,permissions,tags'),
     folderId: z.number().optional().describe('Filter by folder ID.'),
     treeView: z.boolean().optional().describe('Set to true to return playlists in a tree structure.')
   }),
@@ -270,24 +270,21 @@ export const getPlaylists = createTool({
 
       const headers = await getAuthHeaders();
       
+      // Dynamically construct query parameters from the input context
       const queryParams = new URLSearchParams();
       Object.entries(context).forEach(([key, value]) => {
         if (value !== undefined) {
+          // Exclude treeView from query params as it's a client-side flag
           if (key === 'treeView') return;
           
-          const embedValue = Array.isArray(value) ? value.join(',') : String(value);
-          queryParams.append(key, embedValue);
+          // Convert array values to comma-separated strings for the API
+          const paramValue = Array.isArray(value) ? value.join(',') : String(value);
+          queryParams.append(key, paramValue);
           if (key === 'embed') {
-            logger.debug(`Using embed parameter: ${embedValue}`);
+            logger.debug(`Using embed parameter: ${paramValue}`);
           }
         }
       });
-
-      if (context.treeView && !queryParams.has('embed')) {
-        const embedValue = 'widgets,tags,permissions';
-        queryParams.append('embed', embedValue);
-        logger.debug(`Added default embed parameter for treeView: ${embedValue}`);
-      }
       
       let url = `${config.cmsUrl}/api/playlist`;
       if (queryParams.toString()) {
@@ -312,18 +309,22 @@ export const getPlaylists = createTool({
 
       const data = await response.json();
       
+      // Return early with an empty array if the API provides no data
       if (Array.isArray(data) && data.length === 0) {
         return { success: true, data: [] };
       }
 
+      // The API may return JSON strings within the data, so parse them
       const parsedData = parseJsonStrings(data);
       
+      // If treeView is requested, transform the flat list into a hierarchical structure
       if (context.treeView) {
         const playlistTree = buildPlaylistTree(parsedData);
         const treeViewData = createTreeViewResponse(parsedData, playlistTree, playlistNodeFormatter);
         return { success: true, data: treeViewData };
       }
       
+      // Validate the final data against the playlist schema before returning
       try {
         const validatedData = z.array(playlistSchema).parse(parsedData);
         return { success: true, data: validatedData };
@@ -340,6 +341,7 @@ export const getPlaylists = createTool({
         };
       }
     } catch (error) {
+      // Catch-all for unexpected errors during execution
       if (error instanceof z.ZodError) {
         logger.error("getPlaylists: Input validation error", { error: error.issues });
         return { success: false, message: "Input validation error occurred", errorData: error.issues };

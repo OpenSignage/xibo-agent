@@ -22,16 +22,22 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
 
-// Schema for the detailed layout usage report
-const layoutUsageReportSchema = z.object({
-    layouts: z.array(z.object({
-        layoutId: z.number(),
-        layout: z.string(),
-        regions: z.array(z.object({
-            regionId: z.number(),
-            region: z.string()
-        }))
+// Schema for the array of layouts returned directly by the API when usage exists.
+const apiResponseSchema = z.array(z.object({
+    layoutId: z.number(),
+    layout: z.string(),
+    regions: z.array(z.object({
+        regionId: z.number(),
+        region: z.string()
     }))
+}));
+
+// Infer the type from the schema for explicit typing.
+type LayoutUsageArray = z.infer<typeof apiResponseSchema>;
+
+// Schema for the 'data' object in the tool's final output. This standardizes the output format.
+const layoutUsageReportSchema = z.object({
+    layouts: apiResponseSchema.optional().default([])
 });
 
 /**
@@ -56,12 +62,15 @@ export const getPlaylistUsageByLayouts = createTool({
         return { success: false, message: "CMS URL is not configured" };
       }
 
+      // Get authentication headers and construct the request URL.
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/playlist/usage/layouts/${context.playlistId}`;
       logger.debug(`getPlaylistUsageByLayouts: Request URL = ${url}`);
 
+      // Make the GET request to the Xibo API.
       const response = await fetch(url, { method: 'GET', headers });
 
+      // Handle non-2xx responses from the API.
       if (!response.ok) {
         const responseText = await response.text();
         let parsedError: any;
@@ -75,14 +84,32 @@ export const getPlaylistUsageByLayouts = createTool({
       }
 
       const data = await response.json();
-      const validatedData = layoutUsageReportSchema.parse(data);
       
-      return { success: true, data: validatedData };
+      // The API has inconsistent return types for this endpoint.
+      // - It returns an array of layouts if the playlist is in use.
+      // - It returns an empty object {} if the playlist is not in use.
+      // We handle this by checking the type of the response before validation.
+      let layoutsArray: LayoutUsageArray = [];
+      if (Array.isArray(data)) {
+        // If the response is an array, validate it against the array schema.
+        layoutsArray = apiResponseSchema.parse(data);
+      } else if (typeof data === 'object' && data !== null && Object.keys(data).length === 0) {
+        // If it's an empty object, it signifies no usage. We treat it as an empty array.
+        logger.info("getPlaylistUsageByLayouts: Received an empty object, assuming no usage.", { data });
+      } else {
+        // Handle unexpected response types.
+        logger.warn("getPlaylistUsageByLayouts: Unexpected response type, assuming no usage.", { response: data });
+      }
+      
+      // We then wrap the resulting array in an object to match the tool's standardized output schema.
+      return { success: true, data: { layouts: layoutsArray } };
     } catch (error) {
+      // Handle any Zod validation errors.
       if (error instanceof z.ZodError) {
         logger.error("getPlaylistUsageByLayouts: Validation error", { error: error.issues });
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
+      // Handle other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
       logger.error("getPlaylistUsageByLayouts: An unexpected error occurred", { error: errorMessage });
       return { success: false, message: errorMessage };

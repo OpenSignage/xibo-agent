@@ -22,12 +22,17 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
 
-// Schema for the playlist usage report response
-const usageReportSchema = z.array(z.object({
+// Schema for an individual layout entry in the usage report
+const layoutUsageSchema = z.object({
     layout: z.string(),
     layoutId: z.number(),
     status: z.string()
-}));
+});
+
+// The API returns an object where the `data` key contains a JSON string.
+const usageReportSchema = z.object({
+    data: z.string()
+});
 
 /**
  * Tool to retrieve a usage report for a specific playlist, showing which layouts it is used in.
@@ -40,23 +45,27 @@ export const getPlaylistUsage = createTool({
   }),
   outputSchema: z.object({
     success: z.boolean(),
-    data: usageReportSchema.optional(),
+    data: z.array(layoutUsageSchema).optional(),
     message: z.string().optional(),
     errorData: z.any().optional()
   }),
   execute: async ({ context }) => {
     try {
+      // Check for CMS URL configuration.
       if (!config.cmsUrl) {
         logger.error("getPlaylistUsage: CMS URL is not configured");
         return { success: false, message: "CMS URL is not configured" };
       }
 
+      // Get authentication headers and construct the request URL.
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/playlist/usage/${context.playlistId}`;
       logger.debug(`getPlaylistUsage: Request URL = ${url}`);
 
+      // Make the GET request to the Xibo API.
       const response = await fetch(url, { method: 'GET', headers });
 
+      // Handle non-2xx responses from the API.
       if (!response.ok) {
         const responseText = await response.text();
         let parsedError: any;
@@ -69,15 +78,36 @@ export const getPlaylistUsage = createTool({
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
-      const data = await response.json();
-      const validatedData = usageReportSchema.parse(data);
+      const rawData = await response.json();
+      // First, validate that the response is an object with a 'data' property that is a string.
+      const initialValidation = usageReportSchema.parse(rawData);
       
-      return { success: true, data: validatedData };
+      const usageString = initialValidation.data;
+
+      // The 'data' field can contain either a JSON string of an array, or a plain text message.
+      try {
+        // Attempt to parse the string as JSON. It might be empty if there's no usage.
+        if (!usageString.trim()) {
+            return { success: true, data: [] };
+        }
+        const usageData = JSON.parse(usageString);
+        // If successful, validate the array structure.
+        const validatedData = z.array(layoutUsageSchema).parse(usageData);
+        return { success: true, data: validatedData };
+      } catch (e) {
+        // If parsing fails, it's not a JSON string.
+        // It could be a message like "Specified playlist has no usage".
+        // In this case, we return an empty array and the message.
+        logger.info(`getPlaylistUsage: 'data' field was not a valid JSON array. Content: "${usageString}"`);
+        return { success: true, data: [], message: usageString };
+      }
     } catch (error) {
+      // Handle any Zod validation errors from the initial parsing or JSON parsing.
       if (error instanceof z.ZodError) {
         logger.error("getPlaylistUsage: Validation error", { error: error.issues });
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
+      // Handle other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
       logger.error("getPlaylistUsage: An unexpected error occurred", { error: errorMessage });
       return { success: false, message: errorMessage };
