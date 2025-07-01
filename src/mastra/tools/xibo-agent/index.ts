@@ -42,7 +42,7 @@ import { getPlaylists, addPlaylist, editPlaylist, deletePlaylist, copyPlaylist,
 import { getStats, getTimeDisconnected, getExportStatsCount } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
-import { generateImage, updateImage, getImageHistory } from './generate';
+import { generateImage, updateImage, getImageHistory, generateQRCode } from './generate';
 import { getNotifications, deleteNotification, addNotification, editNotification } from './notification';
 import { getDisplayGroups } from './displayGroup';
 import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } from './template';
@@ -147,7 +147,7 @@ export function getTools() {
     // Library
     getLibrary,searchAllLibrary,addMedia,uploadMediaFromURL,
     // Generation
-    generateImage,updateImage,getImageHistory,
+    generateImage,updateImage,getImageHistory,generateQRCode,
     // Notification
     getNotifications,deleteNotification,addNotification,editNotification,
     // Display group
