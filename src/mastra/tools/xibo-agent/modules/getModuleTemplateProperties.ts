@@ -27,10 +27,13 @@ const propertySchema = z.object({
   type: z.string(),
   title: z.string().nullable(),
   helpText: z.string().nullable(),
-  options: z.array(z.any()).optional(),
+  options: z.array(z.any()).nullable(),
 });
 
-const dataSchema = z.record(z.string(), propertySchema);
+const dataSchema = z.union([
+  z.array(propertySchema),
+  z.record(z.string(), propertySchema)
+]);
 
 const outputSchema = z.union([
   z.object({

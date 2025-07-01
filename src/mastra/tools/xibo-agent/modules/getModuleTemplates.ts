@@ -22,34 +22,27 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
 
-const extendSchema = z.object({
-  templateId: z.string(),
-  type: z.string(),
-});
-
 const stencilSchema = z.object({
-  type: z.string(),
-  data: z.any(),
-});
+  elementGroups: z.array(z.string()).optional(),
+}).nullable();
+
+const extendsSchema = z.object({
+  templateId: z.string().optional(),
+  type: z.string().optional(),
+}).nullable();
 
 const propertySchema = z.object({
   id: z.string(),
   type: z.string(),
-  title: z.string().nullable(),
-  helpText: z.string().nullable(),
-  options: z.array(z.any()).optional(),
-});
-
-const propertyGroupSchema = z.object({
-  id: z.string(),
   title: z.string(),
-  properties: z.array(propertySchema),
+  helpText: z.string().nullable(),
+  default: z.union([z.string(), z.number(), z.boolean()]).nullable(),
 });
 
 const moduleTemplateSchema = z.object({
   templateId: z.string(),
   type: z.string(),
-  extends: extendSchema.optional(),
+  extends: extendsSchema,
   dataType: z.string(),
   title: z.string(),
   description: z.string().nullable(),
@@ -59,9 +52,9 @@ const moduleTemplateSchema = z.object({
   properties: z.array(propertySchema),
   isVisible: z.boolean(),
   isEnabled: z.boolean(),
-  propertyGroups: z.array(propertyGroupSchema).optional(),
-  stencil: stencilSchema.optional(),
-  assets: z.array(z.any()).optional(),
+  propertyGroups: z.array(z.string()),
+  stencil: stencilSchema,
+  assets: z.array(z.any()),
   groupsWithPermissions: z.string().nullable(),
 });
 
