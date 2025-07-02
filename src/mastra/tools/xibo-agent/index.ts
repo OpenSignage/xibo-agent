@@ -59,6 +59,7 @@ import { deletePlayerVersion, downloadPlayerVersion, editPlayerVersion, uploadPl
 import { addWidget, editWidget, deleteWidget, editWidgetTransition, editWidgetAudio, deleteWidgetAudio,
   setWidgetRegion, saveWidgetElements, setWidgetDataType, getWidgetData, addWidgetData, editWidgetData,
   deleteWidgetData } from './widget';
+import { addCommand, deleteCommand, editCommand, getCommands } from './command';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -95,6 +96,7 @@ export * from './displayVenue'; // Display venue management
 export * from './news';         // News management
 export * from './weather';      // Weather management
 export * from './syncGroup';    // Synchronization group management
+export * from './command';      // Command management
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -173,5 +175,7 @@ export function getTools() {
     addWidget,editWidget,deleteWidget,editWidgetTransition,editWidgetAudio,deleteWidgetAudio,
     setWidgetRegion,saveWidgetElements,setWidgetDataType,getWidgetData,addWidgetData,editWidgetData,
     deleteWidgetData,
+    // Command
+    addCommand,deleteCommand,editCommand,getCommands,
   };
 }
