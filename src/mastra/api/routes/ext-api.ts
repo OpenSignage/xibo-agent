@@ -10,6 +10,7 @@
 import { Hono } from 'hono';
 import { helloHandler } from '../handlers/hello';
 import { getImageHandler } from '../handlers/getImage';
+import { getVideoHandler } from '../handlers/getVideo';
 import { swaggerHandler } from '../handlers/swagger';
 
 const router = new Hono();
@@ -22,5 +23,8 @@ router.get('/hello', helloHandler);
 
 // Get Image API
 router.get('/getImage/:filename', getImageHandler);
+
+// Get Video API
+router.get('/getVideo/:filename', getVideoHandler);
 
 export default router; 
