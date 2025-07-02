@@ -13,12 +13,14 @@
 /**
  * Xibo CMS Generation Tools
  * 
- * This module exports tools for generating content including images and QR codes.
- * It provides functionality to generate images using Gemini API and QR codes
- * from text content, saving them to persistent storage directories.
+ * This module exports tools for generating content including images, videos, and QR codes.
+ * It provides functionality to generate content using various APIs and libraries,
+ * saving them to persistent storage and managing their history.
  */
 
 export { generateImage } from './imageGeneration';
 export { updateImage } from './imageUpdate';
 export { getImageHistory } from './getImageHistory';
-export { generateQRCode } from './QRcodeGenegation';
+export * as imageHistory from './imageHistory';
+
+
