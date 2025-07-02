@@ -23,14 +23,10 @@ import * as path from 'path';
 import { logger } from '../../../index';
 import { config } from '../config';
 
-// Defines the storage path for video files and the history database.
-const VIDEO_DIR = path.join(config.publicDir, 'videos');
+// Defines the storage path for the history database.
 const HISTORY_FILE = path.join(config.generatedDir, 'videoHistory.json');
 
 // Ensures that the necessary directories for video storage and data exist.
-if (!fs.existsSync(VIDEO_DIR)) {
-  fs.mkdirSync(VIDEO_DIR, { recursive: true });
-}
 if (!fs.existsSync(path.dirname(HISTORY_FILE))) {
   fs.mkdirSync(path.dirname(HISTORY_FILE), { recursive: true });
 }
@@ -43,7 +39,6 @@ export const videoHistorySchema = z.object({
   aspectRatio: z.enum(["16:9", "9:16", "1:1", "4:5"]),
   status: z.enum(["pending", "completed", "failed"]),
   filePath: z.string().optional(),
-  url: z.string().optional(),
   createdAt: z.string(),
   isFavorite: z.boolean().optional().default(false),
 });
@@ -93,11 +88,10 @@ export function writeVideoHistory(history: History): void {
  * @param {Omit<VideoHistory, 'url'>} videoData - The data for the new video.
  * @returns {VideoHistory} The newly created video history entry.
  */
-export function addVideoHistory(videoData: Omit<VideoHistory, 'url' | 'filePath'> & { filePath?: string }): VideoHistory {
+export function addVideoHistory(videoData: Omit<VideoHistory, 'filePath'> & { filePath?: string }): VideoHistory {
   const history = readVideoHistory();
   const newEntry: VideoHistory = {
     ...videoData,
-    url: videoData.filePath ? `/videos/${path.basename(videoData.filePath)}` : undefined,
   };
   history.unshift(newEntry);
   writeVideoHistory(history);
@@ -119,10 +113,6 @@ export function updateVideoHistory(id: string, updates: Partial<Omit<VideoHistor
   }
 
   const updatedEntry = { ...history[index], ...updates };
-  
-  if (updates.filePath && !updates.url) {
-    updatedEntry.url = `/videos/${path.basename(updates.filePath)}`;
-  }
 
   const validation = videoHistorySchema.safeParse(updatedEntry);
   if (!validation.success) {

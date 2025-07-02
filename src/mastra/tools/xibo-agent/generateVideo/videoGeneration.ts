@@ -29,12 +29,18 @@ import { addVideoHistory, updateVideoHistory, videoHistorySchema } from './video
 import { config } from '../config';
 
 // Defines the storage path for video files.
-const VIDEO_DIR = path.join(config.publicDir, 'videos');
+const VIDEO_DIR = config.generatedDir;
 
 // Defines the schema for a successful response.
 const successResponseSchema = z.object({
   success: z.literal(true),
-  data: videoHistorySchema,
+  data: z.object({
+    videoPath: z.string(),
+    videoUrl: z.string(),
+    prompt: z.string(),
+    negativePrompt: z.string().optional(),
+    aspectRatio: z.string(),
+  }),
 });
 
 // Defines the schema for an error response.
@@ -104,7 +110,14 @@ export const videoGeneration = createTool({
       
       // 3. Save video file
       const videoBuffer = Buffer.from(videoDataB64, 'base64');
-      const fileName = `${videoId}.mp4`;
+      const fileName = `video-${videoId}.mp4`;
+      
+      // Create output directory if it doesn't exist
+      if (!fs.existsSync(VIDEO_DIR)) {
+        logger.info(`Creating directory: ${VIDEO_DIR}`);
+        fs.mkdirSync(VIDEO_DIR, { recursive: true });
+      }
+
       const filePath = path.join(VIDEO_DIR, fileName);
       fs.writeFileSync(filePath, videoBuffer);
       logger.info(`Video saved to ${filePath}`);
@@ -119,7 +132,18 @@ export const videoGeneration = createTool({
           throw new Error("Failed to update video history after saving the video.");
       }
 
-      return { success: true, data: updatedEntry };
+      const videoUrl = `http://localhost:4111/ext-api/getVideo/${fileName}`;
+
+      return {
+        success: true,
+        data: {
+          videoPath: filePath,
+          videoUrl,
+          prompt: updatedEntry.prompt,
+          negativePrompt: updatedEntry.negativePrompt,
+          aspectRatio: updatedEntry.aspectRatio,
+        },
+      };
 
     } catch (error) {
       const message = "An error occurred during video generation.";
