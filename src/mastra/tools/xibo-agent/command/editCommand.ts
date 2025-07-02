@@ -69,8 +69,8 @@ export const editCommand = createTool({
   description: "Edit an existing command in the Xibo CMS",
   inputSchema: z.object({
     commandId: z.number().describe("ID of the command to edit (required)"),
-    command: z.string().describe("The command name (required)"),
-    description: z.string().optional().describe("Description of the command (optional)"),
+    command: z.string().min(1, "Command name must be at least 1 character").max(254, "Command name must not exceed 254 characters").describe("The command name (required, 1-254 characters)"),
+    description: z.string().describe("Description of the command (required)"),
     commandString: z.string().optional().describe("The command string to execute (optional)"),
     validationString: z.string().optional().describe("Validation string for the command (optional)"),
     availableOn: z.string().optional().describe("Platforms where the command is available (optional)"),
@@ -87,22 +87,25 @@ export const editCommand = createTool({
 
       const url = new URL(`${config.cmsUrl}/api/command/${context.commandId}`);
       
-      // Create form data
-      const formData = new FormData();
-      formData.append("command", context.command);
-      if (context.description) formData.append("description", context.description);
+      // Create form data with URL-encoded format
+      const formData = new URLSearchParams();
+      formData.append("command", context.command.trim());
+      formData.append("description", context.description);
       if (context.commandString) formData.append("commandString", context.commandString);
       if (context.validationString) formData.append("validationString", context.validationString);
       if (context.availableOn) formData.append("availableOn", context.availableOn);
       if (context.createAlertOn) formData.append("createAlertOn", context.createAlertOn);
 
       logger.info("Editing command", { commandId: context.commandId, command: context.command });
-      logger.debug("Request URL", { url: url.toString() });
 
+      // Send PUT request to update command
       const response = await fetch(url.toString(), {
         method: "PUT",
-        headers: await getAuthHeaders(),
-        body: formData,
+        headers: {
+          ...await getAuthHeaders(),
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: formData.toString(),
       });
 
       const rawData = await response.json();
@@ -113,6 +116,17 @@ export const editCommand = createTool({
         return { success: false, message, errorData: rawData };
       }
 
+      // Try to parse as direct command response first
+      const directValidationResult = commandSchema.safeParse(rawData);
+      if (directValidationResult.success) {
+        logger.info("Command edited successfully", { commandId: context.commandId });
+        return {
+          success: true,
+          data: directValidationResult.data
+        };
+      }
+
+      // Fallback to wrapped response format
       const validationResult = successResponseSchema.safeParse(rawData);
       if (!validationResult.success) {
         const message = "API response validation failed";

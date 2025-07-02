@@ -68,9 +68,9 @@ export const addCommand = createTool({
   id: "add-command",
   description: "Add a new command to the Xibo CMS",
   inputSchema: z.object({
-    command: z.string().describe("The command name (required)"),
-    code: z.string().describe("The command code/identifier (required)"),
-    description: z.string().optional().describe("Description of the command (optional)"),
+    command: z.string().min(1, "Command name must be at least 1 character").max(254, "Command name must not exceed 254 characters").describe("The command name (required, 1-254 characters)"),
+    code: z.string().min(1, "Command code must be at least 1 character").describe("The command code/identifier (required)"),
+    description: z.string().describe("Description of the command (required)"),
     commandString: z.string().optional().describe("The command string to execute (optional)"),
     validationString: z.string().optional().describe("Validation string for the command (optional)"),
     availableOn: z.string().optional().describe("Platforms where the command is available (optional)"),
@@ -87,23 +87,26 @@ export const addCommand = createTool({
 
       const url = new URL(`${config.cmsUrl}/api/command`);
       
-      // Create form data
-      const formData = new FormData();
-      formData.append("command", context.command);
-      formData.append("code", context.code);
-      if (context.description) formData.append("description", context.description);
+      // Create form data with URL-encoded format
+      const formData = new URLSearchParams();
+      formData.append("command", context.command.trim());
+      formData.append("code", context.code.trim());
+      formData.append("description", context.description);
       if (context.commandString) formData.append("commandString", context.commandString);
       if (context.validationString) formData.append("validationString", context.validationString);
       if (context.availableOn) formData.append("availableOn", context.availableOn);
       if (context.createAlertOn) formData.append("createAlertOn", context.createAlertOn);
 
       logger.info("Adding command", { command: context.command, code: context.code });
-      logger.debug("Request URL", { url: url.toString() });
 
+      // Send POST request to create command
       const response = await fetch(url.toString(), {
         method: "POST",
-        headers: await getAuthHeaders(),
-        body: formData,
+        headers: {
+          ...await getAuthHeaders(),
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: formData.toString(),
       });
 
       const rawData = await response.json();
@@ -114,6 +117,17 @@ export const addCommand = createTool({
         return { success: false, message, errorData: rawData };
       }
 
+      // Try to parse as direct command response first
+      const directValidationResult = commandSchema.safeParse(rawData);
+      if (directValidationResult.success) {
+        logger.info("Command added successfully", { commandId: directValidationResult.data.commandId });
+        return {
+          success: true,
+          data: directValidationResult.data
+        };
+      }
+
+      // Fallback to wrapped response format
       const validationResult = successResponseSchema.safeParse(rawData);
       if (!validationResult.success) {
         const message = "API response validation failed";
