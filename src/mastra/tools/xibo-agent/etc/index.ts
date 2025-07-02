@@ -22,3 +22,4 @@ export { getGoogleFonts } from './getGoogleFonts';
 export { uploadGoogleFonts } from './uploadGoogleFonts';
 export { getUploadFiles } from './getUploadFiles';
 export { deleteUploadFiles } from './deleteUploadFiles';    
+export { generateQRCode } from './QRcodeGenegation';

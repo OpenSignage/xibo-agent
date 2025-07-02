@@ -22,6 +22,7 @@ import { z } from "zod";
 import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../../../index';
+import { config } from '../config';
 
 // Schema definition for image history
 const imageHistorySchema = z.object({
@@ -47,7 +48,7 @@ type Generator = z.infer<typeof generatorSchema>;
 type History = z.infer<typeof historySchema>;
 
 // Path to history file
-const HISTORY_FILE = path.join(process.cwd(), '..', '..', 'persistent_data', 'generated', 'imageHistory.json');
+const HISTORY_FILE = path.join(config.generatedDir, 'imageHistory.json');
 
 // Initialize history data
 let history: History = loadHistory();
@@ -117,7 +118,7 @@ export function startNewGeneration(generatorId: string): string {
     logger.info(`Found existing history for generatorId: ${generatorId}, cleaning up...`);
     const generator = history[generatorId];
     generator.images.forEach(image => {
-      const imagePath = path.join(process.cwd(), '..', '..', 'persistent_data', 'generated', image.filename);
+      const imagePath = path.join(config.generatedDir, image.filename);
       try {
         if (fs.existsSync(imagePath)) {
           fs.unlinkSync(imagePath);
@@ -196,7 +197,7 @@ export function endGeneration(generatorId: string, isSuccess: boolean = false): 
 
   if (isSuccess) {
     // Clean up only the current generator's old images
-    const outputDir = path.join(process.cwd(), '..', '..', 'persistent_data', 'generated');
+    const outputDir = config.generatedDir;
     const generator = history[generatorId];
     
     generator.images.forEach(image => {

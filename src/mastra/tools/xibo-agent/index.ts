@@ -33,7 +33,8 @@ import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
   addDrawerRegion,saveDrawerRegion,deleteRegion,positionAllRegions } from './layout';
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
-import { getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles } from './etc';
+import { getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles,
+  generateQRCode } from './etc';
 import { getFonts, getFontDetails, uploadFont, downloadFont, deleteFont } from './font';
 import { getUserGroups, addUserGroup } from './usergroup';
 import { getPlaylists, addPlaylist, editPlaylist, deletePlaylist, copyPlaylist,
@@ -42,7 +43,8 @@ import { getPlaylists, addPlaylist, editPlaylist, deletePlaylist, copyPlaylist,
 import { getStats, getTimeDisconnected, getExportStatsCount } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
-import { generateImage, updateImage, getImageHistory, generateQRCode } from './generate';
+import { generateImage, updateImage, getImageHistory } from './generateImage';
+import { videoGeneration, videoUpdate, getVideoHistory } from './generateVideo';
 import { getNotifications, deleteNotification, addNotification, editNotification } from './notification';
 import { getDisplayGroups } from './displayGroup';
 import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } from './template';
@@ -88,7 +90,8 @@ export * from './usergroup';    // User group management
 export * from './tags';         // Tags management
 export * from './dayPart';      // Day part management
 export * from './statistics';   // Statistics management
-export * from './generate';     // Image and Video generate
+export * from './generateImage';     // Image  generate
+export * from './generateVideo';     // Video generate
 export * from './log';          // Log management
 export * from './transition';   // Transition management
 export * from './compound';     // Compound tools
@@ -150,6 +153,7 @@ export function getTools() {
     getLibrary,searchAllLibrary,addMedia,uploadMediaFromURL,
     // Generation
     generateImage,updateImage,getImageHistory,generateQRCode,
+    videoGeneration, videoUpdate, getVideoHistory,
     // Notification
     getNotifications,deleteNotification,addNotification,editNotification,
     // Display group
