@@ -90,7 +90,7 @@ export const getCommands = createTool({
 
       const url = new URL(`${config.cmsUrl}/api/command`);
       
-      // Add query parameters
+      // Add query parameters if provided
       if (context.commandId) url.searchParams.append("commandId", context.commandId.toString());
       if (context.command) url.searchParams.append("command", context.command);
       if (context.code) url.searchParams.append("code", context.code);
@@ -99,8 +99,7 @@ export const getCommands = createTool({
       if (context.logicalOperatorName) url.searchParams.append("logicalOperatorName", context.logicalOperatorName);
       if (context.logicalOperatorCode) url.searchParams.append("logicalOperatorCode", context.logicalOperatorCode);
 
-      logger.info("Retrieving commands", { filters: Object.keys(context).filter(key => context[key as keyof typeof context] !== undefined) });
-      logger.debug("Request URL", { url: url.toString() });
+      logger.info("Retrieving commands");
 
       const response = await fetch(url.toString(), {
         method: "GET",
@@ -116,7 +115,7 @@ export const getCommands = createTool({
       }
 
       try {
-        // First try to parse as direct array response
+        // First try to parse as direct array response from API
         const directValidationResult = directApiResponseSchema.safeParse(rawData);
         if (directValidationResult.success) {
           logger.info("Commands retrieved successfully", { count: directValidationResult.data.length });

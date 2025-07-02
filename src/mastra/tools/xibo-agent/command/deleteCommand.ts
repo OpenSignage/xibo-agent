@@ -66,7 +66,6 @@ export const deleteCommand = createTool({
       const url = new URL(`${config.cmsUrl}/api/command/${context.commandId}`);
       
       logger.info("Deleting command", { commandId: context.commandId });
-      logger.debug("Request URL", { url: url.toString() });
 
       const response = await fetch(url.toString(), {
         method: "DELETE",
@@ -78,6 +77,7 @@ export const deleteCommand = createTool({
         try {
           errorData = await response.json();
         } catch {
+          // Fallback to text if JSON parsing fails
           errorData = await response.text();
         }
         
@@ -86,7 +86,7 @@ export const deleteCommand = createTool({
         return { success: false, message, errorData };
       }
 
-      // DELETE requests typically return 204 No Content
+      // DELETE requests typically return 204 No Content on success
       if (response.status === 204) {
         logger.info("Command deleted successfully", { commandId: context.commandId });
         return {
@@ -95,10 +95,10 @@ export const deleteCommand = createTool({
         };
       }
 
-      // Handle other successful responses
+      // Handle other successful responses with potential JSON content
       try {
         const rawData = await response.json();
-        logger.info("Command deleted successfully", { commandId: context.commandId, response: rawData });
+        logger.info("Command deleted successfully", { commandId: context.commandId });
         return {
           success: true,
           data: { message: "Command deleted successfully" }
