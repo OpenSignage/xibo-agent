@@ -22,11 +22,15 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
+import { 
+  TreeNode, 
+  treeResponseSchema, 
+  createTreeViewResponse 
+} from '../utility/treeView';
 
 /**
- * Schema for module property definition
- * 
- * Represents configurable properties of Xibo modules
+ * Schema for module property definition.
+ * Represents configurable properties of Xibo modules.
  */
 const propertySchema = z.object({
   id: z.string(),
@@ -37,10 +41,9 @@ const propertySchema = z.object({
 });
 
 /**
- * Schema for module response data from Xibo API
- * 
- * Comprehensive definition of module information returned by the API,
- * including module metadata, compatibility settings, and configuration options.
+ * Schema for module response data from the Xibo API.
+ * Defines the comprehensive structure of module information, including metadata,
+ * compatibility settings, and configuration options.
  */
 const moduleSchema = z.object({
   moduleId: z.union([z.number(), z.string().transform(Number)]),
@@ -88,12 +91,13 @@ const moduleSchema = z.object({
   allowPreview: z.union([z.number(), z.string().transform(Number)]).nullable(),
 });
 
+const successSchema = z.union([
+  treeResponseSchema,
+  z.array(moduleSchema),
+]);
+
 const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.array(moduleSchema),
-    message: z.string(),
-  }),
+  successSchema,
   z.object({
     success: z.literal(false),
     message: z.string(),
@@ -103,16 +107,102 @@ const outputSchema = z.union([
 ]);
 
 /**
- * Tool for retrieving all module information from Xibo CMS
+ * Builds a tree structure from a flat list of modules.
+ * @param modules - The array of module data from the API.
+ * @returns An array of TreeNode objects representing the module hierarchy.
+ */
+function buildModuleTree(modules: any[]): TreeNode[] {
+  return modules.map(module => {
+    const moduleNode: TreeNode = {
+      id: module.moduleId,
+      name: `${module.name || 'Unnamed Module'} (ID: ${module.moduleId})`,
+      type: 'module',
+      children: []
+    };
+
+    // Information Node
+    const infoChildren: TreeNode[] = [];
+    if (module.author) infoChildren.push({ id: -module.moduleId * 10 - 1, name: `Author: ${module.author}`, type: 'info-detail' });
+    if (module.type) infoChildren.push({ id: -module.moduleId * 10 - 2, name: `Type: ${module.type}`, type: 'info-detail' });
+    if (module.dataType) infoChildren.push({ id: -module.moduleId * 10 - 3, name: `Data Type: ${module.dataType}`, type: 'info-detail' });
+    if (module.description) infoChildren.push({ id: -module.moduleId * 10 - 4, name: `Description: ${module.description}`, type: 'info-detail' });
+
+    if (infoChildren.length > 0) {
+      moduleNode.children?.push({
+        id: -module.moduleId * 10,
+        name: 'Information',
+        type: 'info',
+        children: infoChildren
+      });
+    }
+    
+    // Properties Node
+    if (module.properties && module.properties.length > 0) {
+      moduleNode.children?.push({
+        id: -module.moduleId * 100,
+        name: 'Properties',
+        type: 'properties',
+        children: module.properties.map((prop: any, index: number) => ({
+          id: -module.moduleId * 100 - (index + 1),
+          name: `${prop.title || prop.id}: ${prop.type}`,
+          type: 'property'
+        }))
+      });
+    }
+
+    // Settings Node
+    if (module.settings && module.settings.length > 0) {
+      moduleNode.children?.push({
+        id: -module.moduleId * 1000,
+        name: 'Settings',
+        type: 'settings',
+        children: module.settings.map((setting: any, index: number) => ({
+          id: -module.moduleId * 1000 - (index + 1),
+          name: `${setting.title || setting.id}: ${setting.type}`,
+          type: 'setting'
+        }))
+      });
+    }
+
+    return moduleNode;
+  });
+}
+
+/**
+ * Formats a tree node for display in the text-based tree view.
+ * @param node - The TreeNode to format.
+ * @returns A string representation of the node with an icon.
+ */
+function moduleNodeFormatter(node: TreeNode): string {
+  switch (node.type) {
+    case 'module':
+      return `📦 ${node.name}`;
+    case 'info':
+      return `ℹ️ ${node.name}`;
+    case 'properties':
+      return `🔧 ${node.name}`;
+    case 'settings':
+      return `⚙️ ${node.name}`;
+    case 'property':
+    case 'setting':
+    case 'info-detail':
+      return node.name;
+    default:
+      return node.name;
+  }
+}
+
+/**
+ * Tool for retrieving all module information from the Xibo CMS.
  */
 export const getModules = createTool({
   id: 'get-modules',
   description: 'Get information about all available Xibo CMS modules',
   inputSchema: z.object({
-    _placeholder: z.string().optional().describe('This tool does not require input parameters.')
+    treeView: z.boolean().optional().describe("Set to true to return modules in a tree structure."),
   }),
   outputSchema,
-  execute: async () => {
+  execute: async ({ context }) => {
     if (!config.cmsUrl) {
       const message = "CMS URL is not configured.";
       logger.error(message);
@@ -140,9 +230,13 @@ export const getModules = createTool({
         return { success: false as const, message, error: validationResult.error, errorData: rawData };
       }
 
-      const message = "Modules retrieved successfully";
-      logger.info(message, { count: validationResult.data.length });
-      return { success: true, data: validationResult.data, message };
+      // If treeView is requested, build and return the tree structure.
+      if (context.treeView) {
+        const moduleTree = buildModuleTree(validationResult.data);
+        return createTreeViewResponse(validationResult.data, moduleTree, moduleNodeFormatter);
+      }
+
+      return validationResult.data;
     } catch (error) {
       const message = "An unexpected error occurred while getting modules.";
       logger.error(message, { error });

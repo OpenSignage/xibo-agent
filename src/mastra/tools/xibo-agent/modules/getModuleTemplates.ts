@@ -22,23 +22,35 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
 
+/**
+ * Schema for the 'stencil' object within a module template.
+ */
 const stencilSchema = z.object({
   elementGroups: z.array(z.string()).optional(),
 }).nullable();
 
+/**
+ * Schema for the 'extends' object, defining template inheritance.
+ */
 const extendsSchema = z.object({
   templateId: z.string().optional(),
   type: z.string().optional(),
 }).nullable();
 
+/**
+ * Schema for individual properties within a module template.
+ */
 const propertySchema = z.object({
   id: z.string(),
   type: z.string(),
-  title: z.string(),
+  title: z.string().nullable(),
   helpText: z.string().nullable(),
   default: z.union([z.string(), z.number(), z.boolean()]).nullable(),
 });
 
+/**
+ * Schema for the main module template structure.
+ */
 const moduleTemplateSchema = z.object({
   templateId: z.string(),
   type: z.string(),
@@ -72,12 +84,16 @@ const outputSchema = z.union([
   }),
 ]);
 
+/**
+ * Tool to retrieve a list of module templates from the Xibo CMS.
+ * Filters templates based on the specified data type.
+ */
 export const getModuleTemplates = createTool({
   id: "get-module-templates",
   description: "Get module templates by data type",
   inputSchema: z.object({
-    dataType: z.string().describe("The data type of the module to filter by (e.g., 'rss')."),
-    type: z.string().optional().describe("The type of module to filter by."),
+    dataType: z.string().describe("DataType to return templates for"),
+    type: z.string().optional().describe("Type to return templates for"),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -92,8 +108,6 @@ export const getModuleTemplates = createTool({
       if (context.type) {
         url.searchParams.append("type", context.type);
       }
-
-      logger.info(`Requesting module templates from: ${url.toString()}`);
 
       const response = await fetch(url.toString(), {
         method: "GET",
@@ -116,7 +130,6 @@ export const getModuleTemplates = createTool({
       }
 
       const message = "Module templates retrieved successfully";
-      logger.info(message, { count: validationResult.data.length });
       return { success: true, data: validationResult.data, message };
     } catch (error) {
       const message = "An unexpected error occurred while getting module templates.";
@@ -128,6 +141,4 @@ export const getModuleTemplates = createTool({
       };
     }
   },
-});
-
-export default getModuleTemplates; 
+}); 
