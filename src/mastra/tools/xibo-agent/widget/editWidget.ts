@@ -25,10 +25,13 @@ export const editWidget = createTool({
   description: 'Edits a widget.',
   inputSchema: z.object({
     widgetId: z.number().describe('The ID of the widget to edit.'),
-    useDuration: z.number().optional().describe('Whether to use the specified duration (0: no, 1: yes).'),
+    useDuration: z.number().optional().describe('Set a duration on this widget, if unchecked the default or library duration will be used. (0: no, 1: yes).'),
     duration: z.number().optional().describe('The duration in seconds.'),
-    name: z.string().optional().describe('The name of the widget.'),
-    enableStat: z.string().optional().describe('Statistics collection setting (On|Off|Inherit).')
+    name: z.string().optional().describe('An optional name for this widget.'),
+    enableStat: z.string().optional().describe('Should stats be enabled? (On|Off|Inherit).'),
+    isRepeatData: z.number().optional().describe('If this widget requires data, should that data be repeated to meet the number of items requested?'),
+    showFallback: z.string().optional().describe('If this widget requires data and allows fallback data how should that data be returned? (never, always, empty, error)'),
+    properties: z.record(z.any()).optional().describe('Add an additional parameter for each of the properties required this module and its template. Use the moduleProperties and moduleTemplateProperties calls to get a list of properties needed.'),
   }),
   outputSchema: z.object({
     success: z.boolean(),
@@ -51,6 +54,13 @@ export const editWidget = createTool({
       if (context.duration !== undefined) formData.append('duration', context.duration.toString());
       if (context.name) formData.append('name', context.name);
       if (context.enableStat) formData.append('enableStat', context.enableStat);
+      if (context.isRepeatData !== undefined) formData.append('isRepeatData', context.isRepeatData.toString());
+      if (context.showFallback) formData.append('showFallback', context.showFallback);
+      if (context.properties) {
+        for (const key in context.properties) {
+          formData.append(key, context.properties[key]);
+        }
+      }
 
       const response = await fetch(url, {
         method: 'PUT',
