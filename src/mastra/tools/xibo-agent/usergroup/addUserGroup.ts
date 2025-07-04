@@ -11,11 +11,9 @@
  */
 
 /**
- * Xibo CMS User Group Creation Tool
- * 
- * This module provides functionality to create new user groups in the Xibo CMS system.
- * It implements the user group creation API endpoint and handles the necessary validation
- * and data transformation for creating user groups with appropriate permissions.
+ * @module addUserGroup
+ * @description This module provides functionality to create new user groups
+ * in the Xibo CMS.
  */
 
 import { z } from "zod";
@@ -26,36 +24,48 @@ import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for user group data validation
- * Defines the structure of user group data in the Xibo CMS system
+ * Schema for the user group data returned by the API.
  */
 const userGroupSchema = z.object({
   groupId: z.number(),
   group: z.string(),
+  isUserSpecific: z.number().optional(),
+  isEveryone: z.number().optional(),
   description: z.string().nullable().optional(),
-  libraryQuota: z.number().optional(),
+  libraryQuota: z.number().nullable().optional(),
   isSystemNotification: z.number().optional(),
   isDisplayNotification: z.number().optional(),
+  isDataSetNotification: z.number().optional(),
+  isLayoutNotification: z.number().optional(),
+  isLibraryNotification: z.number().optional(),
+  isReportNotification: z.number().optional(),
   isScheduleNotification: z.number().optional(),
   isCustomNotification: z.number().optional(),
   isShownForAddUser: z.number().optional(),
-  defaultHomePageId: z.number().nullable().optional(),
+  defaultHomepageId: z.string().nullable().optional(),
+  features: z.array(z.string()).optional(),
+  buttons: z.array(z.string()).optional(),
 });
 
 /**
- * Schema for API response validation
- * Expected response format from the Xibo CMS API
+ * Schema for the tool's output.
  */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: userGroupSchema,
-});
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    data: userGroupSchema,
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
 
 /**
- * Tool for creating new user groups in Xibo CMS
- * 
- * This tool accepts user group details and creates a new user group
- * with appropriate permissions and settings.
+ * Tool to create a new user group in the Xibo CMS.
  */
 export const addUserGroup = createTool({
   id: "add-user-group",
@@ -71,75 +81,66 @@ export const addUserGroup = createTool({
     isShownForAddUser: z.number().optional().describe("Whether to show in user creation (0: no, 1: yes)"),
     defaultHomePageId: z.number().optional().describe("Default home page ID for the user group (optional)"),
   }),
-  outputSchema: apiResponseSchema,
+  outputSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/group`);
-    
-    // Create form data
-    const formData = new URLSearchParams();
-    formData.append("group", context.group);
-    if (context.description) formData.append("description", context.description);
-    if (context.libraryQuota) formData.append("libraryQuota", context.libraryQuota);
-    if (context.isSystemNotification) formData.append("isSystemNotification", context.isSystemNotification.toString());
-    if (context.isDisplayNotification) formData.append("isDisplayNotification", context.isDisplayNotification.toString());
-    if (context.isScheduleNotification) formData.append("isScheduleNotification", context.isScheduleNotification.toString());
-    if (context.isCustomNotification) formData.append("isCustomNotification", context.isCustomNotification.toString());
-    if (context.isShownForAddUser) formData.append("isShownForAddUser", context.isShownForAddUser.toString());
-    if (context.defaultHomePageId) formData.append("defaultHomePageId", context.defaultHomePageId.toString());
+    logger.info(`Attempting to add user group: ${context.group}`);
 
-    logger.info('Creating user group:', {
-      url: url.toString(),
-      group: context.group,
-      hasDescription: !!context.description,
-      hasLibraryQuota: !!context.libraryQuota,
-      notificationSettings: {
-        system: context.isSystemNotification,
-        display: context.isDisplayNotification,
-        schedule: context.isScheduleNotification,
-        custom: context.isCustomNotification
-      }
-    });
-
-    const response = await fetch(url.toString(), {
-      method: "POST",
-      headers: {
-        ...await getAuthHeaders(),
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: formData.toString(),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      const decodedError = decodeErrorMessage(errorText);
-      logger.error('Failed to create user group:', {
-        status: response.status,
-        statusText: response.statusText,
-        error: decodedError
-      });
-      throw new Error(`HTTP error! status: ${response.status}, message: ${decodedError}`);
-    }
-
-    const rawData = await response.json();
     try {
-      const validatedData = apiResponseSchema.parse(rawData);
-      logger.info('User group created successfully:', {
-        groupId: validatedData.data.groupId,
-        group: validatedData.data.group
+      const url = new URL(`${config.cmsUrl}/api/group`);
+      
+      const formData = new URLSearchParams();
+      formData.append("group", context.group);
+      if (context.description) formData.append("description", context.description);
+      if (context.libraryQuota) formData.append("libraryQuota", context.libraryQuota);
+      if (context.isSystemNotification) formData.append("isSystemNotification", context.isSystemNotification.toString());
+      if (context.isDisplayNotification) formData.append("isDisplayNotification", context.isDisplayNotification.toString());
+      if (context.isScheduleNotification) formData.append("isScheduleNotification", context.isScheduleNotification.toString());
+      if (context.isCustomNotification) formData.append("isCustomNotification", context.isCustomNotification.toString());
+      if (context.isShownForAddUser) formData.append("isShownForAddUser", context.isShownForAddUser.toString());
+      if (context.defaultHomePageId) formData.append("defaultHomePageId", context.defaultHomePageId.toString());
+
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        headers: {
+          ...await getAuthHeaders(),
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: formData.toString(),
       });
-      return validatedData;
+
+      const rawData = await response.json();
+
+      if (!response.ok) {
+        const decodedError = decodeErrorMessage(rawData);
+        const message = `Failed to create user group. API responded with status ${response.status}`;
+        logger.error(message, { response: decodedError });
+        return { success: false as const, message, errorData: decodedError };
+      }
+
+      const validationResult = userGroupSchema.safeParse(rawData);
+      if (!validationResult.success) {
+        const message = "API response validation failed";
+        logger.error(message, { error: validationResult.error, data: rawData });
+        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+      }
+
+      const message = `User group '${validationResult.data.group}' created successfully.`;
+      logger.info(message, { groupId: validationResult.data.groupId });
+      return { success: true, data: validationResult.data, message };
     } catch (error) {
-      logger.error('Failed to validate response data:', {
-        error: error instanceof Error ? error.message : "Unknown error",
-        rawData
-      });
-      throw error;
+      const message = "An unexpected error occurred while creating the user group.";
+      logger.error(message, { error });
+      return {
+        success: false as const,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+      };
     }
   },
-});
-
-export default addUserGroup; 
+}); 

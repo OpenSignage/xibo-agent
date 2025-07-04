@@ -11,11 +11,9 @@
  */
 
 /**
- * Xibo CMS User Group Search Tool
- * 
- * This module provides functionality to search user groups in the Xibo CMS system.
- * It implements the user group search API endpoint and handles the necessary validation
- * and data transformation for retrieving user group information.
+ * @module getUserGroups
+ * @description This module provides functionality to search for and retrieve
+ * user groups from the Xibo CMS.
  */
 
 import { z } from "zod";
@@ -23,121 +21,117 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
+import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for user group data validation
- * Defines the structure of user group data in the Xibo CMS system
+ * Schema for the user group data returned by the API.
  */
 const userGroupSchema = z.object({
   groupId: z.number(),
   group: z.string(),
-  description: z.string().nullable().optional(),
-  libraryQuota: z.number().optional(),
-  isSystemNotification: z.number().optional(),
-  isDisplayNotification: z.number().optional(),
-  isScheduleNotification: z.number().optional(),
-  isCustomNotification: z.number().optional(),
-  isShownForAddUser: z.number().optional(),
-  defaultHomePageId: z.number().nullable().optional(),
   isUserSpecific: z.number().optional(),
   isEveryone: z.number().optional(),
+  description: z.string().nullable().optional(),
+  libraryQuota: z.number().nullable().optional(),
+  isSystemNotification: z.number().optional(),
+  isDisplayNotification: z.number().optional(),
   isDataSetNotification: z.number().optional(),
   isLayoutNotification: z.number().optional(),
   isLibraryNotification: z.number().optional(),
   isReportNotification: z.number().optional(),
+  isScheduleNotification: z.number().optional(),
+  isCustomNotification: z.number().optional(),
+  isShownForAddUser: z.number().optional(),
+  defaultHomepageId: z.string().nullable().optional(),
   features: z.array(z.string()).optional(),
   buttons: z.array(z.string()).optional(),
 });
 
 /**
- * Schema for API response validation
- * Expected response format from the Xibo CMS API
+ * Schema for the tool's output.
  */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  message: z.string().optional(),
-  data: z.array(userGroupSchema).optional()
-});
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    data: z.array(userGroupSchema),
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
 
 /**
- * Tool for searching user groups in Xibo CMS
- * 
- * This tool accepts search criteria and retrieves matching user groups
- * from the Xibo CMS system.
+ * Tool to retrieve a list of user groups from the Xibo CMS.
  */
 export const getUserGroups = createTool({
   id: "get-user-groups",
-  description: "Search user groups in Xibo CMS",
+  description: "Search for user groups in Xibo CMS",
   inputSchema: z.object({
-    userGroupId: z.number().optional().describe("User group ID (optional)"),
-    userGroup: z.string().optional().describe("User group name (optional)"),
+    userGroupId: z.number().optional().describe("Filter by a specific User Group ID"),
+    userGroup: z.string().optional().describe("Filter by a user group name (partial match supported)"),
   }),
-  outputSchema: apiResponseSchema,
+  outputSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/group`);
-    
-    // Add query parameters
-    if (context.userGroupId) url.searchParams.append("userGroupId", context.userGroupId.toString());
-    if (context.userGroup) url.searchParams.append("userGroup", context.userGroup);
+    const searchCriteria = (context.userGroupId ? `ID: ${context.userGroupId}` : '') + 
+                           (context.userGroup ? ` Name: ${context.userGroup}` : '');
+    logger.info(`Attempting to get user groups with criteria: ${searchCriteria || 'none'}`);
 
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: await getAuthHeaders(),
-    });
-
-    // Get response text
-    const responseText = await response.text();
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
-    }
-
-    // Parse and validate response data
     try {
-      const rawData = JSON.parse(responseText);
-      
-      // Handle array response
-      const userGroups = Array.isArray(rawData) ? rawData : [rawData];
+      const url = new URL(`${config.cmsUrl}/api/group`);
+      if (context.userGroupId) url.searchParams.append("userGroupId", context.userGroupId.toString());
+      if (context.userGroup) url.searchParams.append("userGroup", context.userGroup);
 
-      // Check if data is empty
-      if (userGroups.length === 0) {
-        const searchCriteria = [];
-        if (context.userGroupId) searchCriteria.push(`ID: ${context.userGroupId}`);
-        if (context.userGroup) searchCriteria.push(`Name: ${context.userGroup}`);
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: await getAuthHeaders(),
+      });
 
-        const criteriaMessage = searchCriteria.length > 0 
-          ? ` with criteria: ${searchCriteria.join(', ')}`
-          : '';
+      const rawData = await response.json();
 
-        logger.info(`No user groups found${criteriaMessage}`);
-        return {
-          success: false,
-          message: `No user groups found${criteriaMessage}`
-        };
+      if (!response.ok) {
+        const decodedError = decodeErrorMessage(rawData);
+        const message = `Failed to get user groups. API responded with status ${response.status}`;
+        logger.error(message, { response: decodedError });
+        return { success: false as const, message, errorData: decodedError };
       }
 
-      // Validate the transformed data
-      const validatedData = {
-        success: true,
-        data: userGroups
-      };
+      // The API might return a single object or an array of objects
+      const userGroups = Array.isArray(rawData) ? rawData : [rawData];
 
-      return apiResponseSchema.parse(validatedData);
+      const validationResult = z.array(userGroupSchema).safeParse(userGroups);
+      if (!validationResult.success) {
+        const message = "API response validation failed";
+        logger.error(message, { error: validationResult.error, data: rawData });
+        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+      }
+
+      if (validationResult.data.length === 0) {
+        const message = "No user groups found matching the criteria.";
+        logger.info(message, { criteria: context });
+        return { success: true, data: [], message };
+      }
+
+      const message = `Successfully retrieved ${validationResult.data.length} user group(s).`;
+      logger.info(message);
+      return { success: true, data: validationResult.data, message };
     } catch (error) {
-      logger.error(`Failed to parse response: ${error instanceof Error ? error.message : "Unknown error"}`, { 
-        error,
-        responseText
-      });
+      const message = "An unexpected error occurred while getting user groups.";
+      logger.error(message, { error });
       return {
-        success: false,
-        message: error instanceof Error ? error.message : "Invalid response format from CMS API"
+        success: false as const,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
       };
     }
   },
-});
-
-export default getUserGroups; 
+}); 
