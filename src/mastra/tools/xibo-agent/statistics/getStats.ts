@@ -46,26 +46,21 @@ const statisticsDataSchema = z.object({
 });
 
 /**
- * Defines the schema for a successful response, containing an array of stats and a success flag.
+ * Schema for the tool's output.
  */
-const successSchema = z.object({
-  success: z.literal(true),
-  data: z
-    .array(statisticsDataSchema)
-    .describe("An array of statistics data records."),
-});
-
-/**
- * Defines the schema for a failed operation, including a success flag, a message, and optional error details.
- */
-const errorSchema = z.object({
-  success: z.literal(false),
-  message: z.string().describe("A human-readable error message."),
-  error: z
-    .any()
-    .optional()
-    .describe("Optional technical details about the error."),
-});
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    data: z.array(statisticsDataSchema),
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
 
 /**
  * A tool for retrieving statistics data from the Xibo CMS.
@@ -108,9 +103,9 @@ export const getStats = createTool({
       .optional()
       .describe("Filter by a list of Layout IDs."),
     parentCampaignId: z
-      .number()
+      .array(z.number())
       .optional()
-      .describe("Filter by a specific parent Campaign ID."),
+      .describe("Filter by a list of parent Campaign IDs."),
     mediaId: z
       .array(z.number())
       .optional()
@@ -120,30 +115,26 @@ export const getStats = createTool({
       .optional()
       .describe("Filter by a single Campaign ID."),
     returnDisplayLocalTime: z
-      .boolean()
+      .union([z.boolean(), z.number(), z.string()])
       .optional()
-      .describe("Return results in the display's local time. The API accepts boolean true, 1, or 'On'."),
+      .describe("Accepts a boolean (true), a number (1), or the string 'On' to return results in the display's local time."),
     returnDateFormat: z
       .string()
       .optional()
       .describe("A PHP-style date format string for how the returned dates should be formatted."),
     embed: z
-      .string()
+      .array(z.enum(["layoutTags", "displayTags", "mediaTags"]))
       .optional()
-      .describe("Embed additional data. Options include: 'layoutTags', 'displayTags', 'mediaTags'. Can be a comma-separated list."),
+      .describe("Embed additional data. Options include: 'layoutTags', 'displayTags', 'mediaTags'."),
   }),
-  outputSchema: z
-    .union([successSchema, errorSchema])
-    .describe("An array of statistics data records."),
-  execute: async ({
-    context,
-  }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
     // Ensure the CMS URL is configured before proceeding.
     if (!config.cmsUrl) {
       const errorMessage = "CMS URL is not configured.";
       logger.error(errorMessage);
       return {
-        success: false,
+        success: false as const,
         message: errorMessage,
       };
     }
@@ -201,18 +192,15 @@ export const getStats = createTool({
     // Handle non-successful HTTP responses.
     if (!response.ok) {
       const decodedText = decodeErrorMessage(responseText);
-      const errorMessage = `Failed to get statistics. API responded with status ${response.status}.`;
-      logger.error(errorMessage, {
+      const message = `Failed to get statistics. API responded with status ${response.status}.`;
+      logger.error(message, {
         status: response.status,
         response: decodedText,
       });
       return {
-        success: false,
-        message: `${errorMessage} Message: ${decodedText}`,
-        error: {
-          statusCode: response.status,
-          responseBody: responseData,
-        },
+        success: false as const,
+        message: message,
+        errorData: responseData,
       };
     }
 
@@ -222,28 +210,26 @@ export const getStats = createTool({
 
     // If validation fails, log the details and throw an error.
     if (!validationResult.success) {
-      const errorMessage = "Statistics response validation failed.";
-      logger.error(errorMessage, {
+      const message = "Statistics response validation failed.";
+      logger.error(message, {
         error: validationResult.error.issues,
         data: responseData,
       });
       return {
-        success: false,
-        message: errorMessage,
-        error: {
-          validationIssues: validationResult.error.issues,
-          receivedData: responseData,
-        },
+        success: false as const,
+        message: message,
+        error: validationResult.error,
+        errorData: responseData,
       };
     }
 
     // On success, log the number of records retrieved and return the validated data.
-    logger.info(
-      `Successfully retrieved ${validationResult.data.length} statistics records.`
-    );
+    const message = `Successfully retrieved ${validationResult.data.length} statistics records.`;
+    logger.info(message);
     return {
-      success: true,
+      success: true as const,
       data: validationResult.data,
+      message: message,
     };
   },
 });
