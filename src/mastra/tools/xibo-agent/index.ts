@@ -36,7 +36,8 @@ import { getResolutions, addResolution, editResolution, deleteResolution } from 
 import { getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles,
   generateQRCode } from './etc';
 import { getFonts, getFontDetails, uploadFont, downloadFont, deleteFont } from './font';
-import { getUserGroups, addUserGroup } from './usergroup';
+import { getUserGroups, addUserGroup, deleteUserGroup, editUserGroup, copyUserGroup,
+  assignUserToGroup, unassignUserFromGroup } from './usergroup';
 import { getPlaylists, addPlaylist, editPlaylist, deletePlaylist, copyPlaylist,
   assignLibraryItems, getPlaylistUsage, getPlaylistUsageByLayouts, setPlaylistEnableStat,
    selectPlaylistFolder } from './playlist';
@@ -140,7 +141,8 @@ export function getTools() {
     // Font
     getFonts,getFontDetails,uploadFont,downloadFont,deleteFont,
     // User group
-    getUserGroups,addUserGroup,
+    getUserGroups,addUserGroup,deleteUserGroup,editUserGroup,copyUserGroup,
+    assignUserToGroup,unassignUserFromGroup,
     // Playlist
     getPlaylists,addPlaylist,editPlaylist,deletePlaylist,copyPlaylist,
     assignLibraryItems,getPlaylistUsage,getPlaylistUsageByLayouts,
