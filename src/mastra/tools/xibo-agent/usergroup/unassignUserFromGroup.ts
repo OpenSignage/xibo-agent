@@ -22,6 +22,7 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
+import { userGroupSchema } from "./schemas";
 
 /**
  * Schema for the tool's output.
@@ -30,6 +31,7 @@ const outputSchema = z.union([
   z.object({
     success: z.literal(true),
     message: z.string(),
+    data: z.array(userGroupSchema).optional(),
   }),
   z.object({
     success: z.literal(false),
@@ -92,9 +94,17 @@ export const unassignUserFromGroup = createTool({
         return { success: false as const, message, errorData: decodedError };
       }
       
+      const validationResult = z.array(userGroupSchema).safeParse(rawData);
+
+      if (!validationResult.success) {
+        const message = "Users unassigned from group, but with an unexpected and invalid response format.";
+        logger.warn(message, { userGroupId: context.userGroupId, error: validationResult.error, data: rawData });
+        return { success: true, message };
+      }
+
       const message = "Users unassigned from group, but with an unexpected response.";
       logger.warn(message, { userGroupId: context.userGroupId, data: rawData });
-      return { success: true, message };
+      return { success: true, message, data: validationResult.data };
 
     } catch (error) {
       const message = "An unexpected error occurred while unassigning users from the group.";

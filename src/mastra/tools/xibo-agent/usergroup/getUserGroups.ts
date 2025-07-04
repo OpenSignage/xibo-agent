@@ -22,30 +22,7 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
-
-/**
- * Schema for the user group data returned by the API.
- */
-const userGroupSchema = z.object({
-  groupId: z.number(),
-  group: z.string(),
-  isUserSpecific: z.number().optional(),
-  isEveryone: z.number().optional(),
-  description: z.string().nullable().optional(),
-  libraryQuota: z.number().nullable().optional(),
-  isSystemNotification: z.number().optional(),
-  isDisplayNotification: z.number().optional(),
-  isDataSetNotification: z.number().optional(),
-  isLayoutNotification: z.number().optional(),
-  isLibraryNotification: z.number().optional(),
-  isReportNotification: z.number().optional(),
-  isScheduleNotification: z.number().optional(),
-  isCustomNotification: z.number().optional(),
-  isShownForAddUser: z.number().optional(),
-  defaultHomepageId: z.string().nullable().optional(),
-  features: z.array(z.string()).optional(),
-  buttons: z.array(z.string()).optional(),
-});
+import { userGroupSchema } from "./schemas";
 
 /**
  * Schema for the tool's output.

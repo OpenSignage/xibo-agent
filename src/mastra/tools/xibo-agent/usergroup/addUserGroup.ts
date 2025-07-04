@@ -22,30 +22,7 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
-
-/**
- * Schema for the user group data returned by the API.
- */
-const userGroupSchema = z.object({
-  groupId: z.number(),
-  group: z.string(),
-  isUserSpecific: z.number().optional(),
-  isEveryone: z.number().optional(),
-  description: z.string().nullable().optional(),
-  libraryQuota: z.number().nullable().optional(),
-  isSystemNotification: z.number().optional(),
-  isDisplayNotification: z.number().optional(),
-  isDataSetNotification: z.number().optional(),
-  isLayoutNotification: z.number().optional(),
-  isLibraryNotification: z.number().optional(),
-  isReportNotification: z.number().optional(),
-  isScheduleNotification: z.number().optional(),
-  isCustomNotification: z.number().optional(),
-  isShownForAddUser: z.number().optional(),
-  defaultHomepageId: z.string().nullable().optional(),
-  features: z.array(z.string()).optional(),
-  buttons: z.array(z.string()).optional(),
-});
+import { userGroupSchema } from "./schemas";
 
 /**
  * Schema for the tool's output.
@@ -53,7 +30,7 @@ const userGroupSchema = z.object({
 const outputSchema = z.union([
   z.object({
     success: z.literal(true),
-    data: userGroupSchema,
+    data: z.array(userGroupSchema),
     message: z.string(),
   }),
   z.object({
@@ -123,15 +100,16 @@ export const addUserGroup = createTool({
         return { success: false as const, message, errorData: decodedError };
       }
 
-      const validationResult = userGroupSchema.safeParse(rawData);
+      const userGroups = Array.isArray(rawData) ? rawData : [rawData];
+      const validationResult = z.array(userGroupSchema).safeParse(userGroups);
       if (!validationResult.success) {
         const message = "API response validation failed";
         logger.error(message, { error: validationResult.error, data: rawData });
         return { success: false as const, message, error: validationResult.error, errorData: rawData };
       }
 
-      const message = `User group '${validationResult.data.group}' created successfully.`;
-      logger.info(message, { groupId: validationResult.data.groupId });
+      const message = `User group '${validationResult.data[0].group}' created successfully.`;
+      logger.info(message, { groupId: validationResult.data[0].groupId });
       return { success: true, data: validationResult.data, message };
     } catch (error) {
       const message = "An unexpected error occurred while creating the user group.";
