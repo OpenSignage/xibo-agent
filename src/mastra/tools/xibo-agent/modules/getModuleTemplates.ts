@@ -26,7 +26,7 @@ import { logger } from "../../../index";
  * Schema for the 'stencil' object within a module template.
  */
 const stencilSchema = z.object({
-  elementGroups: z.array(z.string()).optional(),
+  elementGroups: z.array(z.any()).optional(),
 }).nullable();
 
 /**
