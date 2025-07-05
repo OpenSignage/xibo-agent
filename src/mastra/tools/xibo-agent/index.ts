@@ -67,7 +67,8 @@ import { getDisplayProfiles, addDisplayProfile, editDisplayProfile, deleteDispla
 import { getDataSets, addDataSet, editDataSet, deleteDataSet, getDataSetColumns, addDataSetColumn,
   editDataSetColumn, deleteDataSetColumn, getDataSetData, addDataSetData, editDataSetData,
   deleteDataSetData, importDataSetData, exportDataSetData, importDataSetDataJson, copyDataSet,
-  manageDataSetRss, manageDataSetConnector, selectDataSetFolder } from './dataset';
+  selectDataSetFolder, getDataSetRss, addDataSetRss, editDataSetRss, 
+  deleteDataSetRss, editDataSetConnector } from './dataset';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -185,8 +186,8 @@ export function getTools() {
     deletePlayerVersion,downloadPlayerVersion,editPlayerVersion,uploadPlayerSoftware,
     // Widget
     addWidget,editWidget,deleteWidget,editWidgetTransition,editWidgetAudio,deleteWidgetAudio,
-    setWidgetRegion,saveWidgetElements,setWidgetDataType,getWidgetData,addWidgetData,editWidgetData,
-    deleteWidgetData,
+    setWidgetRegion,saveWidgetElements,setWidgetDataType,getWidgetData,addWidgetData,
+    editWidgetData,deleteWidgetData,
     // Command
     addCommand,deleteCommand,editCommand,getCommands,
     // Display profile
@@ -196,6 +197,7 @@ export function getTools() {
     getDataSetColumns,addDataSetColumn,editDataSetColumn,deleteDataSetColumn,
     getDataSetData,addDataSetData,editDataSetData,deleteDataSetData,
     importDataSetData,exportDataSetData,importDataSetDataJson,copyDataSet,
-    manageDataSetRss,manageDataSetConnector,selectDataSetFolder,
+    selectDataSetFolder,getDataSetRss,addDataSetRss,editDataSetRss,
+    deleteDataSetRss,editDataSetConnector,
   };
 }
