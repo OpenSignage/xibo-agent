@@ -1,42 +1,117 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * @module getDisplayProfiles
+ * @description Provides a tool to retrieve display profiles from the Xibo CMS.
+ */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { logger } from "../../../index";
+import { decodeErrorMessage } from "../utility/error";
+import { displayProfileSchema } from './schemas';
 
+/**
+ * Schema for the tool's output.
+ */
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    data: z.array(displayProfileSchema),
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
+
+/**
+ * A tool for retrieving display profiles.
+ */
 export const getDisplayProfiles = createTool({
   id: "get-display-profiles",
-  description: "ディスプレイプロファイルの検索",
+  description: "Search and retrieve display profiles.",
   inputSchema: z.object({
-    displayProfileId: z.number().optional(),
-    displayProfile: z.string().optional(),
-    type: z.string().optional(),
-    embed: z.string().optional(),
+    displayProfileId: z.number().optional().describe("Filter by DisplayProfile Id"),
+    displayProfile: z.string().optional().describe("Filter by DisplayProfile Name"),
+    type: z.string().optional().describe("Filter by DisplayProfile Type (windows|android|lg)"),
+    embed: z.string().default("config,commands,configWithDefault").optional().describe("Embed related data such as config,commands,configWithDefault"),
   }),
-  outputSchema: z.string(),
+  outputSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/displayprofile`);
-    if (context.displayProfileId) url.searchParams.append("displayProfileId", context.displayProfileId.toString());
-    if (context.displayProfile) url.searchParams.append("displayProfile", context.displayProfile);
-    if (context.type) url.searchParams.append("type", context.type);
-    if (context.embed) url.searchParams.append("embed", context.embed);
+    const url = new URL(`${config.cmsUrl}/api/displayprofile`);
+    const params = new URLSearchParams();
+    if (context.displayProfileId) params.append("displayProfileId", context.displayProfileId.toString());
+    if (context.displayProfile) params.append("displayProfile", context.displayProfile);
+    if (context.type) params.append("type", context.type);
+    if (context.embed) params.append("embed", context.embed);
+    url.search = params.toString();
 
-    console.log(`Requesting URL: ${url.toString()}`);
+    logger.info(`Requesting display profiles from URL: ${url.toString()}`);
 
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: await getAuthHeaders(),
-    });
+    try {
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: await getAuthHeaders(),
+      });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        const decodedError = decodeErrorMessage(responseData);
+        const message = `Failed to retrieve display profiles. API responded with status ${response.status}.`;
+        logger.error(message, { response: decodedError });
+        return { success: false as const, message, errorData: decodedError };
+      }
+
+      const validationResult = z.array(displayProfileSchema).safeParse(responseData);
+
+      if (!validationResult.success) {
+        const message = "Display profiles response validation failed.";
+        logger.error(message, { error: validationResult.error, data: responseData });
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error,
+          errorData: responseData,
+        };
+      }
+      
+      const message = `Successfully retrieved ${validationResult.data.length} display profiles.`;
+      logger.info(message);
+      return {
+        success: true as const,
+        data: validationResult.data,
+        message,
+      };
+    } catch (error) {
+      const message = "An unexpected error occurred while retrieving display profiles.";
+      logger.error(message, { error });
+      return {
+        success: false as const,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+      };
     }
-
-    const data = await response.json();
-    console.log("Display profiles retrieved successfully");
-    return JSON.stringify(data);
   },
 }); 
