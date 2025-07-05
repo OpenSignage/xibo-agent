@@ -64,6 +64,10 @@ import { addWidget, editWidget, deleteWidget, editWidgetTransition, editWidgetAu
   deleteWidgetData } from './widget';
 import { addCommand, deleteCommand, editCommand, getCommands } from './command';
 import { getDisplayProfiles, addDisplayProfile, editDisplayProfile, deleteDisplayProfile } from './displayprofile';
+import { getDataSets, addDataSet, editDataSet, deleteDataSet, getDataSetColumns, addDataSetColumn,
+  editDataSetColumn, deleteDataSetColumn, getDataSetData, addDataSetData, editDataSetData,
+  deleteDataSetData, importDataSetData, exportDataSetData, importDataSetDataJson, copyDataSet,
+  manageDataSetRss, manageDataSetConnector, selectDataSetFolder } from './dataset';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -102,6 +106,7 @@ export * from './news';         // News management
 export * from './weather';      // Weather management
 export * from './syncGroup';    // Synchronization group management
 export * from './command';      // Command management
+export * from './dataset';      // Dataset management
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -186,5 +191,11 @@ export function getTools() {
     addCommand,deleteCommand,editCommand,getCommands,
     // Display profile
     getDisplayProfiles,addDisplayProfile,editDisplayProfile,deleteDisplayProfile,
+    // Dataset
+    getDataSets,addDataSet,editDataSet,deleteDataSet,
+    getDataSetColumns,addDataSetColumn,editDataSetColumn,deleteDataSetColumn,
+    getDataSetData,addDataSetData,editDataSetData,deleteDataSetData,
+    importDataSetData,exportDataSetData,importDataSetDataJson,copyDataSet,
+    manageDataSetRss,manageDataSetConnector,selectDataSetFolder,
   };
 }
