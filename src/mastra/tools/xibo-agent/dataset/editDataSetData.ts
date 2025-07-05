@@ -48,7 +48,10 @@ export const editDataSetData = createTool({
   inputSchema: z.object({
     dataSetId: z.number().describe("The ID of the dataset the data belongs to."),
     rowId: z.number().describe("The ID of the data row to edit."),
-    rowData: z.record(z.string(), z.any()).describe("An object representing the new row data, with column headings as keys."),
+    rowData: z.array(z.object({
+      key: z.string().describe("The column heading."),
+      value: z.any().describe("The new value for the column."),
+    })).describe("An array of key-value pairs representing the new row data."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -64,9 +67,9 @@ export const editDataSetData = createTool({
 
     try {
       const params = new URLSearchParams();
-      Object.entries(rowData).forEach(([key, value]) => {
+      rowData.forEach(item => {
         // The API expects keys in the format 'colName[colHeading]'
-        params.append(`colName[${key}]`, value.toString());
+        params.append(`colName[${item.key}]`, String(item.value));
       });
 
       const response = await fetch(url.toString(), {

@@ -69,6 +69,7 @@ import { getDataSets, addDataSet, editDataSet, deleteDataSet, getDataSetColumns,
   deleteDataSetData, importDataSetData, exportDataSetData, importDataSetDataJson, copyDataSet,
   selectDataSetFolder, getDataSetRss, addDataSetRss, editDataSetRss, 
   deleteDataSetRss, editDataSetConnector } from './dataset';
+import { addAction, deleteAction, getActions } from './action';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -155,7 +156,8 @@ export function getTools() {
     assignLibraryItems,getPlaylistUsage,getPlaylistUsageByLayouts,
     setPlaylistEnableStat,selectPlaylistFolder,
     // Statistics
-    getStats,getTimeDisconnected,getExportStatsCount,
+    getStats,getTimeDisconnected,
+    getExportStatsCount,
     // Tags
     getTags,addTag,editTag,deleteTag,
     // Library
@@ -195,9 +197,11 @@ export function getTools() {
     // Dataset
     getDataSets,addDataSet,editDataSet,deleteDataSet,
     getDataSetColumns,addDataSetColumn,editDataSetColumn,deleteDataSetColumn,
-    getDataSetData,addDataSetData,editDataSetData,deleteDataSetData,
-    importDataSetData,exportDataSetData,importDataSetDataJson,copyDataSet,
+    getDataSetData,addDataSetData,editDataSetData,importDataSetDataJson,
+    deleteDataSetData,importDataSetData,exportDataSetData,copyDataSet,
     selectDataSetFolder,getDataSetRss,addDataSetRss,editDataSetRss,
     deleteDataSetRss,editDataSetConnector,
+    // Action
+    addAction,deleteAction,getActions,
   };
 }

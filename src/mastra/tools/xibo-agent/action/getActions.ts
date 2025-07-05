@@ -1,79 +1,114 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * @module getActions
+ * @description Provides a tool to retrieve a list of actions from the Xibo CMS,
+ * with optional filtering capabilities.
+ */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
+import { logger } from "../../../index";
+import { decodeErrorMessage } from "../utility/error";
+import { actionSchema } from "./schemas";
 
-const actionSchema = z.object({
-  actionId: z.number(),
-  ownerId: z.number(),
-  triggerType: z.string(),
-  triggerCode: z.string().optional(),
-  actionType: z.string(),
-  source: z.string(),
-  sourceId: z.number(),
-  target: z.string(),
-  targetId: z.number().optional(),
-  widgetId: z.number().optional(),
-});
+/**
+ * Schema for the tool's output, covering success and failure cases.
+ */
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    data: z.array(actionSchema),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
 
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.array(actionSchema),
-});
-
+/**
+ * Tool for retrieving a list of actions from the Xibo CMS.
+ */
 export const getActions = createTool({
   id: "get-actions",
-  description: "アクションを検索",
+  description: "Get a list of actions, with optional filters.",
   inputSchema: z.object({
-    actionId: z.number().optional(),
-    ownerId: z.number().optional(),
-    triggerType: z.string().optional(),
-    triggerCode: z.string().optional(),
-    actionType: z.string().optional(),
-    source: z.string().optional(),
-    sourceId: z.number().optional(),
-    target: z.string().optional(),
-    targetId: z.number().optional(),
-    layoutId: z.number().optional(),
-    sourceOrTargetId: z.number().optional(),
+    actionId: z.number().optional().describe("Filter by a specific Action ID."),
+    action: z.string().optional().describe("Filter by a descriptive action name (supports filtering with %)."),
+    displayGroupId: z.number().optional().describe("Filter by a specific Display Group ID."),
+    actionType: z.string().optional().describe("Filter by a specific action type."),
+    ownerId: z.number().optional().describe("Filter by a specific owner User ID."),
   }),
-  outputSchema: apiResponseSchema,
+  outputSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
-
-    const url = new URL(`${config.cmsUrl}/action`);
     
-    // クエリパラメータの追加
-    if (context.actionId) url.searchParams.append("actionId", context.actionId.toString());
-    if (context.ownerId) url.searchParams.append("ownerId", context.ownerId.toString());
-    if (context.triggerType) url.searchParams.append("triggerType", context.triggerType);
-    if (context.triggerCode) url.searchParams.append("triggerCode", context.triggerCode);
-    if (context.actionType) url.searchParams.append("actionType", context.actionType);
-    if (context.source) url.searchParams.append("source", context.source);
-    if (context.sourceId) url.searchParams.append("sourceId", context.sourceId.toString());
-    if (context.target) url.searchParams.append("target", context.target);
-    if (context.targetId) url.searchParams.append("targetId", context.targetId.toString());
-    if (context.layoutId) url.searchParams.append("layoutId", context.layoutId.toString());
-    if (context.sourceOrTargetId) url.searchParams.append("sourceOrTargetId", context.sourceOrTargetId.toString());
-
-    console.log(`Requesting URL: ${url.toString()}`);
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: await getAuthHeaders(),
+    const url = new URL(`${config.cmsUrl}/api/action`);
+    
+    // Append optional query parameters
+    Object.entries(context).forEach(([key, value]) => {
+        if (value !== undefined) {
+            url.searchParams.append(key, String(value));
+        }
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    logger.info(`Requesting actions from ${url.toString()}`);
+    
+    try {
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: await getAuthHeaders(),
+      });
+      
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        const decodedError = decodeErrorMessage(responseData);
+        const message = `Failed to get actions. API responded with status ${response.status}.`;
+        logger.error(message, { response: decodedError });
+        return { success: false as const, message, errorData: decodedError };
+      }
+
+      const validationResult = z.array(actionSchema).safeParse(responseData);
+
+      if (!validationResult.success) {
+        const message = "Get actions response validation failed.";
+        logger.error(message, { error: validationResult.error, data: responseData });
+        return { 
+          success: false as const, 
+          message, 
+          error: validationResult.error, 
+          errorData: responseData,
+        };
+      }
+      
+      return { success: true as const, data: validationResult.data };
+
+    } catch (error) {
+      const message = "An unexpected error occurred while getting actions.";
+      logger.error(message, { error });
+      return {
+        success: false as const,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+      };
     }
-
-    const rawData = await response.json();
-    const validatedData = apiResponseSchema.parse(rawData);
-    console.log("Actions retrieved successfully");
-    return validatedData;
   },
-});
-
-export default getActions; 
+}); 

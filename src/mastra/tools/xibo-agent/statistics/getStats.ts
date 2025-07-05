@@ -70,62 +70,20 @@ export const getStats = createTool({
   id: "get-stats",
   description: "Search and retrieve statistics data from Xibo CMS.",
   inputSchema: z.object({
-    type: z
-      .enum(["Layout", "Media", "Widget"])
-      .optional()
-      .describe("The type of stat to return. Can be 'Layout', 'Media', or 'Widget'."),
-    fromDt: z
-      .string()
-      .optional()
-      .describe("The start date for the filter (e.g., 'YYYY-MM-DD HH:MM:SS'). Defaults to 24 hours ago."),
-    toDt: z
-      .string()
-      .optional()
-      .describe("The end date for the filter (e.g., 'YYYY-MM-DD HH:MM:SS'). Defaults to the current time."),
-    statDate: z
-      .string()
-      .optional()
-      .describe("Filter for records on or after a specific date (YYYY-MM-DD)."),
-    statId: z
-      .string()
-      .optional()
-      .describe("Filter for records with a statId greater than the specified value."),
-    displayId: z
-      .number()
-      .optional()
-      .describe("Filter by a single Display ID."),
-    displayIds: z
-      .array(z.number())
-      .optional()
-      .describe("Filter by a list of Display IDs."),
-    layoutId: z
-      .array(z.number())
-      .optional()
-      .describe("Filter by a list of Layout IDs."),
-    parentCampaignId: z
-      .array(z.number())
-      .optional()
-      .describe("Filter by a list of parent Campaign IDs."),
-    mediaId: z
-      .array(z.number())
-      .optional()
-      .describe("Filter by a list of Media IDs."),
-    campaignId: z
-      .number()
-      .optional()
-      .describe("Filter by a single Campaign ID."),
-    returnDisplayLocalTime: z
-      .union([z.boolean(), z.number(), z.string()])
-      .optional()
-      .describe("Accepts a boolean (true), a number (1), or the string 'On' to return results in the display's local time."),
-    returnDateFormat: z
-      .string()
-      .optional()
-      .describe("A PHP-style date format string for how the returned dates should be formatted."),
-    embed: z
-      .array(z.enum(["layoutTags", "displayTags", "mediaTags"]))
-      .optional()
-      .describe("Embed additional data. Options include: 'layoutTags', 'displayTags', 'mediaTags'."),
+    type: z.enum(["Layout", "Media", "Widget"]).optional().describe("The type of stat to return. Can be 'Layout', 'Media', or 'Widget'."),
+    fromDt: z.string().optional().describe("The start date for the filter (e.g., 'YYYY-MM-DD HH:MM:SS'). Defaults to 24 hours ago."),
+    toDt: z.string().optional().describe("The end date for the filter (e.g., 'YYYY-MM-DD HH:MM:SS'). Defaults to the current time."),
+    statDate: z.string().optional().describe("Filter for records on or after a specific date (YYYY-MM-DD)."),
+    statId: z.string().optional().describe("Filter for records with a statId greater than the specified value."),
+    displayId: z.number().optional().describe("Filter by a single Display ID."),
+    displayIds: z.array(z.number()).optional().describe("Filter by a list of Display IDs."),
+    layoutId: z.array(z.number()).optional().describe("Filter by a list of Layout IDs."),
+    parentCampaignId: z.array(z.number()).optional().describe("Filter by a list of parent Campaign IDs."),
+    mediaId: z.array(z.number()).optional().describe("Filter by a list of Media IDs."),
+    campaignId: z.number().optional().describe("Filter by a single Campaign ID."),
+    returnDisplayLocalTime: z.string().optional().describe("Return results in the display's local time. Use 'on', '1', or 'true'."),
+    returnDateFormat: z.string().optional().describe("A PHP-style date format string for how the returned dates should be formatted."),
+    embed: z.array(z.enum(["layoutTags", "displayTags", "mediaTags"])).optional().describe("Embed additional data. Options include: 'layoutTags', 'displayTags', 'mediaTags'."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -233,5 +191,3 @@ export const getStats = createTool({
     };
   },
 });
-
-export default getStats; 

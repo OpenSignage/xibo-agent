@@ -26,7 +26,12 @@ import { decodeErrorMessage } from "../utility/error";
  */
 const importJsonSchema = z.object({
   uniqueKeys: z.array(z.string()).describe("An array of column headings to use as a unique key for matching rows."),
-  rows: z.array(z.record(z.string(), z.any())).describe("An array of objects, where each object represents a row."),
+  rows: z.array(
+    z.array(z.object({
+      key: z.string().describe("The column heading."),
+      value: z.any().describe("The value for the column."),
+    }))
+  ).describe("An array of rows, where each row is an array of key-value objects."),
 });
 
 /**
@@ -68,6 +73,19 @@ export const importDataSetDataJson = createTool({
     const url = new URL(`${config.cmsUrl}/api/dataset/importjson/${dataSetId}`);
     logger.info(`Attempting to import JSON data into dataset ID: ${dataSetId}`);
 
+    // Transform the input data into the format the API expects
+    const transformedRows = jsonData.rows.map(rowArray => {
+      const rowObject: { [key: string]: any } = {};
+      rowArray.forEach(item => {
+        rowObject[item.key] = item.value;
+      });
+      return rowObject;
+    });
+    const apiBody = {
+      uniqueKeys: jsonData.uniqueKeys,
+      rows: transformedRows,
+    };
+
     try {
       const response = await fetch(url.toString(), {
         method: "POST",
@@ -75,7 +93,7 @@ export const importDataSetDataJson = createTool({
           ...await getAuthHeaders(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(jsonData),
+        body: JSON.stringify(apiBody),
       });
 
       const responseData = await response.json();
