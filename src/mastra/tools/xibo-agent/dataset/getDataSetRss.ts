@@ -11,25 +11,24 @@
  */
 
 /**
- * @module getDataSetData
- * @description Provides a tool to retrieve all data rows for a specific dataset from the Xibo CMS.
+ * @module getDataSetRss
+ * @description Provides a tool to retrieve all RSS feeds for a specific dataset from the Xibo CMS.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { dataSetDataSchema } from "./schemas";
+import { dataSetRssSchema } from "./schemas";
 import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
 
 /**
  * Schema for the tool's output, covering success and failure cases.
- * The success data is an array of dataset data rows.
  */
 const outputSchema = z.union([
   z.object({
     success: z.literal(true),
-    data: z.array(dataSetDataSchema),
+    data: z.array(dataSetRssSchema),
   }),
   z.object({
     success: z.literal(false),
@@ -40,13 +39,13 @@ const outputSchema = z.union([
 ]);
 
 /**
- * Tool for retrieving all data rows for a specific dataset.
+ * Tool for retrieving all RSS feeds for a specific dataset.
  */
-export const getDataSetData = createTool({
-  id: "get-data-set-data",
-  description: "Get all data rows for a specific dataset.",
+export const getDataSetRss = createTool({
+  id: "get-data-set-rss",
+  description: "Get all RSS feeds for a specific dataset.",
   inputSchema: z.object({
-    dataSetId: z.number().describe("The ID of the dataset to retrieve data for."),
+    dataSetId: z.number().describe("The ID of the dataset to retrieve RSS feeds for."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -56,8 +55,8 @@ export const getDataSetData = createTool({
       return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/dataset/data/${context.dataSetId}`);
-    logger.info(`Requesting data for dataset ID: ${context.dataSetId}`);
+    const url = new URL(`${config.cmsUrl}/api/dataset/${context.dataSetId}/rss`);
+    logger.info(`Requesting RSS feeds for dataset ID: ${context.dataSetId}`);
 
     try {
       const response = await fetch(url.toString(), {
@@ -69,15 +68,15 @@ export const getDataSetData = createTool({
 
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
-        const message = `Failed to retrieve dataset data. API responded with status ${response.status}.`;
+        const message = `Failed to retrieve RSS feeds. API responded with status ${response.status}.`;
         logger.error(message, { response: decodedError });
         return { success: false as const, message, errorData: decodedError };
       }
 
-      const validationResult = z.array(dataSetDataSchema).safeParse(responseData);
+      const validationResult = z.array(dataSetRssSchema).safeParse(responseData);
 
       if (!validationResult.success) {
-        const message = "Dataset data response validation failed.";
+        const message = "RSS feeds response validation failed.";
         logger.error(message, { error: validationResult.error, data: responseData });
         return {
           success: false as const,
@@ -87,14 +86,12 @@ export const getDataSetData = createTool({
         };
       }
       
-      const message = `Successfully retrieved ${validationResult.data.length} data rows for dataset ID: ${context.dataSetId}.`;
-      logger.info(message);
       return {
         success: true as const,
         data: validationResult.data,
       };
     } catch (error) {
-      const message = "An unexpected error occurred while retrieving dataset data.";
+      const message = "An unexpected error occurred while retrieving RSS feeds.";
       logger.error(message, { error });
       return {
         success: false as const,

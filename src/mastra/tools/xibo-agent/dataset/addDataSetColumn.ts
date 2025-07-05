@@ -29,7 +29,6 @@ const outputSchema = z.union([
   z.object({
     success: z.literal(true),
     data: dataSetColumnSchema,
-    message: z.string(),
   }),
   z.object({
     success: z.literal(false),
@@ -48,11 +47,17 @@ export const addDataSetColumn = createTool({
   inputSchema: z.object({
     dataSetId: z.number().describe("The ID of the dataset to add the column to."),
     heading: z.string().describe("The heading for the new column."),
-    dataTypeId: z.number().describe("The ID of the data type for the new column."),
-    listContent: z.string().optional().describe("Content for list-based data types."),
-    columnOrder: z.number().optional().describe("The display order for the column."),
-    formula: z.string().optional().describe("A formula to calculate the column's value."),
-    remoteField: z.string().optional().describe("The field name in the remote data source."),
+    dataTypeId: z.number().describe("The ID of the data type for the new column. (1:String, 2:Number, 3:Date, 4:External Image, 5:library Image, 6:HTML)"),
+    columnOrder: z.number().describe("The display order for this column."),
+    dataSetColumnTypeId: z.number().optional().describe("The column type for this column.(1:Value, 2:Formula, 3:Remote)"),
+    listContent: z.string().optional().describe("A comma-separated list of content for drop-downs."),
+    formula: z.string().optional().describe("A formula to calculate the column's value (MySQL SELECT syntax)."),
+    remoteField: z.string().optional().describe("JSON-String to select Data from the Remote DataSet."),
+    showFilter: z.number().optional().describe("Flag to show a filter for this column (0 or 1)."),
+    showSort: z.number().optional().describe("Flag to enable sorting for this column (0 or 1)."),
+    tooltip: z.string().optional().describe("Help text to be displayed when entering data for this column."),
+    isRequired: z.number().optional().describe("Flag indicating whether a value must be provided for this column (0 or 1)."),
+    dateFormat: z.string().optional().describe("PHP date format for dates in the remote DataSet source."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -110,7 +115,6 @@ export const addDataSetColumn = createTool({
       return {
         success: true as const,
         data: validationResult.data,
-        message,
       };
     } catch (error) {
       const message = "An unexpected error occurred while adding the dataset column.";

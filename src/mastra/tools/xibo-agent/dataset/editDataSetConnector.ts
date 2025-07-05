@@ -11,25 +11,24 @@
  */
 
 /**
- * @module getDataSetData
- * @description Provides a tool to retrieve all data rows for a specific dataset from the Xibo CMS.
+ * @module editDataSetConnector
+ * @description Provides a tool to edit the data connector for a dataset in the Xibo CMS.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { dataSetDataSchema } from "./schemas";
 import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
+import { dataSetConnectorSchema } from "./schemas";
 
 /**
  * Schema for the tool's output, covering success and failure cases.
- * The success data is an array of dataset data rows.
  */
 const outputSchema = z.union([
   z.object({
     success: z.literal(true),
-    data: z.array(dataSetDataSchema),
+    data: dataSetConnectorSchema,
   }),
   z.object({
     success: z.literal(false),
@@ -40,13 +39,14 @@ const outputSchema = z.union([
 ]);
 
 /**
- * Tool for retrieving all data rows for a specific dataset.
+ * Tool for editing a dataset's data connector.
  */
-export const getDataSetData = createTool({
-  id: "get-data-set-data",
-  description: "Get all data rows for a specific dataset.",
+export const editDataSetConnector = createTool({
+  id: "edit-data-set-connector",
+  description: "Edit the data connector for a dataset.",
   inputSchema: z.object({
-    dataSetId: z.number().describe("The ID of the dataset to retrieve data for."),
+    dataSetId: z.number().describe("The ID of the dataset."),
+    dataConnectorScript: z.string().describe("If isRealTime then provide a script to connect to the data source."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -56,28 +56,36 @@ export const getDataSetData = createTool({
       return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/dataset/data/${context.dataSetId}`);
-    logger.info(`Requesting data for dataset ID: ${context.dataSetId}`);
+    const { dataSetId, dataConnectorScript } = context;
+    const url = new URL(`${config.cmsUrl}/api/dataset/dataconnector/${dataSetId}`);
+    logger.info(`Editing data connector for dataset ID: ${dataSetId}`);
 
     try {
+      const params = new URLSearchParams();
+      params.append('dataConnectorScript', dataConnectorScript);
+
       const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: await getAuthHeaders(),
+        method: "PUT",
+        headers: {
+          ...await getAuthHeaders(),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params,
       });
 
       const responseData = await response.json();
 
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
-        const message = `Failed to retrieve dataset data. API responded with status ${response.status}.`;
+        const message = `Failed to edit data connector. API responded with status ${response.status}.`;
         logger.error(message, { response: decodedError });
         return { success: false as const, message, errorData: decodedError };
       }
 
-      const validationResult = z.array(dataSetDataSchema).safeParse(responseData);
+      const validationResult = dataSetConnectorSchema.safeParse(responseData);
 
       if (!validationResult.success) {
-        const message = "Dataset data response validation failed.";
+        const message = "Edit data connector response validation failed.";
         logger.error(message, { error: validationResult.error, data: responseData });
         return {
           success: false as const,
@@ -86,15 +94,14 @@ export const getDataSetData = createTool({
           errorData: responseData,
         };
       }
-      
-      const message = `Successfully retrieved ${validationResult.data.length} data rows for dataset ID: ${context.dataSetId}.`;
-      logger.info(message);
+
       return {
         success: true as const,
         data: validationResult.data,
       };
+
     } catch (error) {
-      const message = "An unexpected error occurred while retrieving dataset data.";
+      const message = "An unexpected error occurred while editing data connector.";
       logger.error(message, { error });
       return {
         success: false as const,
