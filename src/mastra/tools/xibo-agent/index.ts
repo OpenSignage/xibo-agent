@@ -63,6 +63,7 @@ import { addWidget, editWidget, deleteWidget, editWidgetTransition, editWidgetAu
   setWidgetRegion, saveWidgetElements, setWidgetDataType, getWidgetData, addWidgetData, editWidgetData,
   deleteWidgetData } from './widget';
 import { addCommand, deleteCommand, editCommand, getCommands } from './command';
+import { getDisplayProfiles, addDisplayProfile, editDisplayProfile, deleteDisplayProfile } from './displayprofile';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -183,5 +184,7 @@ export function getTools() {
     deleteWidgetData,
     // Command
     addCommand,deleteCommand,editCommand,getCommands,
+    // Display profile
+    getDisplayProfiles,addDisplayProfile,editDisplayProfile,deleteDisplayProfile,
   };
 }
