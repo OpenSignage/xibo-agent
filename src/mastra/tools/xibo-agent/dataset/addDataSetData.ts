@@ -47,7 +47,10 @@ export const addDataSetData = createTool({
   description: "Add a new row of data to a dataset.",
   inputSchema: z.object({
     dataSetId: z.number().describe("The ID of the dataset to add data to."),
-    rowData: z.record(z.string(), z.any()).describe("An object representing the row data, with column headings as keys."),
+    rowData: z.array(z.object({
+      key: z.string().describe("The column heading."),
+      value: z.any().describe("The value for the column."),
+    })).describe("An array of key-value pairs representing the row data."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -63,9 +66,9 @@ export const addDataSetData = createTool({
 
     try {
       const params = new URLSearchParams();
-      Object.entries(rowData).forEach(([key, value]) => {
+      rowData.forEach(item => {
         // The API expects keys in the format 'colName[colHeading]'
-        params.append(`colName[${key}]`, value.toString());
+        params.append(`colName[${item.key}]`, String(item.value));
       });
 
       const response = await fetch(url.toString(), {

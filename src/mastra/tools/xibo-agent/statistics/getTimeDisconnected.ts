@@ -72,9 +72,9 @@ export const getTimeDisconnected = createTool({
       .optional()
       .describe("Filter by a list of Display IDs."),
     returnDisplayLocalTime: z
-      .union([z.boolean(), z.number(), z.string()])
+      .string()
       .optional()
-      .describe("Accepts a boolean (true), a number (1), or the string 'On' to return results in the display's local time."),
+      .describe("Return results in the display's local time. Use 'on', '1', or 'true'."),
     returnDateFormat: z
       .string()
       .optional()
