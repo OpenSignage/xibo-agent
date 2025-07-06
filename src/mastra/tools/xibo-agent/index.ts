@@ -71,7 +71,7 @@ import { getDataSets, addDataSet, editDataSet, deleteDataSet, getDataSetColumns,
   deleteDataSetRss, editDataSetConnector } from './dataset';
 import { addAction, deleteAction, getActions } from './action';
 import { addCampaign, editCampaign, deleteCampaign, getCampaigns, assignLayoutToCampaign,
-  removeLayoutFromCampaign } from './campaign';
+  removeLayoutFromCampaign, selectCampaignFolder } from './campaign';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -208,6 +208,6 @@ export function getTools() {
     addAction,deleteAction,getActions,
     // Campaign
     addCampaign,editCampaign,deleteCampaign,getCampaigns,
-    assignLayoutToCampaign,removeLayoutFromCampaign,
+    assignLayoutToCampaign,removeLayoutFromCampaign,selectCampaignFolder,
   };
 }
