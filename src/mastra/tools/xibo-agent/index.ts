@@ -25,7 +25,8 @@ import { getUser, getUserMe, addUser, deleteUser, editUser, getUserPermissions,
   setUserPermissions, getUserPreferences, setUserPreferences,
   getMultiEntityPermissions, editUserPreferences } from './user';
 import { getModules, getModuleProperties, getModuleTemplateProperties, getModuleTemplates } from './modules';
-import { getDisplays } from './display';
+import { getDisplays, editDisplay, wakeOnLan, toggleAuthoriseForDisplay, setDefaultLayoutOnDisplay,
+  checkDisplayLicence, getDisplayStatus, purgeAllMediaFromDisplay } from './display';
 import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
   clearLayout, getLayoutStatus, checkoutLayout, discardLayout,editLayout,
   setLayoutEnableStat,editLayoutBackground,copyLayout,tagLayout,untagLayout,
@@ -136,7 +137,8 @@ export function getTools() {
     // Module 
     getModules,getModuleProperties,getModuleTemplateProperties,getModuleTemplates, 
     // Display
-    getDisplays,
+    getDisplays,editDisplay,wakeOnLan,toggleAuthoriseForDisplay,setDefaultLayoutOnDisplay,
+    checkDisplayLicence,getDisplayStatus,purgeAllMediaFromDisplay,
     // Layout    
     getLayouts,addLayout,deleteLayout,retireLayout,unretireLayout,clearLayout,
     getLayoutStatus,checkoutLayout,discardLayout,setLayoutEnableStat,editLayout,

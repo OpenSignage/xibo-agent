@@ -12,8 +12,8 @@
 
 /**
  * @module
- * This module provides a tool to send a Wake On LAN (WOL) command to a display.
- * It sends a POST request to the /api/display/wol/:displayId endpoint.
+ * This module provides a tool to request a license check for a specific display.
+ * It sends a PUT request to the /api/display/licenceCheck/:displayId endpoint.
  */
 
 import { z } from 'zod';
@@ -23,7 +23,7 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 
 const inputSchema = z.object({
-  displayId: z.number().describe('The ID of the display to send the Wake On LAN command to.'),
+  displayId: z.number().describe('The ID of the display to check the license for.'),
 });
 
 const outputSchema = z.union([
@@ -38,9 +38,9 @@ const outputSchema = z.union([
   }),
 ]);
 
-export const wakeOnLan = createTool({
-  id: 'wake-on-lan',
-  description: 'Send a Wake On LAN (WOL) command to a specific display.',
+export const checkDisplayLicence = createTool({
+  id: 'check-display-licence',
+  description: 'Request a license check for a specific display.',
   inputSchema,
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
@@ -50,26 +50,26 @@ export const wakeOnLan = createTool({
       }
 
       const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/display/wol/${input.displayId}`;
-      logger.debug(`wakeOnLan: Requesting URL = ${url}`);
+      const url = `${config.cmsUrl}/api/display/licenceCheck/${input.displayId}`;
+      logger.debug(`checkLicence: Requesting URL = ${url}`);
 
       const response = await fetch(url, {
-        method: 'POST',
+        method: 'PUT',
         headers,
       });
 
       if (!response.ok) {
         const errorData = await response.text();
-        logger.error(`wakeOnLan: HTTP error: ${response.status}`, { error: errorData });
+        logger.error(`checkLicence: HTTP error: ${response.status}`, { error: errorData });
         return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
       }
-
+      
       // A successful response is typically a 204 No Content
-      return { success: true, message: 'Wake On LAN command sent successfully.' };
+      return { success: true, message: 'License check requested successfully.' };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('wakeOnLan: An unexpected error occurred', { error });
+      logger.error('checkLicence: An unexpected error occurred', { error });
       return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
   },
