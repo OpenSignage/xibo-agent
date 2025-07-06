@@ -70,6 +70,8 @@ import { getDataSets, addDataSet, editDataSet, deleteDataSet, getDataSetColumns,
   selectDataSetFolder, getDataSetRss, addDataSetRss, editDataSetRss, 
   deleteDataSetRss, editDataSetConnector } from './dataset';
 import { addAction, deleteAction, getActions } from './action';
+import { addCampaign, editCampaign, deleteCampaign, getCampaigns, assignLayoutToCampaign,
+  removeLayoutFromCampaign } from './campaign';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -109,6 +111,7 @@ export * from './weather';      // Weather management
 export * from './syncGroup';    // Synchronization group management
 export * from './command';      // Command management
 export * from './dataset';      // Dataset management
+export * from './campaign';     // Campaign management
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -203,5 +206,8 @@ export function getTools() {
     deleteDataSetRss,editDataSetConnector,
     // Action
     addAction,deleteAction,getActions,
+    // Campaign
+    addCampaign,editCampaign,deleteCampaign,getCampaigns,
+    assignLayoutToCampaign,removeLayoutFromCampaign,
   };
 }

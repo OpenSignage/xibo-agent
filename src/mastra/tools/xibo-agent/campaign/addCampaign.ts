@@ -12,8 +12,8 @@
 
 /**
  * @module
- * This module provides a tool for assigning a campaign to a specific folder in Xibo CMS.
- * It implements the PUT /campaign/{id}/selectfolder endpoint.
+ * This module provides a tool for creating a new campaign in Xibo CMS.
+ * It implements the POST /campaign endpoint.
  */
 
 import { z } from 'zod';
@@ -23,8 +23,15 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 
 const inputSchema = z.object({
-  campaignId: z.number().describe('The ID of the campaign to move.'),
-  folderId: z.number().optional().describe('The ID of the folder to assign the campaign to. If omitted, it may be moved to the root.'),
+  type: z.string().describe('Type of campaign (list|ad).'),
+  name: z.string().describe('Name of the campaign.'),
+  folderId: z.number().optional().describe('ID of the folder to create the campaign in.'),
+  layoutIds: z.array(z.number()).optional().describe('Array of layout IDs to assign to this campaign (ordered).'),
+  cyclePlaybackEnabled: z.number().optional().describe('Enable cycle-based playback (1: enabled, 0: disabled).'),
+  playCount: z.number().optional().describe('For cycle-based playback, how many times to play each layout before moving to the next.'),
+  listPlayOrder: z.string().optional().describe('For list campaigns, how to play campaigns with the same play order.'),
+  targetType: z.string().optional().describe('For ad campaigns, the measurement for the target (plays|budget|imp).'),
+  target: z.number().optional().describe('For ad campaigns, the target number of plays for the entire campaign.'),
 });
 
 const tagSchema = z.object({
@@ -43,41 +50,18 @@ const campaignResponseSchema = z.object({
   totalDuration: z.number().optional().describe('The total duration of the campaign in seconds.'),
   tags: z.array(tagSchema).optional().describe('An array of tags associated with the campaign.'),
   folderId: z.number().optional().describe('The ID of the folder containing the campaign.'),
-  permissionsFolderId: z
-    .number()
-    .optional()
-    .describe('The ID of the folder for permissions.'),
-  cyclePlaybackEnabled: z
-    .number()
-    .optional()
-    .describe('Indicates if cycle-based playback is enabled.'),
-  playCount: z
-    .number()
-    .optional()
-    .describe('The number of times each layout plays in a cycle.'),
+  permissionsFolderId: z.number().optional().describe('The ID of the folder for permissions.'),
+  cyclePlaybackEnabled: z.number().optional().describe('Indicates if cycle-based playback is enabled.'),
+  playCount: z.number().optional().describe('The number of times each layout plays in a cycle.'),
   listPlayOrder: z.string().optional().describe('The play order for list campaigns.'),
-  targetType: z
-    .string()
-    .nullable()
-    .optional()
-    .describe(
-      'The measurement target type for ad campaigns (e.g., "plays", "budget", "imp").',
-    ),
+  targetType: z.string().optional().describe('The measurement target type for ad campaigns (e.g., "plays", "budget", "imp").',),
   target: z.number().optional().describe('The target value for ad campaigns.'),
-  startDt: z
-    .number()
-    .nullable()
-    .optional()
-    .describe('The start date/time of the campaign (timestamp).'),
-  endDt: z
-    .number()
-    .nullable()
-    .optional()
-    .describe('The end date/time of the campaign (timestamp).'),
+  startDt: z.number().nullable().optional().describe('The start date/time of the campaign (timestamp).'),
+  endDt: z.number().nullable().optional().describe('The end date/time of the campaign (timestamp).'),
   plays: z.number().optional().describe('The number of plays.'),
   spend: z.number().optional().describe('The amount spent.'),
   impressions: z.number().optional().describe('The number of impressions.'),
-  lastPopId: z.number().nullable().optional().describe('The ID of the last POP.'),
+  lastPopId: z.number().optional().describe('The ID of the last POP.'),
   ref1: z.string().nullable().optional().describe('Reference field 1.'),
   ref2: z.string().nullable().optional().describe('Reference field 2.'),
   ref3: z.string().nullable().optional().describe('Reference field 3.'),
@@ -101,14 +85,14 @@ const outputSchema = z.union([
   }),
 ]);
 
-export const selectCampaignFolderTool = createTool({
-  id: 'select-campaign-folder',
-  description: 'Assigns a campaign to a specific folder.',
+export const addCampaign = createTool({
+  id: 'add-campaign',
+  description: 'Add a new campaign in the Xibo CMS.',
   inputSchema,
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
-    const { campaignId, folderId } = input;
-
+  execute: async ({
+    context: input,
+  }): Promise<z.infer<typeof outputSchema>> => {
     if (!config.cmsUrl) {
       return { success: false, message: 'CMS URL is not configured.' };
     }
@@ -117,16 +101,25 @@ export const selectCampaignFolderTool = createTool({
       const authHeaders = await getAuthHeaders();
       const headers = { ...authHeaders, 'Content-Type': 'application/x-www-form-urlencoded' };
       const params = new URLSearchParams();
+
+      Object.entries(input).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          if (key === 'layoutIds' && Array.isArray(value)) {
+            // The API likely expects a specific format for arrays, often not standard URL encoding.
+            // Assuming it expects comma-separated values for a parameter like this.
+            // This might need adjustment based on actual API behavior.
+            params.append(key, JSON.stringify(value));
+          } else {
+            params.append(key, String(value));
+          }
+        }
+      });
       
-      if (folderId !== undefined) {
-        params.append('folderId', folderId.toString());
-      }
-      
-      const url = `${config.cmsUrl}/api/campaign/${campaignId}/selectfolder`;
-      logger.debug(`selectCampaignFolder: Requesting URL = ${url}`, { body: params.toString() });
+      const url = `${config.cmsUrl}/api/campaign`;
+      logger.debug(`postCampaign: Requesting URL = ${url}`, { body: params.toString() });
 
       const response = await fetch(url, {
-        method: 'PUT',
+        method: 'POST',
         headers,
         body: params.toString(),
       });
@@ -134,23 +127,23 @@ export const selectCampaignFolderTool = createTool({
       const responseData = await response.json();
 
       if (!response.ok) {
-        logger.error(`selectCampaignFolder: HTTP error: ${response.status}`, { error: responseData });
+        logger.error(`postCampaign: HTTP error: ${response.status}`, { error: responseData });
         return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
       }
 
       const validatedData = campaignResponseSchema.parse(responseData);
-      logger.info(`selectCampaignFolder: Successfully moved campaign ${validatedData.campaignId} to folder.`);
-      return { success: true, message: 'Campaign folder updated successfully.', data: validatedData };
+      logger.info(`postCampaign: Successfully created campaign ${validatedData.campaignId}.`);
+      return { success: true, message: 'Campaign created successfully.', data: validatedData };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('selectCampaignFolder: An unexpected error occurred', { error });
+      logger.error('postCampaign: An unexpected error occurred', { error });
 
       if (error instanceof z.ZodError) {
         return { success: false, message: 'Validation error occurred.', error: error.issues };
       }
       
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      return { success: false, message: `An unexpected error occurred: ${errorMessage}` };
     }
   },
 }); 
