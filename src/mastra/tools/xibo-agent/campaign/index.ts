@@ -16,3 +16,4 @@ export { editCampaign } from './editCampaign';
 export { deleteCampaign} from './deleteCampaign';
 export { assignLayoutToCampaign } from './assignLayoutToCampaign';
 export { removeLayoutFromCampaign } from './removeLayoutFromCampaign';
+export { selectCampaignFolder } from './selectCampaignFolder';
