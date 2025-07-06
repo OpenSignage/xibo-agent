@@ -12,8 +12,8 @@
 
 /**
  * @module
- * This module provides a tool to send a Wake On LAN (WOL) command to a display.
- * It sends a POST request to the /api/display/wol/:displayId endpoint.
+ * This module provides a tool to toggle the authorization status of a display.
+ * It sends a PUT request to the /api/display/authorise/:displayId endpoint.
  */
 
 import { z } from 'zod';
@@ -23,7 +23,7 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 
 const inputSchema = z.object({
-  displayId: z.number().describe('The ID of the display to send the Wake On LAN command to.'),
+  displayId: z.number().describe('The ID of the display to toggle authorization for.'),
 });
 
 const outputSchema = z.union([
@@ -38,9 +38,9 @@ const outputSchema = z.union([
   }),
 ]);
 
-export const wakeOnLan = createTool({
-  id: 'wake-on-lan',
-  description: 'Send a Wake On LAN (WOL) command to a specific display.',
+export const toggleAuthoriseForDisplay = createTool({
+  id: 'toggle-authorise-for-display',
+  description: 'Toggle the authorization status of a specific display.',
   inputSchema,
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
@@ -50,26 +50,26 @@ export const wakeOnLan = createTool({
       }
 
       const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/display/wol/${input.displayId}`;
-      logger.debug(`wakeOnLan: Requesting URL = ${url}`);
+      const url = `${config.cmsUrl}/api/display/authorise/${input.displayId}`;
+      logger.debug(`toggleAuthorise: Requesting URL = ${url}`);
 
       const response = await fetch(url, {
-        method: 'POST',
+        method: 'PUT',
         headers,
       });
 
       if (!response.ok) {
         const errorData = await response.text();
-        logger.error(`wakeOnLan: HTTP error: ${response.status}`, { error: errorData });
+        logger.error(`toggleAuthorise: HTTP error: ${response.status}`, { error: errorData });
         return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
       }
 
       // A successful response is typically a 204 No Content
-      return { success: true, message: 'Wake On LAN command sent successfully.' };
+      return { success: true, message: 'Display authorization toggled successfully.' };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('wakeOnLan: An unexpected error occurred', { error });
+      logger.error('toggleAuthorise: An unexpected error occurred', { error });
       return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
   },

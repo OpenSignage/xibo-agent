@@ -140,6 +140,7 @@ export const getCampaigns = createTool({
                 id: layoutId,
                 name: layout.layout,
                 type: 'layout-item',
+                layoutId: layout.layoutId,
               });
             });
             detailNodes.push(layoutParentNode);
@@ -188,8 +189,9 @@ export const getCampaigns = createTool({
 
         return createTreeViewResponse(campaignsData, finalTree, (node) => {
             if (node.type === 'folder') return `📁 ${node.name}`;
-            if (node.type === 'campaign') return `🎬 ${node.name}`;
+            if (node.type === 'campaign') return `🎬 ${node.name} (ID: ${node.campaignId})`;
             if (node.type === 'detail-group') return `ℹ️ ${node.name}`;
+            if (node.type === 'layout-item') return `${node.name} (ID: ${node.layoutId})`;
             // For simple details and layout items, just return the name.
             // generateTreeView will handle the prefix characters (├─, └─).
             return node.name;

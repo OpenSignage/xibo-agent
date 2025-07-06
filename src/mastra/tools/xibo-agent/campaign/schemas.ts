@@ -31,7 +31,7 @@ export const campaignSchema = z.object({
   campaign: z.string().describe('The name of the campaign.'),
   isLayoutSpecific: z.number().describe('Indicates if the campaign is layout-specific.'),
   numberLayouts: z.number().describe('The number of layouts in the campaign.'),
-  totalDuration: z.number().optional().describe('The total duration of the campaign in seconds.'),
+  totalDuration: z.number().nullable().optional().describe('The total duration of the campaign in seconds.'),
   tags: z.array(tagSchema).optional().describe('An array of tags associated with the campaign.'),
   folderId: z.number().optional().describe('The ID of the folder containing the campaign.'),
   permissionsFolderId: z.number().optional().describe('The ID of the folder for permissions.'),

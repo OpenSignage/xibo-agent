@@ -11,21 +11,17 @@
  */
 
 /**
- * Xibo CMS Display Management Tools
- * 
- * This module exports tools for managing displays in the Xibo CMS system.
- * These tools allow for retrieving display information, editing display settings,
- * managing display status, and controlling display behavior remotely.
- * 
- * The tools provide functionality ranging from basic status checks to advanced
- * operations like Wake-on-LAN and license management.
+ * @module
+ * This module aggregates and exports all tools related to display management
+ * in the Xibo CMS. It provides a single point of access for functionalities
+ * like retrieving display information, editing settings, and controlling state.
  */
 
 export { getDisplays } from './getDisplays';
 export { editDisplay } from './editDisplay';
 export { wakeOnLan } from './wakeOnLan';
-export { toggleAuthorise } from './toggleAuthorise';
-export { setDefaultLayout } from './setDefaultLayout';
-export { checkLicence } from './checkLicence';
+export { toggleAuthoriseForDisplay } from './toggleAuthoriseForDisplay';
+export { setDefaultLayoutOnDisplay } from './setDefaultLayoutOnDisplay';
+export { checkDisplayLicence } from './checkDisplayLicence';
 export { getDisplayStatus } from './getDisplayStatus';
-export { purgeAll } from './purgeAll'; 
+export { purgeAllMediaFromDisplay } from './purgeAllMediaFromDisplay';
