@@ -53,7 +53,7 @@ import { getDisplayGroups, addDisplayGroup, editDisplayGroup, deleteDisplayGroup
   clearStatsAndLogsForDisplayGroup, revertDisplayGroupToSchedule, sendCommandToDisplayGroup,
   copyDisplayGroup, selectFolderForDisplayGroup, triggerWebhookForDisplayGroup } from './displayGroup';
 import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } from './template';
-import { getLogs } from './log';
+import { getLogs, getAgentLog } from './log';
 import { getTransition } from './transition';
 import { getDayParts, addDayPart, editDayPart, deleteDayPart } from './dayPart';
 import { changePassword } from './compound';
@@ -134,7 +134,7 @@ export function getTools() {
     // Misc
     getCmsTime,getAbout,
     // Log
-    getLogs,
+    getLogs,getAgentLog,
     // Transition
     getTransition,
     // User

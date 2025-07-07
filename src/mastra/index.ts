@@ -14,29 +14,58 @@
  */
 
 // Import required modules
-import { config } from 'dotenv';
+import { config as dotEnvConfig } from 'dotenv';
 import { resolve } from 'path';
+import pino from 'pino';
 import { Mastra } from '@mastra/core';
 import { LibSQLStore } from '@mastra/libsql';
-import { createLogger } from '@mastra/core/logger';
 import { apiRoutes } from './api';
+import { config } from './tools/xibo-agent/config';
 
 // Import workflows and agents
-import { weatherWorkflow } from './workflows';
+//import { weatherWorkflow } from './workflows';
 import { xiboAgent } from './agents/xibo-agent';
 import { xiboManualAgent } from './agents/xibo-manual';
-import { svgWorkflow } from './workflows/svg-illustration';
-import { mcpAgent } from './agents/mcp-agent';
+//import { svgWorkflow } from './workflows/svg-illustration';
+//import { mcpAgent } from './agents/mcp-agent';
 
 // Load environment variables from .env.development
 const envPath = resolve(process.cwd(), '.env.development');
-config({ path: envPath });
+dotEnvConfig({ path: envPath });
 
-// Create shared logger instance for centralized logging
-export const logger = createLogger({
-  name: 'Xibo-System',
-  level: 'info',  // Set to info level to exclude debug logs
-});
+// Create pino logger instance
+const pinoLogger = pino(
+  {
+    level: 'info',
+  },
+  pino.transport({
+    targets: [
+      {
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+          levelFirst: true,
+          translateTime: 'SYS:yyyy-mm-dd HH:MM:ss',
+          ignore: 'pid,hostname',
+        },
+      },
+      {
+        target: 'pino-roll',
+        level: 'info',
+        options: {
+          file: resolve(config.logsDir, 'agent.log'), // Base file name
+          frequency: 'daily', // Rotate daily
+          maxFiles: 14, // Keep 14 days of old logs
+          mkdir: true,
+        },
+      },
+    ],
+  })
+);
+
+// The pino logger is structurally compatible with what Mastra expects at runtime.
+// We cast it to 'any' to bypass the strict compile-time type checking of Mastra's Logger interface.
+export const logger = pinoLogger as any;
 
 // Initialize Mastra instance with core services
 export const mastra = new Mastra({

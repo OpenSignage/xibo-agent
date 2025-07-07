@@ -17,5 +17,5 @@
  * These tools provide general functionality such as retrieving CMS time and
  * system information that don't fit into specific categories.
  */
-
-export { getLogs } from './getLogs';
+export * from './getLogs';
+export * from './getAgentLog';
