@@ -88,6 +88,7 @@ export const editMenuBoard = createTool({
 
       // Validate the response data against the schema
       const validatedData = menuBoardSchema.parse(responseData);
+      logger.info(`editMenuBoard: Successfully edited menu board '${validatedData.name}'.`, { menuId: validatedData.menuId });
       return { success: true, message: 'Menu board edited successfully.', data: validatedData };
 
     } catch (error) {

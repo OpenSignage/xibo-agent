@@ -99,6 +99,7 @@ export const editMenuBoardProduct = createTool({
 
       // Validate the response data against the schema
       const validatedData = menuBoardProductSchema.parse(responseData);
+      logger.info(`editMenuBoardProduct: Successfully edited product '${validatedData.name}' (ID: ${validatedData.menuProductId}).`);
       return { success: true, message: 'Menu board product edited successfully.', data: validatedData };
 
     } catch (error) {

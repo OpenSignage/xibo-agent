@@ -78,6 +78,7 @@ export const selectMenuBoardFolder = createTool({
 
       // Validate the response data against the schema
       const validatedData = menuBoardSchema.parse(responseData);
+      logger.info(`selectMenuBoardFolder: Successfully moved menu board ${validatedData.menuId} to folder ${validatedData.folderId}.`);
       return { success: true, message: 'Menu board folder changed successfully.', data: validatedData };
 
     } catch (error) {

@@ -85,6 +85,7 @@ export const addMenuBoard = createTool({
 
       // Validate the response data against the schema
       const validatedData = menuBoardSchema.parse(responseData);
+      logger.info(`addMenuBoard: Successfully added menu board '${validatedData.name}'.`, { menuId: validatedData.menuId });
       return { success: true, message: 'Menu board added successfully.', data: validatedData };
 
     } catch (error) {

@@ -99,6 +99,7 @@ export const addMenuBoardProduct = createTool({
 
       // Validate the response data against the schema
       const validatedData = menuBoardProductSchema.parse(responseData);
+      logger.info(`addMenuBoardProduct: Successfully added product '${validatedData.name}' to category ${validatedData.menuCategoryId}.`, { menuProductId: validatedData.menuProductId });
       return { success: true, message: 'Menu board product added successfully.', data: validatedData };
 
     } catch (error) {

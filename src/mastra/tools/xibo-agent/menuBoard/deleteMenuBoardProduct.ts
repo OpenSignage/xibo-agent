@@ -68,6 +68,7 @@ export const deleteMenuBoardProduct = createTool({
       }
       
       // A successful DELETE request returns a 204 No Content response
+      logger.info(`deleteMenuBoardProduct: Successfully deleted menu board product with ID ${input.menuProductId}.`);
       return { success: true, message: 'Menu board product deleted successfully.' };
 
     } catch (error) {

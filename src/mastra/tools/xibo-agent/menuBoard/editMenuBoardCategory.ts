@@ -88,6 +88,7 @@ export const editMenuBoardCategory = createTool({
 
       // Validate the response data against the schema
       const validatedData = menuBoardCategorySchema.parse(responseData);
+      logger.info(`editMenuBoardCategory: Successfully edited category '${validatedData.name}' (ID: ${validatedData.menuCategoryId}).`);
       return { success: true, message: 'Menu board category edited successfully.', data: validatedData };
 
     } catch (error) {

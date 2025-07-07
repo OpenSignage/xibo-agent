@@ -82,6 +82,7 @@ export const getMenuBoardCategories = createTool({
       
       // Validate the response data against the schema
       const validatedData = z.array(menuBoardCategorySchema).parse(responseData);
+      logger.info(`getMenuBoardCategories: Retrieved ${validatedData.length} categories for menu board ID ${menuId}.`);
 
       // Handle cases where no data is found
       if (validatedData.length === 0) {
