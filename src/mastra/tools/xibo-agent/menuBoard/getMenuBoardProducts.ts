@@ -82,6 +82,7 @@ export const getMenuBoardProducts = createTool({
       
       // Validate the response data against the schema
       const validatedData = z.array(menuBoardProductSchema).parse(responseData);
+      logger.info(`getMenuBoardProducts: Retrieved ${validatedData.length} products for category ID ${menuCategoryId}.`);
 
       // Handle cases where no data is found
       if (validatedData.length === 0) {

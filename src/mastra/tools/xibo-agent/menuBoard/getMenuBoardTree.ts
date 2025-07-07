@@ -65,6 +65,7 @@ export const getMenuBoardTree = createTool({
     context: input,
     runtimeContext,
   }): Promise<z.infer<typeof outputSchema>> => {
+    logger.info('getMenuBoardTree: Starting tree generation process.', { menuId: input.menuId });
     try {
       // Step 1: Fetch all relevant menu boards
       const menuBoardsResponse = await getMenuBoards.execute({
@@ -83,6 +84,7 @@ export const getMenuBoardTree = createTool({
 
       // Handle case where no menu boards are found
       if (menuBoardsResponse.data.length === 0) {
+        logger.info('getMenuBoardTree: No menu boards found, returning empty tree.');
         const emptyTreeResponse = createTreeViewResponse([], []);
         return {
           ...emptyTreeResponse,
@@ -154,6 +156,7 @@ export const getMenuBoardTree = createTool({
       };
 
       const treeResponse = createTreeViewResponse(menuBoards, tree, nodeFormatter);
+      logger.info('getMenuBoardTree: Successfully generated menu board tree.');
       return {
         ...treeResponse,
         message: 'Menu board tree generated successfully.',

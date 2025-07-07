@@ -83,6 +83,7 @@ export const getMenuBoards = createTool({
       
       // Validate the response data against the schema
       const validatedData = z.array(menuBoardSchema).parse(responseData);
+      logger.info(`getMenuBoards: Retrieved ${validatedData.length} menu boards.`);
 
       // Handle cases where no data is found
       if (validatedData.length === 0) {
