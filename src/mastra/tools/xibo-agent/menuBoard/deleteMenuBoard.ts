@@ -44,31 +44,37 @@ export const deleteMenuBoard = createTool({
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
     try {
+      // Ensure CMS URL is configured
       if (!config.cmsUrl) {
         return { success: false, message: 'CMS URL is not configured.' };
       }
 
+      // Get authentication headers
       const headers = await getAuthHeaders();
       const url = `${config.cmsUrl}/api/menuboard/${input.menuId}`;
       logger.debug(`deleteMenuBoard: Requesting URL = ${url}`);
 
+      // Make the API call to delete the menu board
       const response = await fetch(url, {
         method: 'DELETE',
         headers,
       });
 
+      // Handle non-successful responses
       if (!response.ok) {
         const errorData = await response.text();
         logger.error(`deleteMenuBoard: HTTP error: ${response.status}`, { error: errorData });
         return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
       }
       
-      // Successful response is 204 No Content
+      // A successful DELETE request returns a 204 No Content response
       return { success: true, message: 'Menu board deleted successfully.' };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       logger.error('deleteMenuBoard: An unexpected error occurred', { error });
+
+      // Handle other unexpected errors
       return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
   },

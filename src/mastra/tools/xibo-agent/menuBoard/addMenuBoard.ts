@@ -49,13 +49,16 @@ export const addMenuBoard = createTool({
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
     try {
+      // Ensure CMS URL is configured
       if (!config.cmsUrl) {
         return { success: false, message: 'CMS URL is not configured.' };
       }
 
+      // Get authentication headers
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
 
+      // Prepare request parameters from input context
       Object.entries(input).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
           params.append(key, String(value));
@@ -65,6 +68,7 @@ export const addMenuBoard = createTool({
       const url = `${config.cmsUrl}/api/menuboard`;
       logger.debug(`addMenuBoard: Requesting URL = ${url}, Body = ${params.toString()}`);
       
+      // Make the API call to add the menu board
       const response = await fetch(url, {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -73,22 +77,26 @@ export const addMenuBoard = createTool({
 
       const responseData = await response.json();
 
+      // Handle non-successful responses
       if (!response.ok) {
         logger.error(`addMenuBoard: HTTP error: ${response.status}`, { error: responseData });
         return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
       }
 
-      const validatedData = menuBoardSchema.parse(responseData.data);
+      // Validate the response data against the schema
+      const validatedData = menuBoardSchema.parse(responseData);
       return { success: true, message: 'Menu board added successfully.', data: validatedData };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       logger.error('addMenuBoard: An unexpected error occurred', { error });
 
+      // Handle validation errors specifically
       if (error instanceof z.ZodError) {
         return { success: false, message: 'Validation error occurred.', error: error.issues };
       }
       
+      // Handle other unexpected errors
       return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
   },

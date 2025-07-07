@@ -76,6 +76,10 @@ import { getDataSets, addDataSet, editDataSet, deleteDataSet, getDataSetColumns,
 import { addAction, deleteAction, getActions } from './action';
 import { addCampaign, editCampaign, deleteCampaign, getCampaigns, assignLayoutToCampaign,
   removeLayoutFromCampaign, selectCampaignFolder } from './campaign';
+import { addMenuBoard, addMenuBoardCategory, addMenuBoardProduct, deleteMenuBoard,
+  deleteMenuBoardCategory, deleteMenuBoardProduct, editMenuBoard, editMenuBoardCategory,
+  editMenuBoardProduct, getMenuBoardCategories, getMenuBoardProducts, getMenuBoards,
+  selectMenuBoardFolder, getMenuBoardTree } from './menuBoard';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -218,5 +222,10 @@ export function getTools() {
     // Campaign
     addCampaign,editCampaign,deleteCampaign,getCampaigns,
     assignLayoutToCampaign,removeLayoutFromCampaign,selectCampaignFolder,
+    // Menu board
+    addMenuBoard,addMenuBoardCategory,addMenuBoardProduct,deleteMenuBoard,
+    deleteMenuBoardCategory,deleteMenuBoardProduct,editMenuBoard,editMenuBoardCategory,
+    editMenuBoardProduct,getMenuBoardCategories,getMenuBoardProducts,getMenuBoards,
+    selectMenuBoardFolder,getMenuBoardTree,
   };
 }
