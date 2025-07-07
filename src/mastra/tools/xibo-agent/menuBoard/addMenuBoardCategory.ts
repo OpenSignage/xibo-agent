@@ -1,64 +1,97 @@
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
 
-const menuBoardCategorySchema = z.object({
-  menuCategoryId: z.number(),
-  menuId: z.number(),
-  name: z.string(),
-  description: z.string().optional(),
-  code: z.string().optional(),
-  mediaId: z.number().optional(),
+/**
+ * @module
+ * This module provides a tool to add a new category to a menu board.
+ */
+
+import { z } from 'zod';
+import { createTool } from '@mastra/core/tools';
+import { config } from '../config';
+import { getAuthHeaders } from '../auth';
+import { logger } from '../../../index';
+import { menuBoardCategorySchema } from './schemas';
+
+const inputSchema = z.object({
+  menuId: z.number().describe('The ID of the parent menu board.'),
+  name: z.string().describe('The name for the new category.'),
+  description: z.string().optional().describe('An optional description for the category.'),
+  code: z.string().optional().describe('An optional code for the category.'),
+  mediaId: z.number().optional().describe('The ID of a media item to associate with the category.'),
 });
 
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: menuBoardCategorySchema,
-});
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    message: z.string(),
+    data: menuBoardCategorySchema,
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+  }),
+]);
 
 export const addMenuBoardCategory = createTool({
-  id: "add-menu-board-category",
-  description: "メニューボードカテゴリを追加",
-  inputSchema: z.object({
-    menuId: z.number(),
-    name: z.string(),
-    mediaId: z.number().optional(),
-    code: z.string().optional(),
-    description: z.string().optional(),
-  }),
-  outputSchema: apiResponseSchema,
-  execute: async ({ context }) => {
-    if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+  id: 'add-menu-board-category',
+  description: 'Add a new category to a specific menu board.',
+  inputSchema,
+  outputSchema,
+  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+    try {
+      if (!config.cmsUrl) {
+        return { success: false, message: 'CMS URL is not configured.' };
+      }
+      
+      const { menuId, ...bodyParams } = input;
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
+
+      Object.entries(bodyParams).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          params.append(key, String(value));
+        }
+      });
+      
+      const url = `${config.cmsUrl}/api/menuboard/${menuId}/category`;
+      logger.debug(`addMenuBoardCategory: Requesting URL = ${url}, Body = ${params.toString()}`);
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        logger.error(`addMenuBoardCategory: HTTP error: ${response.status}`, { error: responseData });
+        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+      }
+
+      const validatedData = menuBoardCategorySchema.parse(responseData.data);
+      return { success: true, message: 'Menu board category added successfully.', data: validatedData };
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      logger.error('addMenuBoardCategory: An unexpected error occurred', { error });
+
+      if (error instanceof z.ZodError) {
+        return { success: false, message: 'Validation error occurred.', error: error.issues };
+      }
+      
+      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
-
-    const url = new URL(`${config.cmsUrl}/menuboard/${context.menuId}/category`);
-    
-    // フォームデータの作成
-    const formData = new FormData();
-    formData.append("name", context.name);
-    if (context.mediaId) formData.append("mediaId", context.mediaId.toString());
-    if (context.code) formData.append("code", context.code);
-    if (context.description) formData.append("description", context.description);
-
-    console.log(`Requesting URL: ${url.toString()}`);
-
-    const response = await fetch(url.toString(), {
-      method: "POST",
-      headers: await getAuthHeaders(),
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const rawData = await response.json();
-    const validatedData = apiResponseSchema.parse(rawData);
-    console.log("Menu board category added successfully");
-    return validatedData;
   },
-});
-
-export default addMenuBoardCategory; 
+}); 

@@ -1,15 +1,25 @@
-export { default as getMenuBoards } from "./getMenuBoards";
-export { default as addMenuBoard } from "./addMenuBoard";
-export { default as editMenuBoard } from "./editMenuBoard";
-export { default as deleteMenuBoard } from "./deleteMenuBoard";
-export { default as selectMenuBoardFolder } from "./selectMenuBoardFolder";
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
 
-export { default as getMenuBoardCategories } from "./getMenuBoardCategories";
-export { default as addMenuBoardCategory } from "./addMenuBoardCategory";
-export { default as editMenuBoardCategory } from "./editMenuBoardCategory";
-export { default as deleteMenuBoardCategory } from "./deleteMenuBoardCategory";
-
-export { default as getMenuBoardProducts } from "./getMenuBoardProducts";
-export { default as addMenuBoardProduct } from "./addMenuBoardProduct";
-export { default as editMenuBoardProduct } from "./editMenuBoardProduct";
-export { default as deleteMenuBoardProduct } from "./deleteMenuBoardProduct"; 
+export { addMenuBoard } from './addMenuBoard';
+export { addMenuBoardCategory } from './addMenuBoardCategory';
+export { addMenuBoardProduct } from './addMenuBoardProduct';
+export { deleteMenuBoard } from './deleteMenuBoard';
+export { deleteMenuBoardCategory } from './deleteMenuBoardCategory';
+export { deleteMenuBoardProduct } from './deleteMenuBoardProduct';
+export { editMenuBoard } from './editMenuBoard';
+export { editMenuBoardCategory } from './editMenuBoardCategory';
+export { editMenuBoardProduct } from './editMenuBoardProduct';
+export { getMenuBoardCategories } from './getMenuBoardCategories';
+export { getMenuBoardProducts } from './getMenuBoardProducts';
+export { getMenuBoards } from './getMenuBoards';
+export { selectMenuBoardFolder } from './selectMenuBoardFolder'; 

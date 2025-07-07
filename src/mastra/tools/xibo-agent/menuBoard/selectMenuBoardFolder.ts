@@ -1,61 +1,88 @@
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
 
-const menuBoardSchema = z.object({
-  menuId: z.number(),
-  name: z.string(),
-  description: z.string().optional(),
-  code: z.string().optional(),
-  userId: z.number(),
-  modifiedDt: z.number(),
-  folderId: z.string(),
-  permissionsFolderId: z.number(),
-  groupsWithPermissions: z.string(),
+/**
+ * @module
+ * This module provides a tool to move a menu board to a different folder.
+ */
+
+import { z } from 'zod';
+import { createTool } from '@mastra/core/tools';
+import { config } from '../config';
+import { getAuthHeaders } from '../auth';
+import { logger } from '../../../index';
+import { menuBoardSchema } from './schemas';
+
+const inputSchema = z.object({
+  menuId: z.number().describe('The ID of the menu board to move.'),
+  folderId: z.number().describe('The ID of the target destination folder.'),
 });
 
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: menuBoardSchema,
-});
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    message: z.string(),
+    data: menuBoardSchema,
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+  }),
+]);
 
 export const selectMenuBoardFolder = createTool({
-  id: "select-menu-board-folder",
-  description: "メニューボードのフォルダを選択",
-  inputSchema: z.object({
-    menuId: z.number(),
-    folderId: z.number(),
-  }),
-  outputSchema: apiResponseSchema,
-  execute: async ({ context }) => {
-    if (!config.cmsUrl) {
-      throw new Error("CMS URL is not set");
+  id: 'select-menu-board-folder',
+  description: 'Move a menu board to a new parent folder.',
+  inputSchema,
+  outputSchema,
+  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+    try {
+      if (!config.cmsUrl) {
+        return { success: false, message: 'CMS URL is not configured.' };
+      }
+      
+      const { menuId, folderId } = input;
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams({ folderId: String(folderId) });
+      
+      const url = `${config.cmsUrl}/api/menuboard/${menuId}/selectfolder`;
+      logger.debug(`selectMenuBoardFolder: Requesting URL = ${url}, Body = ${params.toString()}`);
+      
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        logger.error(`selectMenuBoardFolder: HTTP error: ${response.status}`, { error: responseData });
+        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+      }
+
+      const validatedData = menuBoardSchema.parse(responseData.data);
+      return { success: true, message: 'Menu board folder changed successfully.', data: validatedData };
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      logger.error('selectMenuBoardFolder: An unexpected error occurred', { error });
+
+      if (error instanceof z.ZodError) {
+        return { success: false, message: 'Validation error occurred.', error: error.issues };
+      }
+      
+      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
-
-    const url = new URL(`${config.cmsUrl}/menuboard/${context.menuId}/selectfolder`);
-    
-    // フォームデータの作成
-    const formData = new FormData();
-    formData.append("folderId", context.folderId.toString());
-
-    console.log(`Requesting URL: ${url.toString()}`);
-
-    const response = await fetch(url.toString(), {
-      method: "PUT",
-      headers: await getAuthHeaders(),
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const rawData = await response.json();
-    const validatedData = apiResponseSchema.parse(rawData);
-    console.log("Menu board folder selected successfully");
-    return validatedData;
   },
-});
-
-export default selectMenuBoardFolder; 
+}); 
