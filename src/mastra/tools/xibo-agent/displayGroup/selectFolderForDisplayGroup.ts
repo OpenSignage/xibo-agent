@@ -12,8 +12,8 @@
 
 /**
  * @module
- * This module provides a tool for copying an existing display group.
- * It sends a POST request to the /api/displaygroup/:displayGroupId/copy endpoint.
+ * This module provides a tool for assigning a display group to a folder.
+ * It sends a POST request to the /api/displaygroup/:displayGroupId/folder endpoint.
  */
 
 import { z } from 'zod';
@@ -24,10 +24,8 @@ import { logger } from '../../../index';
 import { displayGroupSchema } from './schemas';
 
 const inputSchema = z.object({
-  displayGroupId: z.number().describe('The ID of the display group to copy.'),
-  name: z.string().describe('The name for the new, copied display group.'),
-  description: z.string().optional().describe('An optional description for the new display group.'),
-  folderId: z.number().optional().describe('The ID of the folder to place the new display group in.'),
+  displayGroupId: z.number().describe('The ID of the display group to move.'),
+  folderId: z.number().describe('The ID of the destination folder.'),
 });
 
 const outputSchema = z.union([
@@ -43,9 +41,9 @@ const outputSchema = z.union([
   }),
 ]);
 
-export const copyDisplayGroup = createTool({
-  id: 'copy-display-group',
-  description: 'Copy an existing display group to create a new one.',
+export const selectFolderForDisplayGroup = createTool({
+  id: 'select-folder-for-display-group',
+  description: 'Assign a display group to a specific folder.',
   inputSchema,
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
@@ -54,15 +52,11 @@ export const copyDisplayGroup = createTool({
         return { success: false, message: 'CMS URL is not configured.' };
       }
 
-      const { displayGroupId, name, ...rest } = input;
       const headers = await getAuthHeaders();
-      const params = new URLSearchParams({
-        displayGroup: name, // API expects 'displayGroup' for the name
-        ...Object.fromEntries(Object.entries(rest).map(([k, v]) => [k, String(v)])),
-      });
+      const params = new URLSearchParams({ folderId: String(input.folderId) });
 
-      const url = `${config.cmsUrl}/api/displaygroup/${displayGroupId}/copy`;
-      logger.debug(`copyDisplayGroup: Requesting URL = ${url}, Body = ${params.toString()}`);
+      const url = `${config.cmsUrl}/api/displaygroup/${input.displayGroupId}/folder`;
+      logger.debug(`selectFolderForDisplayGroup: Requesting URL = ${url}, Body = ${params.toString()}`);
       
       const response = await fetch(url, {
         method: 'POST',
@@ -73,16 +67,16 @@ export const copyDisplayGroup = createTool({
       const responseData = await response.json();
 
       if (!response.ok) {
-        logger.error(`copyDisplayGroup: HTTP error: ${response.status}`, { error: responseData });
+        logger.error(`selectFolderForDisplayGroup: HTTP error: ${response.status}`, { error: responseData });
         return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
       }
 
       const validatedData = displayGroupSchema.parse(responseData);
-      return { success: true, message: 'Display group copied successfully.', data: validatedData };
+      return { success: true, message: 'Display group moved to folder successfully.', data: validatedData };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('copyDisplayGroup: An unexpected error occurred', { error });
+      logger.error('selectFolderForDisplayGroup: An unexpected error occurred', { error });
 
       if (error instanceof z.ZodError) {
         return { success: false, message: 'Validation error occurred.', error: error.issues };

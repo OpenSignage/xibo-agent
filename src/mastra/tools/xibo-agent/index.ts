@@ -25,7 +25,7 @@ import { getUser, getUserMe, addUser, deleteUser, editUser, getUserPermissions,
   setUserPermissions, getUserPreferences, setUserPreferences,
   getMultiEntityPermissions, editUserPreferences } from './user';
 import { getModules, getModuleProperties, getModuleTemplateProperties, getModuleTemplates } from './modules';
-import { getDisplays, editDisplay, wakeOnLan, toggleAuthoriseForDisplay, setDefaultLayoutOnDisplay,
+import { getDisplays, editDisplay, wakeOnLan, toggleAuthoriseForDisplay, setDefaultLayoutForDisplay,
   checkDisplayLicence, getDisplayStatus, purgeAllMediaFromDisplay } from './display';
 import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
   clearLayout, getLayoutStatus, checkoutLayout, discardLayout,editLayout,
@@ -48,7 +48,10 @@ import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './li
 import { generateImage, updateImage, getImageHistory } from './generateImage';
 import { videoGeneration, videoUpdate, getVideoHistory } from './generateVideo';
 import { getNotifications, deleteNotification, addNotification, editNotification } from './notification';
-import { getDisplayGroups } from './displayGroup';
+import { getDisplayGroups, addDisplayGroup, editDisplayGroup, deleteDisplayGroup,
+  assignDisplaysToDisplayGroup, unassignDisplaysFromDisplayGroup, collectNowForDisplayGroup,
+  clearStatsAndLogsForDisplayGroup, revertDisplayGroupToSchedule, sendCommandToDisplayGroup,
+  copyDisplayGroup, selectFolderForDisplayGroup, triggerWebhookForDisplayGroup } from './displayGroup';
 import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } from './template';
 import { getLogs } from './log';
 import { getTransition } from './transition';
@@ -137,7 +140,7 @@ export function getTools() {
     // Module 
     getModules,getModuleProperties,getModuleTemplateProperties,getModuleTemplates, 
     // Display
-    getDisplays,editDisplay,wakeOnLan,toggleAuthoriseForDisplay,setDefaultLayoutOnDisplay,
+    getDisplays,editDisplay,wakeOnLan,toggleAuthoriseForDisplay,setDefaultLayoutForDisplay,
     checkDisplayLicence,getDisplayStatus,purgeAllMediaFromDisplay,
     // Layout    
     getLayouts,addLayout,deleteLayout,retireLayout,unretireLayout,clearLayout,
@@ -173,7 +176,11 @@ export function getTools() {
     // Notification
     getNotifications,deleteNotification,addNotification,editNotification,
     // Display group
-    getDisplayGroups,
+    getDisplayGroups,addDisplayGroup,editDisplayGroup,deleteDisplayGroup,
+    assignDisplaysToDisplayGroup,unassignDisplaysFromDisplayGroup,
+    collectNowForDisplayGroup,clearStatsAndLogsForDisplayGroup,
+    revertDisplayGroupToSchedule,sendCommandToDisplayGroup,copyDisplayGroup,
+    selectFolderForDisplayGroup,triggerWebhookForDisplayGroup,
     // Template
     getTemplate,searchAllTemplates,addTemplate,addTemplateFromLayout,
     // Day part

@@ -12,8 +12,8 @@
 
 /**
  * @module
- * This module provides a tool to purge all cached media from a display.
- * It sends a PUT request to the /api/display/purgeAll/:displayId endpoint.
+ * This module provides a tool to trigger a webhook for a display group.
+ * It sends a POST request to the /api/displaygroup/:displayGroupId/webhook endpoint.
  */
 
 import { z } from 'zod';
@@ -23,7 +23,8 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 
 const inputSchema = z.object({
-  displayId: z.number().describe('The ID of the display to purge media from.'),
+  displayGroupId: z.number().describe('The ID of the display group to trigger the webhook for.'),
+  triggerCode: z.string().describe('The trigger code for the webhook.'),
 });
 
 const outputSchema = z.union([
@@ -38,9 +39,9 @@ const outputSchema = z.union([
   }),
 ]);
 
-export const purgeAllMediaFromDisplay = createTool({
-  id: 'purge-all-media-from-display',
-  description: 'Purge all cached media from a specific display.',
+export const triggerWebhookForDisplayGroup = createTool({
+  id: 'trigger-webhook-for-display-group',
+  description: 'Trigger a webhook for a specific display group.',
   inputSchema,
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
@@ -50,26 +51,29 @@ export const purgeAllMediaFromDisplay = createTool({
       }
 
       const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/display/purgeAll/${input.displayId}`;
-      logger.debug(`purgeAllMediaFromDisplay: Requesting URL = ${url}`);
+      const params = new URLSearchParams({ triggerCode: input.triggerCode });
 
+      const url = `${config.cmsUrl}/api/displaygroup/${input.displayGroupId}/webhook`;
+      logger.debug(`triggerWebhookForDisplayGroup: Requesting URL = ${url}, Body = ${params.toString()}`);
+      
       const response = await fetch(url, {
-        method: 'PUT',
-        headers,
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
       });
 
       if (!response.ok) {
         const errorData = await response.text();
-        logger.error(`purgeAllMediaFromDisplay: HTTP error: ${response.status}`, { error: errorData });
+        logger.error(`triggerWebhookForDisplayGroup: HTTP error: ${response.status}`, { error: errorData });
         return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
       }
-
-      // A successful response is typically a 204 No Content
-      return { success: true, message: 'All media purge requested successfully.' };
+      
+      // Successful response is 204 No Content
+      return { success: true, message: 'Webhook triggered successfully.' };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('purgeAllMediaFromDisplay: An unexpected error occurred', { error });
+      logger.error('triggerWebhookForDisplayGroup: An unexpected error occurred', { error });
       return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
   },

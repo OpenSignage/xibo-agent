@@ -12,8 +12,8 @@
 
 /**
  * @module
- * This module provides a tool to set the default layout for a display.
- * It sends a PUT request to the /api/display/defaultlayout/:displayId endpoint.
+ * This module provides a tool to clear statistics and logs for a display group.
+ * It sends a POST request to the /api/displaygroup/:displayGroupId/clearStatsAndLogs endpoint.
  */
 
 import { z } from 'zod';
@@ -23,8 +23,7 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 
 const inputSchema = z.object({
-  displayId: z.number().describe('The ID of the display to set the default layout for.'),
-  layoutId: z.number().describe('The ID of the layout to set as default.'),
+  displayGroupId: z.number().describe('The ID of the display group to clear stats and logs for.'),
 });
 
 const outputSchema = z.union([
@@ -39,9 +38,9 @@ const outputSchema = z.union([
   }),
 ]);
 
-export const setDefaultLayoutOnDisplay = createTool({
-  id: 'set-default-layout',
-  description: 'Set the default layout for a specific display.',
+export const clearStatsAndLogsForDisplayGroup = createTool({
+  id: 'clear-stats-and-logs-for-display-group',
+  description: 'Clear statistics and logs for a specific display group.',
   inputSchema,
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
@@ -51,29 +50,26 @@ export const setDefaultLayoutOnDisplay = createTool({
       }
 
       const headers = await getAuthHeaders();
-      const params = new URLSearchParams({ layoutId: String(input.layoutId) });
-      const url = `${config.cmsUrl}/api/display/defaultlayout/${input.displayId}`;
-      
-      logger.debug(`setDefaultLayout: Requesting URL = ${url}`);
+      const url = `${config.cmsUrl}/api/displaygroup/${input.displayGroupId}/clearStatsAndLogs`;
+      logger.debug(`clearStatsAndLogsForDisplayGroup: Requesting URL = ${url}`);
 
       const response = await fetch(url, {
-        method: 'PUT',
-        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
+        method: 'POST',
+        headers,
       });
 
       if (!response.ok) {
-        const errorData = await response.text();
-        logger.error(`setDefaultLayout: HTTP error: ${response.status}`, { error: errorData });
+        const errorData = await response.text(); // Error might not be JSON
+        logger.error(`clearStatsAndLogsForDisplayGroup: HTTP error: ${response.status}`, { error: errorData });
         return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
       }
-
-      // A successful response is typically a 204 No Content
-      return { success: true, message: 'Default layout set successfully.' };
+      
+      // Successful response is 204 No Content
+      return { success: true, message: 'Stats and logs cleared successfully.' };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('setDefaultLayout: An unexpected error occurred', { error });
+      logger.error('clearStatsAndLogsForDisplayGroup: An unexpected error occurred', { error });
       return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
   },
