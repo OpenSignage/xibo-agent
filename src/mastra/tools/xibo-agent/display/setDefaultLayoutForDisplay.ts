@@ -12,8 +12,8 @@
 
 /**
  * @module
- * This module provides a tool to purge all cached media from a display.
- * It sends a PUT request to the /api/display/purgeAll/:displayId endpoint.
+ * This module provides a tool to set the default layout for a display.
+ * It sends a PUT request to the /api/display/defaultlayout/:displayId endpoint.
  */
 
 import { z } from 'zod';
@@ -23,7 +23,8 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 
 const inputSchema = z.object({
-  displayId: z.number().describe('The ID of the display to purge media from.'),
+  displayId: z.number().describe('The ID of the display to set the default layout for.'),
+  layoutId: z.number().describe('The ID of the layout to set as default.'),
 });
 
 const outputSchema = z.union([
@@ -38,9 +39,9 @@ const outputSchema = z.union([
   }),
 ]);
 
-export const purgeAllMediaFromDisplay = createTool({
-  id: 'purge-all-media-from-display',
-  description: 'Purge all cached media from a specific display.',
+export const setDefaultLayoutForDisplay = createTool({
+  id: 'set-default-layout-for-display',
+  description: 'Set the default layout for a specific display.',
   inputSchema,
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
@@ -50,26 +51,29 @@ export const purgeAllMediaFromDisplay = createTool({
       }
 
       const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/display/purgeAll/${input.displayId}`;
-      logger.debug(`purgeAllMediaFromDisplay: Requesting URL = ${url}`);
+      const params = new URLSearchParams({ layoutId: String(input.layoutId) });
+      const url = `${config.cmsUrl}/api/display/defaultlayout/${input.displayId}`;
+      
+      logger.debug(`setDefaultLayoutForDisplay: Requesting URL = ${url}`);
 
       const response = await fetch(url, {
         method: 'PUT',
-        headers,
+        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
       });
 
       if (!response.ok) {
         const errorData = await response.text();
-        logger.error(`purgeAllMediaFromDisplay: HTTP error: ${response.status}`, { error: errorData });
+        logger.error(`setDefaultLayoutForDisplay: HTTP error: ${response.status}`, { error: errorData });
         return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
       }
 
       // A successful response is typically a 204 No Content
-      return { success: true, message: 'All media purge requested successfully.' };
+      return { success: true, message: 'Default layout set successfully.' };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('purgeAllMediaFromDisplay: An unexpected error occurred', { error });
+      logger.error('setDefaultLayoutForDisplay: An unexpected error occurred', { error });
       return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
   },

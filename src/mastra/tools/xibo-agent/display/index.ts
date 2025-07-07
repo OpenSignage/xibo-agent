@@ -21,7 +21,7 @@ export { getDisplays } from './getDisplays';
 export { editDisplay } from './editDisplay';
 export { wakeOnLan } from './wakeOnLan';
 export { toggleAuthoriseForDisplay } from './toggleAuthoriseForDisplay';
-export { setDefaultLayoutOnDisplay } from './setDefaultLayoutOnDisplay';
+export { setDefaultLayoutForDisplay } from './setDefaultLayoutForDisplay';
 export { checkDisplayLicence } from './checkDisplayLicence';
 export { getDisplayStatus } from './getDisplayStatus';
 export { purgeAllMediaFromDisplay } from './purgeAllMediaFromDisplay';

@@ -12,8 +12,8 @@
 
 /**
  * @module
- * This module provides a tool to purge all cached media from a display.
- * It sends a PUT request to the /api/display/purgeAll/:displayId endpoint.
+ * This module provides a tool to revert a display group to its scheduled content.
+ * It sends a POST request to the /api/displaygroup/:displayGroupId/revertToSchedule endpoint.
  */
 
 import { z } from 'zod';
@@ -23,7 +23,7 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 
 const inputSchema = z.object({
-  displayId: z.number().describe('The ID of the display to purge media from.'),
+  displayGroupId: z.number().describe('The ID of the display group to revert to schedule.'),
 });
 
 const outputSchema = z.union([
@@ -38,9 +38,9 @@ const outputSchema = z.union([
   }),
 ]);
 
-export const purgeAllMediaFromDisplay = createTool({
-  id: 'purge-all-media-from-display',
-  description: 'Purge all cached media from a specific display.',
+export const revertDisplayGroupToSchedule = createTool({
+  id: 'revert-display-group-to-schedule',
+  description: 'Revert a display group to its scheduled content, canceling any overrides.',
   inputSchema,
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
@@ -50,26 +50,26 @@ export const purgeAllMediaFromDisplay = createTool({
       }
 
       const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/display/purgeAll/${input.displayId}`;
-      logger.debug(`purgeAllMediaFromDisplay: Requesting URL = ${url}`);
+      const url = `${config.cmsUrl}/api/displaygroup/${input.displayGroupId}/revertToSchedule`;
+      logger.debug(`revertDisplayGroupToSchedule: Requesting URL = ${url}`);
 
       const response = await fetch(url, {
-        method: 'PUT',
+        method: 'POST',
         headers,
       });
 
       if (!response.ok) {
         const errorData = await response.text();
-        logger.error(`purgeAllMediaFromDisplay: HTTP error: ${response.status}`, { error: errorData });
+        logger.error(`revertDisplayGroupToSchedule: HTTP error: ${response.status}`, { error: errorData });
         return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
       }
-
-      // A successful response is typically a 204 No Content
-      return { success: true, message: 'All media purge requested successfully.' };
+      
+      // Successful response is 204 No Content
+      return { success: true, message: 'Successfully reverted to schedule.' };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('purgeAllMediaFromDisplay: An unexpected error occurred', { error });
+      logger.error('revertDisplayGroupToSchedule: An unexpected error occurred', { error });
       return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
   },
