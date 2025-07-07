@@ -22,4 +22,5 @@ export { editMenuBoardProduct } from './editMenuBoardProduct';
 export { getMenuBoardCategories } from './getMenuBoardCategories';
 export { getMenuBoardProducts } from './getMenuBoardProducts';
 export { getMenuBoards } from './getMenuBoards';
-export { selectMenuBoardFolder } from './selectMenuBoardFolder'; 
+export { selectMenuBoardFolder } from './selectMenuBoardFolder';
+export { getMenuBoardTree } from './getMenuBoardTree'; 

@@ -50,14 +50,18 @@ export const editMenuBoardCategory = createTool({
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
     try {
+      // Ensure CMS URL is configured
       if (!config.cmsUrl) {
         return { success: false, message: 'CMS URL is not configured.' };
       }
       
       const { menuCategoryId, ...bodyParams } = input;
+      
+      // Get authentication headers
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
 
+      // Prepare request parameters from input context
       Object.entries(bodyParams).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
           params.append(key, String(value));
@@ -67,6 +71,7 @@ export const editMenuBoardCategory = createTool({
       const url = `${config.cmsUrl}/api/menuboard/${menuCategoryId}/category`;
       logger.debug(`editMenuBoardCategory: Requesting URL = ${url}, Body = ${params.toString()}`);
       
+      // Make the API call to edit the menu board category
       const response = await fetch(url, {
         method: 'PUT',
         headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -75,22 +80,26 @@ export const editMenuBoardCategory = createTool({
 
       const responseData = await response.json();
 
+      // Handle non-successful responses
       if (!response.ok) {
         logger.error(`editMenuBoardCategory: HTTP error: ${response.status}`, { error: responseData });
         return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
       }
 
-      const validatedData = menuBoardCategorySchema.parse(responseData.data);
+      // Validate the response data against the schema
+      const validatedData = menuBoardCategorySchema.parse(responseData);
       return { success: true, message: 'Menu board category edited successfully.', data: validatedData };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       logger.error('editMenuBoardCategory: An unexpected error occurred', { error });
 
+      // Handle validation errors specifically
       if (error instanceof z.ZodError) {
         return { success: false, message: 'Validation error occurred.', error: error.issues };
       }
       
+      // Handle other unexpected errors
       return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
   },
