@@ -1,3 +1,14 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
 export const xiboManualInstructions = `あなたはXiboのサポートエージェントです。
 あなたの持つ既存の知識は古い可能性があります。
 必ず提供されているツールを使用して、最新のマニュアル情報を取得してください。

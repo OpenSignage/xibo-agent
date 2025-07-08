@@ -15,19 +15,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { config } from './config';
 import fs from 'fs';
 import path from 'path';
-//import { fileURLToPath } from 'url';
-//import { createLogger } from '@mastra/core/logger';
 import { logger } from '../../index';
-
-// Create logger
-//const logger = createLogger({
-//  name: 'xibo-manual',
-//  level: 'info'
-//});
-
-// Get the path of the original source code
-//const __filename = fileURLToPath(import.meta.url);
-//const __dirname = path.dirname(__filename);
 
 // Use settings from config.ts
 const BASE_DIR = config.paths.root;
@@ -36,11 +24,6 @@ const SOURCE_DIR = path.resolve(BASE_DIR, config.paths.contents);
 const MANUAL_BASE_URL = config.baseUrl;
 
 const CONTENTS_DIR = SOURCE_DIR;
-
-// For debugging: check paths
-//logger.debug('BASE_DIR', { BASE_DIR });
-//logger.debug('SOURCE_DIR', { SOURCE_DIR });
-//logger.info('CONTENTS_DIR', { CONTENTS_DIR });
 
 const loadManualContents = () => {
   const contents: Record<string, string> = {};

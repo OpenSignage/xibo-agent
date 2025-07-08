@@ -92,7 +92,7 @@ export const videoGeneration = createTool({
       }
 
       const genAI = new GoogleGenerativeAI(geminiApiKey);
-      const model = genAI.getGenerativeModel({ model: "veo" }); // Using "veo" as per docs.
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" }); // Using "veo" as per docs.
 
       // 2. Generate video content
       let fullPrompt = prompt;
