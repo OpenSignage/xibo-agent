@@ -1,66 +1,78 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Delete Schedule Event Tool
+ *
+ * This module provides a tool to delete a specific schedule event
+ * from the Xibo CMS.
+ */
 import { z } from "zod";
-import { createTool } from '@mastra/core/tools';
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
+import { createTool } from '@mastra/core';
+import { logger } from '../../../index';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 
-// APIレスポンスのスキーマ
-const responseSchema = z.object({
-  success: z.boolean(),
-  message: z.string()
-});
+// Schema for the overall response
+const outputSchema = z.union([
+    z.object({
+        success: z.literal(true),
+        message: z.string(),
+    }),
+    z.object({
+        success: z.literal(false),
+        message: z.string(),
+        error: z.any().optional(),
+    }),
+]);
 
+/**
+ * A tool to delete a specific schedule event from the Xibo CMS.
+ */
 export const deleteSchedule = createTool({
-  id: 'delete-schedule',
-  description: 'スケジュールを削除します',
-  inputSchema: z.object({
-    eventId: z.number().describe('削除するスケジュールのイベントID')
-  }),
+    id: 'delete-schedule',
+    description: 'Deletes a specific schedule event.',
+    inputSchema: z.object({
+        eventId: z.number().describe("The ID of the event to delete."),
+    }),
+    outputSchema,
+    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+        const { eventId } = input;
+        
+        if (!config.cmsUrl) {
+            return { success: false, message: 'CMS URL is not configured.' };
+        }
 
-  outputSchema: z.string(),
-  execute: async ({ context }) => {
-    try {
-      console.log("[DEBUG] deleteSchedule: 開始");
-      console.log("[DEBUG] deleteSchedule: config =", config);
-      
-      if (!config.cmsUrl) {
-        console.error("[DEBUG] deleteSchedule: CMSのURLが設定されていません");
-        throw new Error("CMSのURLが設定されていません");
-      }
-      console.log(`[DEBUG] deleteSchedule: CMS URL = ${config.cmsUrl}`);
+        const url = `${config.cmsUrl}/api/schedule/${eventId}`;
 
-      const headers = await getAuthHeaders();
-      console.log("[DEBUG] deleteSchedule: 認証ヘッダーを取得しました");
-      console.log("[DEBUG] deleteSchedule: 認証ヘッダー =", headers);
+        try {
+            const headers = await getAuthHeaders();
+            const response = await fetch(url, {
+                method: 'DELETE',
+                headers,
+            });
 
-      const { eventId } = context;
-      console.log(`[DEBUG] deleteSchedule: イベントID = ${eventId}`);
-
-      const response = await fetch(`${config.cmsUrl}/api/schedule/${eventId}`, {
-        method: 'DELETE',
-        headers
-      });
-
-      console.log(`[DEBUG] deleteSchedule: レスポンスステータス = ${response.status}`);
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error(`[DEBUG] deleteSchedule: HTTPエラーが発生しました: ${response.status}`, errorData);
-        throw new Error(`HTTP error! status: ${response.status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`);
-      }
-
-      const data = await response.json();
-      console.log("[DEBUG] deleteSchedule: レスポンスデータを取得しました");
-      console.log("[DEBUG] deleteSchedule: レスポンスデータの構造:");
-      console.log("生データ:", JSON.stringify(data, null, 2));
-      console.log("データ型:", typeof data);
-      console.log("キー一覧:", Object.keys(data));
-
-      const validatedData = responseSchema.parse(data);
-      console.log("[DEBUG] deleteSchedule: データの検証が成功しました");
-
-      return JSON.stringify(validatedData, null, 2);
-    } catch (error) {
-      console.error("[DEBUG] deleteSchedule: エラーが発生しました", error);
-      return `エラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`;
-    }
-  },
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => response.statusText);
+                logger.error('deleteSchedule: HTTP error', { eventId, status: response.status, error: errorData });
+                return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+            }
+            
+            // A 204 No Content response is expected on successful deletion
+            return { success: true, message: `Schedule event ${eventId} deleted successfully.` };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            logger.error('deleteSchedule: Unexpected error', { eventId, error: errorMessage });
+            return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+        }
+    },
 }); 

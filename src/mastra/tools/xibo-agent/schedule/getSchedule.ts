@@ -1,172 +1,96 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Get Schedule Tool
+ *
+ * This module provides a tool to retrieve schedule information from the Xibo CMS.
+ * It allows querying for schedule events based on various filters like display
+ * group IDs and event IDs.
+ */
 import { z } from "zod";
-import { createTool } from '@mastra/core/tools';
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
+import { createTool } from '@mastra/core';
+import { logger } from '../../../index';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { scheduleEventSchema } from './schemas';
 
-const tagSchema = z.object({
-  tag: z.string(),
-  tagId: z.number(),
-  value: z.string()
-});
+const responseDataSchema = z.array(scheduleEventSchema);
 
-const displayGroupSchema = z.object({
-  displayGroupId: z.number(),
-  displayGroup: z.string(),
-  description: z.string(),
-  isDisplaySpecific: z.number(),
-  isDynamic: z.number(),
-  dynamicCriteria: z.string(),
-  dynamicCriteriaLogicalOperator: z.string(),
-  dynamicCriteriaTags: z.string(),
-  dynamicCriteriaExactTags: z.number(),
-  dynamicCriteriaTagsLogicalOperator: z.string(),
-  userId: z.number(),
-  tags: z.array(tagSchema),
-  bandwidthLimit: z.number(),
-  groupsWithPermissions: z.string(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
-  folderId: z.number(),
-  permissionsFolderId: z.number(),
-  ref1: z.string(),
-  ref2: z.string(),
-  ref3: z.string(),
-  ref4: z.string(),
-  ref5: z.string()
-});
+// Schema for the overall response
+const outputSchema = z.union([
+    z.object({
+        success: z.literal(true),
+        data: responseDataSchema,
+    }),
+    z.object({
+        success: z.literal(false),
+        message: z.string(),
+        error: z.any().optional(),
+    }),
+]);
 
-const scheduleReminderSchema = z.object({
-  scheduleReminderId: z.number(),
-  eventId: z.number(),
-  value: z.number(),
-  type: z.number(),
-  option: z.number(),
-  isEmail: z.number(),
-  reminderDt: z.number(),
-  lastReminderDt: z.number()
-});
-
-const eventSchema = z.object({
-  eventId: z.number(),
-  eventTypeId: z.number(),
-  campaignId: z.number(),
-  commandId: z.number(),
-  displayGroups: z.array(displayGroupSchema),
-  scheduleReminders: z.array(scheduleReminderSchema),
-  criteria: z.array(z.string()),
-  userId: z.number(),
-  fromDt: z.number(),
-  toDt: z.number(),
-  isPriority: z.number(),
-  displayOrder: z.number(),
-  recurrenceType: z.string(),
-  recurrenceDetail: z.number(),
-  recurrenceRange: z.number(),
-  recurrenceRepeatsOn: z.string(),
-  recurrenceMonthlyRepeatsOn: z.number(),
-  campaign: z.string(),
-  command: z.string(),
-  dayPartId: z.number(),
-  isAlways: z.number(),
-  isCustom: z.number(),
-  syncEvent: z.number(),
-  syncTimezone: z.number(),
-  shareOfVoice: z.number(),
-  maxPlaysPerHour: z.number(),
-  isGeoAware: z.number(),
-  geoLocation: z.string(),
-  actionTriggerCode: z.string(),
-  actionType: z.string(),
-  actionLayoutCode: z.string(),
-  parentCampaignId: z.number(),
-  syncGroupId: z.number(),
-  dataSetId: z.number(),
-  dataSetParams: z.number(),
-  modifiedBy: z.number(),
-  createdOn: z.string(),
-  updatedOn: z.string(),
-  name: z.string()
-});
-
-// APIレスポンスのスキーマ
-const responseSchema = z.array(eventSchema);
-
+/**
+ * A tool to retrieve schedule events from the Xibo CMS.
+ * It can filter events by display group IDs and a specific event ID.
+ */
 export const getSchedule = createTool({
-  id: 'get-schedule',
-  description: 'スケジュールイベントの一覧を取得します',
-  inputSchema: z.object({
-    eventTypeId: z.number().optional().describe('イベントタイプID（1=レイアウト、2=コマンド、3=オーバーレイ、4=割り込み、5=キャンペーン、6=アクション、7=メディアライブラリ、8=プレイリスト）'),
-    fromDt: z.string().optional().describe('開始日時（Y-m-d H:i:s形式）'),
-    toDt: z.string().optional().describe('終了日時（Y-m-d H:i:s形式）'),
-    geoAware: z.number().optional().describe('地理的位置情報を使用するイベントを取得するかどうか（0-1）'),
-    recurring: z.number().optional().describe('繰り返しイベントを取得するかどうか（0-1）'),
-    campaignId: z.number().optional().describe('特定のキャンペーンIDでフィルタリング'),
-    displayGroupIds: z.array(z.number()).optional().describe('表示グループIDの配列でフィルタリング')
-  }),
+    id: 'get-schedule',
+    description: 'Retrieves schedule events. Can be filtered by display groups or a specific event.',
+    inputSchema: z.object({
+        displayGroupIds: z.array(z.number()).optional().describe("An array of display group IDs to filter the schedule events."),
+        eventId: z.number().optional().describe("A specific event ID to retrieve.")
+    }),
+    outputSchema,
+    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+        const { displayGroupIds, eventId } = input;
+        
+        if (!config.cmsUrl) {
+            return { success: false, message: 'CMS URL is not configured.' };
+        }
 
-  outputSchema: z.string(),
-  execute: async ({ context }) => {
-    try {
-      console.log("[DEBUG] getSchedule: 開始");
-      console.log("[DEBUG] getSchedule: config =", config);
-      
-      if (!config.cmsUrl) {
-        console.error("[DEBUG] getSchedule: CMSのURLが設定されていません");
-        throw new Error("CMSのURLが設定されていません");
-      }
-      console.log(`[DEBUG] getSchedule: CMS URL = ${config.cmsUrl}`);
+        const params = new URLSearchParams();
+        if (displayGroupIds) {
+            params.append('displayGroupIds', displayGroupIds.join(','));
+        }
 
-      const headers = await getAuthHeaders();
-      console.log("[DEBUG] getSchedule: 認証ヘッダーを取得しました");
-      console.log("[DEBUG] getSchedule: 認証ヘッダー =", headers);
+        const endpoint = eventId ? `/api/schedule/${eventId}` : '/api/schedule';
+        const url = `${config.cmsUrl}${endpoint}?${params.toString()}`;
 
-      console.log("[DEBUG] getSchedule: 検索条件 =", context);
+        try {
+            const headers = await getAuthHeaders();
+            const response = await fetch(url, { headers });
 
-      // クエリパラメータの構築
-      const params = new URLSearchParams();
-      if (context.eventTypeId !== undefined) params.append('eventTypeId', context.eventTypeId.toString());
-      if (context.fromDt) {
-        const fromDate = new Date(context.fromDt);
-        params.append('fromDt', fromDate.toISOString().slice(0, 19).replace('T', ' '));
-      }
-      if (context.toDt) {
-        const toDate = new Date(context.toDt);
-        params.append('toDt', toDate.toISOString().slice(0, 19).replace('T', ' '));
-      }
-      if (context.geoAware !== undefined) params.append('geoAware', context.geoAware.toString());
-      if (context.recurring !== undefined) params.append('recurring', context.recurring.toString());
-      if (context.campaignId !== undefined) params.append('campaignId', context.campaignId.toString());
-      if (context.displayGroupIds) params.append('displayGroupIds', context.displayGroupIds.join(','));
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => response.statusText);
+                logger.error('getSchedule: HTTP error', { status: response.status, error: errorData });
+                return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+            }
 
-      const url = `${config.cmsUrl}/api/schedule?${params.toString()}`;
-      console.log(`[DEBUG] getSchedule: リクエストURL = ${url}`);
+            const data = await response.json();
+            // If a single event is requested, the API returns an object, not an array. Wrap it.
+            const dataArray = Array.isArray(data) ? data : [data];
+            const parsedData = responseDataSchema.safeParse(dataArray);
 
-      const response = await fetch(url, {
-        method: 'GET',
-        headers
-      });
+            if (!parsedData.success) {
+                logger.error('getSchedule: Zod validation failed', { error: parsedData.error });
+                return { success: false, message: 'Validation failed for the received schedule data.', error: parsedData.error.format() };
+            }
 
-      console.log(`[DEBUG] getSchedule: レスポンスステータス = ${response.status}`);
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error(`[DEBUG] getSchedule: HTTPエラーが発生しました: ${response.status}`, errorData);
-        throw new Error(`HTTP error! status: ${response.status}${errorData ? `, message: ${JSON.stringify(errorData)}` : ''}`);
-      }
-
-      const data = await response.json();
-      console.log("[DEBUG] getSchedule: レスポンスデータを取得しました");
-      console.log("[DEBUG] getSchedule: レスポンスデータの構造:");
-      console.log("生データ:", JSON.stringify(data, null, 2));
-      console.log("データ型:", typeof data);
-      console.log("キー一覧:", Object.keys(data));
-
-      const validatedData = responseSchema.parse(data);
-      console.log("[DEBUG] getSchedule: データの検証が成功しました");
-
-      return JSON.stringify(validatedData, null, 2);
-    } catch (error) {
-      console.error("[DEBUG] getSchedule: エラーが発生しました", error);
-      return `エラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`;
-    }
-  },
+            return { success: true, data: parsedData.data };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            logger.error('getSchedule: Unexpected error', { error: errorMessage });
+            return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+        }
+    },
 }); 

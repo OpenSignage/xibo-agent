@@ -80,6 +80,8 @@ import { addMenuBoard, addMenuBoardCategory, addMenuBoardProduct, deleteMenuBoar
   deleteMenuBoardCategory, deleteMenuBoardProduct, editMenuBoard, editMenuBoardCategory,
   editMenuBoardProduct, getMenuBoardCategories, getMenuBoardProducts, getMenuBoards,
   selectMenuBoardFolder, getMenuBoardTree } from './menuBoard';
+import { deleteSchedule, deleteScheduleRecurrence, getSchedule, getScheduleDataEvents,
+  getScheduleDisplayGroupIdEvents, addSchedule, editSchedule, scheduleEventSchema } from './schedule';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -227,5 +229,8 @@ export function getTools() {
     deleteMenuBoardCategory,deleteMenuBoardProduct,editMenuBoard,editMenuBoardCategory,
     editMenuBoardProduct,getMenuBoardCategories,getMenuBoardProducts,getMenuBoards,
     selectMenuBoardFolder,getMenuBoardTree,
+    // Schedule
+    deleteSchedule,deleteScheduleRecurrence,getSchedule,getScheduleDataEvents,
+    getScheduleDisplayGroupIdEvents,addSchedule,editSchedule,scheduleEventSchema,
   };
 }
