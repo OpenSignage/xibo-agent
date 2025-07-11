@@ -11,11 +11,10 @@
  */
 
 /**
- * Tag Media Tool
+ * Assign Tags to Media Tool
  *
- * This module provides a tool to assign or unassign tags to a media item in
- * the Xibo CMS library. It implements the 'POST /library/{mediaId}/tag' and
- * 'DELETE /library/{mediaId}/tag' endpoints.
+ * This module provides a tool to assign tags to a media item in
+ * the Xibo CMS library. It implements the 'POST /library/{mediaId}/tag' endpoint.
  */
 import { z } from "zod";
 import { createTool } from '@mastra/core';
@@ -24,11 +23,10 @@ import { getAuthHeaders } from '../auth';
 import { config } from '../config';
 import { librarySchema } from './schemas';
 
-// Schema for the input, based on the POST/DELETE /library/{mediaId}/tag endpoints
+// Schema for the input, based on the POST /library/{mediaId}/tag endpoint
 const inputSchema = z.object({
-    mediaId: z.number().describe("The ID of the media item to tag or untag."),
+    mediaId: z.number().describe("The ID of the media item to tag."),
     tags: z.array(z.string()).describe("An array of tags to assign."),
-    action: z.enum(['assign', 'unassign']).default('assign').describe("Whether to 'assign' or 'unassign' the tags."),
 });
 
 // The API returns the updated media object on success.
@@ -45,28 +43,28 @@ const outputSchema = z.union([
 ]);
 
 /**
- * Tool for Tagging a Media Item
+ * Tool for Assigning Tags to a Media Item
  *
- * This tool assigns or unassigns one or more tags to a specified media item.
+ * This tool assigns one or more tags to a specified media item.
  */
-export const tagMedia = createTool({
-    id: 'tag-media',
-    description: 'Assigns or unassigns tags to a media item.',
+export const assignTagsToMedia = createTool({
+    id: 'assign-tags-to-media',
+    description: 'Assigns tags to a media item.',
     inputSchema,
     outputSchema,
     execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
-        const { mediaId, tags, action } = input;
+        const { mediaId, tags } = input;
 
         if (!config.cmsUrl) {
             return { success: false, message: 'CMS URL is not configured.' };
         }
 
-        const method = action === 'assign' ? 'POST' : 'DELETE';
+        const method = 'POST';
         const params = new URLSearchParams();
-        params.append('tags', tags.join(','));
+        tags.forEach(tag => params.append('tag[]', tag));
 
         const url = `${config.cmsUrl}/api/library/${mediaId}/tag`;
-        logger.debug(`tagMedia: ${method}ing to URL: ${url}`);
+        logger.debug(`assignTagsToMedia: ${method}ing to URL: ${url}`);
 
         try {
             const authHeaders = await getAuthHeaders();
@@ -83,7 +81,7 @@ export const tagMedia = createTool({
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => response.statusText);
-                logger.error('tagMedia: HTTP error', { status: response.status, error: errorData });
+                logger.error('assignTagsToMedia: HTTP error', { status: response.status, error: errorData });
                 return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
             }
 
@@ -91,14 +89,14 @@ export const tagMedia = createTool({
             const parsedData = librarySchema.safeParse(data);
 
             if (!parsedData.success) {
-                logger.error('tagMedia: Zod validation failed', { error: parsedData.error.format(), rawData: data });
+                logger.error('assignTagsToMedia: Zod validation failed', { error: parsedData.error.format(), rawData: data });
                 return { success: false, message: 'Validation failed for the API response.', error: parsedData.error.format() };
             }
 
             return { success: true, data: parsedData.data };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
-            logger.error('tagMedia: Unexpected error', { error: errorMessage, details: error });
+            logger.error('assignTagsToMedia: Unexpected error', { error: errorMessage, details: error });
             return { success: false, message: errorMessage, error };
         }
     },

@@ -45,7 +45,8 @@ import { getPlaylists, addPlaylist, editPlaylist, deletePlaylist, copyPlaylist,
 import { getStats, getTimeDisconnected, getExportStatsCount } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, addMedia, uploadMediaFromURL, downloadThumbnail, editMedia,
-  deleteMedia, downloadMedia, tagMedia } from './library';
+  deleteMedia, downloadMedia, assignTagsToMedia, unassignTagsFromMedia,
+  setEnableStatToMedia, getMediaUsage, getUsageLayouts } from './library';
 import { generateImage, updateImage, getImageHistory } from './generateImage';
 import { videoGeneration, videoUpdate, getVideoHistory } from './generateVideo';
 import { getNotifications, deleteNotification, addNotification, editNotification } from './notification';
@@ -177,7 +178,8 @@ export function getTools() {
     getTags,addTag,editTag,deleteTag,
     // Library
     getLibrary,addMedia,uploadMediaFromURL,downloadThumbnail,editMedia,
-    deleteMedia,downloadMedia,tagMedia,
+      deleteMedia,downloadMedia,assignTagsToMedia,unassignTagsFromMedia,
+      setEnableStatToMedia,getMediaUsage,getUsageLayouts,
     // Generation
     generateImage,updateImage,getImageHistory,generateQRCode,
     videoGeneration, videoUpdate, getVideoHistory,
