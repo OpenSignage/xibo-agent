@@ -11,11 +11,9 @@
  */
 
 /**
- * Xibo CMS Resolution Editing Tool
- * 
- * This module provides functionality to edit existing resolutions in the Xibo CMS system.
- * It implements the resolution editing API endpoint and handles the necessary validation
- * and data transformation for updating resolution properties.
+ * @module
+ * This module provides a tool for editing an existing resolution in the Xibo CMS.
+ * It implements the PUT /resolution/{id} endpoint.
  */
 
 import { z } from "zod";
@@ -26,31 +24,34 @@ import { logger } from '../../../index';
 import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for a single resolution object.
+ * Schema for a single resolution object returned by the API.
  */
 const resolutionSchema = z.object({
-  resolutionId: z.number(),
-  resolution: z.string(),
-  width: z.number(),
-  height: z.number(),
-  designerWidth: z.number(),
-  designerHeight: z.number(),
-  version: z.number(),
-  enabled: z.number(),
-  userId: z.number(),
+  resolutionId: z.number().describe("The unique ID of the resolution."),
+  resolution: z.string().describe("The name of the resolution."),
+  width: z.number().describe("The width of the resolution in pixels."),
+  height: z.number().describe("The height of the resolution in pixels."),
+  designerWidth: z.number().describe("The designer width."),
+  designerHeight: z.number().describe("The designer height."),
+  version: z.number().describe("The version number of the resolution."),
+  enabled: z.number().describe("Flag indicating if the resolution is enabled (1 or 0)."),
+  userId: z.number().describe("The ID of the user who last modified the resolution."),
 }).passthrough();
 
 /**
  * Schema for the tool's output, covering both success and failure cases.
  */
 const outputSchema = z.object({
-  success: z.boolean(),
-  data: resolutionSchema.optional(),
-  message: z.string().optional(),
-  error: z.any().optional(),
-  errorData: z.any().optional(),
+  success: z.boolean().describe("Indicates whether the operation was successful."),
+  data: resolutionSchema.optional().describe("The edited resolution data on success."),
+  message: z.string().optional().describe("A message providing details about the operation outcome."),
+  error: z.any().optional().describe("Error details if the operation failed."),
+  errorData: z.any().optional().describe("Raw error data from the API."),
 });
 
+/**
+ * Tool to edit an existing resolution in the Xibo CMS.
+ */
 export const editResolution = createTool({
   id: "edit-resolution",
   description: "Edit an existing resolution in Xibo CMS",
@@ -63,23 +64,24 @@ export const editResolution = createTool({
   }),
   outputSchema,
   execute: async ({ context }) => {
-    const logContext = { ...context };
-    logger.info("Attempting to edit a resolution.", logContext);
+    logger.info({ context }, "Executing editResolution tool.");
     
     if (!config.cmsUrl) {
-      logger.error("CMS URL is not configured.", logContext);
-      return { success: false, message: "CMS URL is not configured." };
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false, message };
     }
 
     try {
       const url = new URL(`${config.cmsUrl}/api/resolution/${context.resolutionId}`);
-      logger.debug(`Requesting to edit resolution at: ${url.toString()}`, logContext);
-
+      
       const formData = new URLSearchParams();
       formData.append("resolution", context.resolution);
       formData.append("width", context.width.toString());
       formData.append("height", context.height.toString());
       formData.append("enabled", context.enabled.toString());
+      
+      logger.debug({ url: url.toString(), body: formData.toString() }, "Sending PUT request to edit resolution.");
 
       const headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/x-www-form-urlencoded';
@@ -94,61 +96,35 @@ export const editResolution = createTool({
       
       if (!response.ok) {
         const errorData = decodeErrorMessage(responseText);
-        logger.error("Failed to edit resolution via CMS API.", {
-          ...logContext,
-          status: response.status,
-          errorData,
-        });
-        return {
-          success: false,
-          message: `API request failed with status ${response.status}.`,
-          errorData,
-        };
+        const message = `API request failed with status ${response.status}.`;
+        logger.error({ status: response.status, errorData, context }, message);
+        return { success: false, message, errorData };
       }
 
       let responseData;
       try {
         responseData = JSON.parse(responseText);
       } catch (e) {
-        logger.error("Failed to parse JSON response from CMS API.", {
-          ...logContext,
-          responseText,
-        });
-        return {
-          success: false,
-          message: "Invalid JSON response from server.",
-          errorData: responseText,
-        };
+        const message = "Invalid JSON response from server.";
+        logger.error({ responseText, context }, message);
+        return { success: false, message, errorData: responseText };
       }
       
       const validationResult = resolutionSchema.safeParse(responseData);
 
       if (!validationResult.success) {
-        logger.warn("API response validation failed for editResolution.", {
-          ...logContext,
-          error: validationResult.error.flatten(),
-          responseData,
-        });
-        return {
-          success: false,
-          message: "Response validation failed.",
-          error: validationResult.error.flatten(),
-          errorData: responseData,
-        };
+        const message = "Response validation failed.";
+        logger.warn({ error: validationResult.error.flatten(), responseData, context }, message);
+        return { success: false, message, error: validationResult.error.flatten(), errorData: responseData };
       }
 
-      logger.info(`Successfully edited resolution ID ${validationResult.data.resolutionId}.`, logContext);
+      logger.info({ resolutionId: validationResult.data.resolutionId }, "Successfully edited resolution.");
       return { success: true, data: validationResult.data };
 
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-      logger.error("An unexpected error occurred in editResolution.", {
-        ...logContext,
-        error: errorMessage,
-      });
+      logger.error({ error: errorMessage, context }, "An unexpected error occurred in editResolution.");
       return { success: false, message: "An unexpected error occurred.", error: errorMessage };
     }
   },
-});
-
-export default editResolution; 
+}); 
