@@ -11,14 +11,9 @@
  */
 
 /**
- * Xibo CMS Time Retrieval Tool
- * 
- * This module provides functionality to retrieve the current time from the Xibo CMS API.
- * It connects to the /api/clock endpoint to get the server's current time, which is useful
- * for synchronization and scheduling operations in the Xibo ecosystem.
- * 
- * The tool returns both server time (UTC) and local time based on the server's timezone settings.
- * For Japanese servers, the timezone is typically set to JST (UTC+9).
+ * @module
+ * This module provides a tool to retrieve the current time from the Xibo CMS.
+ * It implements the GET /clock endpoint.
  */
 
 import { z } from "zod";
@@ -29,106 +24,88 @@ import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
 
 /**
- * Schema for the clock response from Xibo API
- * 
- * The API returns:
- * - serverTime: Current server time in ISO 8601 format
- * - timezone: Server's timezone setting (e.g., "Asia/Tokyo" for JST)
- * - offset: Timezone offset in minutes (e.g., 540 for JST)
+ * Schema for the 'clock' response from the Xibo API.
  */
 const clockResponseSchema = z.object({
-  serverTime: z.string().optional(),
-  timezone: z.string().optional(),
-  offset: z.number().optional()
+  serverTime: z.string().optional().describe("Current server time in ISO 8601 format."),
+  timezone: z.string().optional().describe("Server's timezone setting (e.g., 'Asia/Tokyo')."),
+  offset: z.number().optional().describe("Timezone offset in minutes from UTC.")
 }).passthrough();
 
 /**
- * Convert UTC time to local time with timezone offset
- * 
- * @param utcTime - UTC time string in ISO 8601 format
- * @param timezone - Timezone string (e.g., "Asia/Tokyo")
- * @param offset - Timezone offset in minutes (e.g., 540 for JST)
- * @returns Local time string in ISO 8601 format
+ * Converts a UTC time string to a local time string using a given offset.
+ * @param utcTime - The UTC time string in ISO 8601 format.
+ * @param offset - The timezone offset in minutes.
+ * @returns The calculated local time string in ISO 8601 format.
  */
-function convertToLocalTime(utcTime: string, timezone: string, offset: number): string {
+function convertToLocalTime(utcTime: string, offset: number): string {
   try {
     const date = new Date(utcTime);
     const localDate = new Date(date.getTime() + (offset * 60 * 1000));
     return localDate.toISOString();
   } catch (error) {
-    logger.error(`Error converting time: ${error instanceof Error ? error.message : "Unknown error"}`);
-    return utcTime;
+    logger.error({ error }, "Error converting UTC time to local time.");
+    return utcTime; // Return original time on error
   }
 }
 
 /**
- * Tool for retrieving the current time from Xibo CMS
- * 
- * This tool doesn't require any input parameters and returns
- * a JSON object containing:
- * - currentTime: Server's current time in UTC
- * - timezone: Server's timezone setting
- * - offset: Timezone offset in minutes
- * - localTime: Time converted to local timezone
+ * Schema for the tool's output.
+ */
+const outputSchema = z.object({
+  success: z.boolean().describe("Indicates whether the operation was successful."),
+  message: z.string().describe("A message providing details about the operation outcome."),
+  data: z.object({
+    currentTime: z.string().describe("The server's current time in UTC (ISO 8601)."),
+    timezone: z.string().describe("The server's configured timezone."),
+    offset: z.number().describe("The timezone offset in minutes from UTC."),
+    localTime: z.string().describe("The calculated local time (ISO 8601).")
+  }).optional().describe("The time information on success."),
+  error: z.string().optional().describe("Error details if the operation failed."),
+});
+
+/**
+ * Tool for retrieving the current time from the Xibo CMS.
  */
 export const getCmsTime = createTool({
   id: 'get-cms-time',
-  description: 'Get the current time from Xibo CMS',
-  inputSchema: z.object({
-    _placeholder: z.string().optional().describe('This tool does not require input parameters')
-  }),
-  outputSchema: z.object({
-    success: z.boolean(),
-    message: z.string(),
-    data: z.object({
-      currentTime: z.string(),
-      timezone: z.string(),
-      offset: z.number(),
-      localTime: z.string()
-    }).optional(),
-    error: z.string().optional()
-  }),
+  description: 'Get the current time from Xibo CMS.',
+  inputSchema: z.object({}), // This tool does not require any input.
+  outputSchema,
   execute: async ({ context }) => {
+    logger.info({ context }, "Executing getCmsTime tool.");
+    
     try {
-      // Check if CMS URL is configured
       if (!config.cmsUrl) {
-        return {
-          success: false,
-          message: "Failed to get CMS time",
-          error: "CMS URL is not configured"
-        };
+        const message = "CMS URL is not configured.";
+        logger.error(message);
+        return { success: false, message, error: message };
       }
 
-      // Get authentication headers
       const headers = await getAuthHeaders();
+      const url = `${config.cmsUrl}/api/clock`;
+      logger.debug({ url }, "Sending GET request for CMS time.");
+      
+      const response = await fetch(url, { headers });
 
-      // Call CMS API
-      const response = await fetch(`${config.cmsUrl}/api/clock`, {
-        headers,
-      });
-
-      // Handle API errors
       if (!response.ok) {
         const text = await response.text();
-        return {
-          success: false,
-          message: "Failed to get CMS time",
-          error: decodeErrorMessage(text)
-        };
+        const error = decodeErrorMessage(text);
+        const message = "Failed to get CMS time.";
+        logger.error({ status: response.status, error }, message);
+        return { success: false, message, error };
       }
 
-      // Parse and validate response
       const data = await response.json();
-      logger.debug('CMS time response:', data);
+      logger.debug({ data }, "Received clock response from CMS API.");
       const validatedData = clockResponseSchema.parse(data);
       
-      // Extract time information with fallbacks
       const serverTime = validatedData.serverTime || new Date().toISOString();
       const timezone = validatedData.timezone || 'UTC';
       const offset = validatedData.offset || 0;
-      const localTime = convertToLocalTime(serverTime, timezone, offset);
+      const localTime = convertToLocalTime(serverTime, offset);
 
-      // Return formatted response
+      logger.info("Successfully retrieved CMS time.");
       return {
         success: true,
         data: {
@@ -140,11 +117,12 @@ export const getCmsTime = createTool({
         message: "Successfully retrieved CMS time"
       };
     } catch (error: unknown) {
-      logger.error(`getCmsTime: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error({ error }, "An unexpected error occurred in getCmsTime.");
       return {
         success: false,
         message: "Failed to get CMS time",
-        error: error instanceof Error ? error.message : "Unknown error"
+        error: errorMessage,
       };
     }
   },
