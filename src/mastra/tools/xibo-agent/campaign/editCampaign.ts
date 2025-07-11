@@ -23,20 +23,21 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 import { campaignSchema } from './schemas';
 
+// Schema for the tool's input, based on the API endpoint.
 const inputSchema = z.object({
   campaignId: z.number().describe('ID of the campaign to edit.'),
   name: z.string().describe('The new name for the campaign.'),
   folderId: z.number().optional().describe('Folder ID to which this object should be assigned to.'),
   manageLayouts: z.number().optional().describe('Flag indicating whether to manage layouts or not. Default to no.'),
   layoutIds: z.array(z.number()).optional().describe('An array of layoutIds to assign to this Campaign, in order.'),
-  cyclePlaybackEnabled: z.number().optional().describe("When cycle based playback is enabled only 1 Layout from this Campaign will be played each time it is in a Schedule loop. The same Layout will be shown until the 'Play count' is achieved.",),
-  playCount: z.number().optional().describe('In cycle based playback, how many plays should each Layout have before moving on?',),
-  listPlayOrder: z.string().optional().describe('In layout list, how should campaigns in the schedule with the same play order be played?',),
+  cyclePlaybackEnabled: z.number().optional().describe("When cycle based playback is enabled only 1 Layout from this Campaign will be played each time it is in a Schedule loop. The same Layout will be shown until the 'Play count' is achieved."),
+  playCount: z.number().optional().describe('In cycle based playback, how many plays should each Layout have before moving on?'),
+  listPlayOrder: z.string().optional().describe('In layout list, how should campaigns in the schedule with the same play order be played?'),
   targetType: z.string().optional().describe('For ad campaigns, how do we measure the target? plays|budget|imp'),
-  target: z.number().optional().describe('For ad campaigns, what is the target count for playback over the entire campaign',),
+  target: z.number().optional().describe('For ad campaigns, what is the target count for playback over the entire campaign'),
   startDt: z.string().optional().describe('For ad campaigns, what is the start date (ISO 8601 format).'),
   endDt: z.string().optional().describe('For ad campaigns, what is the end date (ISO 8601 format).'),
-  displayGroupIds: z.array(z.number()).optional().describe('For ad campaigns, which display groups should the campaign be run on?',),
+  displayGroupIds: z.array(z.number()).optional().describe('For ad campaigns, which display groups should the campaign be run on?'),
   ref1: z.string().optional().describe('An optional reference field.'),
   ref2: z.string().optional().describe('An optional reference field.'),
   ref3: z.string().optional().describe('An optional reference field.'),
@@ -44,6 +45,7 @@ const inputSchema = z.object({
   ref5: z.string().optional().describe('An optional reference field.'),
 });
 
+// Schema for the tool's output.
 const outputSchema = z.union([
   z.object({
     success: z.literal(true),
@@ -57,6 +59,9 @@ const outputSchema = z.union([
   }),
 ]);
 
+/**
+ * Tool to edit an existing campaign in the Xibo CMS.
+ */
 export const editCampaign = createTool({
   id: 'edit-campaign',
   description: 'Edits an existing campaign in the Xibo CMS.',
@@ -65,10 +70,14 @@ export const editCampaign = createTool({
   execute: async ({
     context: input,
   }): Promise<z.infer<typeof outputSchema>> => {
+    // Log the start of the execution.
+    logger.info({ input }, 'Executing editCampaign tool.');
     const { campaignId, layoutIds, displayGroupIds, ...inputData } = input;
 
     if (!config.cmsUrl) {
-      return { success: false, message: 'CMS URL is not configured.' };
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
     }
 
     try {
@@ -93,7 +102,8 @@ export const editCampaign = createTool({
       }
       
       const url = `${config.cmsUrl}/api/campaign/${campaignId}`;
-      logger.debug(`putCampaign: Requesting URL = ${url}`, { body: params.toString() });
+      // Log the request details before sending.
+      logger.debug({ url, body: params.toString() }, 'Sending PUT request to edit campaign.');
 
       const response = await fetch(url, {
         method: 'PUT',
@@ -104,22 +114,26 @@ export const editCampaign = createTool({
       const responseData = await response.json();
 
       if (!response.ok) {
-        logger.error(`putCampaign: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+        // Log the HTTP error.
+        const message = `HTTP error! status: ${response.status}`;
+        logger.error({ status: response.status, responseData }, message);
+        return { success: false, message, error: responseData };
       }
 
       const validatedData = campaignSchema.parse(responseData);
-      logger.info(`putCampaign: Successfully edited campaign ${validatedData.campaignId}.`);
+      // Log the successful edit.
+      logger.info({ campaignId: validatedData.campaignId }, 'Successfully edited campaign.');
       return { success: true, message: 'Campaign edited successfully.', data: validatedData };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('putCampaign: An unexpected error occurred', { error });
+      // Log any unexpected errors.
+      logger.error({ error, input }, 'An unexpected error occurred in editCampaign.');
 
       if (error instanceof z.ZodError) {
         return { success: false, message: 'Validation error occurred.', error: error.issues };
       }
       
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       return { success: false, message: `An unexpected error occurred: ${errorMessage}` };
     }
   },

@@ -28,6 +28,7 @@ import {
   createTreeViewResponse,
 } from '../utility/treeView';
 
+// Schema for the tool's input.
 const inputSchema = z.object({
   campaignId: z.number().optional().describe('Filter by Campaign ID.'),
   name: z.string().optional().describe('Filter by campaign name (supports filtering with %).'),
@@ -43,6 +44,7 @@ const inputSchema = z.object({
   treeView: z.boolean().optional().describe('Set to true to return campaigns in a structured, hierarchical tree view.'),
 });
 
+// Schema for the tool's output.
 const outputSchema = z.union([
   z.object({
     success: z.literal(true),
@@ -57,24 +59,34 @@ const outputSchema = z.union([
   }),
 ]);
 
+/**
+ * Tool to search for and retrieve campaigns from the Xibo CMS.
+ */
 export const getCampaigns = createTool({
   id: 'get-campaigns',
   description: 'Searches for and retrieves campaigns from the Xibo CMS.',
   inputSchema,
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+    // Log the start of the execution.
+    logger.info({ input }, 'Executing getCampaigns tool.');
+
     if (!config.cmsUrl) {
-      return { success: false, message: 'CMS URL is not configured.' };
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
     }
 
     if (input.treeView) {
+      // Logic for building a hierarchical tree view of campaigns and folders.
       try {
         const authHeaders = await getAuthHeaders();
         const campaignParams = new URLSearchParams();
-        // When tree view is enabled, always use the default embed to get all info
+        // When tree view is enabled, always use the default embed to get all info.
         campaignParams.append('embed', 'layouts,permissions,tags,event');
 
-        // 1. Fetch all folders and campaigns in parallel
+        // 1. Fetch all folders and campaigns in parallel.
+        logger.debug('Fetching all folders and campaigns for tree view.');
         const [foldersResponse, campaignsResponse] = await Promise.all([
           fetch(`${config.cmsUrl}/api/folders?gridView=1`, { headers: authHeaders }),
           fetch(`${config.cmsUrl}/api/campaign?${campaignParams.toString()}`, { headers: authHeaders })
@@ -85,8 +97,9 @@ export const getCampaigns = createTool({
 
         const foldersData = await foldersResponse.json();
         const campaignsData: z.infer<typeof campaignSchema>[] = await campaignsResponse.json();
+        logger.debug({ foldersCount: foldersData.length, campaignsCount: campaignsData.length }, 'Fetched data for tree view.');
 
-        // 2. Map all folders and campaigns to TreeNode objects
+        // 2. Map all folders and campaigns to TreeNode objects.
         const nodes: { [id: string]: TreeNode } = {};
 
         foldersData.forEach((folder: any) => {
@@ -101,7 +114,7 @@ export const getCampaigns = createTool({
         });
 
         campaignsData.forEach(campaign => {
-          const campaignNodeId = campaign.campaignId + 1000000; // Offset to avoid collision with folder IDs
+          const campaignNodeId = campaign.campaignId + 1000000; // Offset to avoid collision with folder IDs.
           const id = `campaign-${campaign.campaignId}`;
           const parentId = campaign.folderId ? `folder-${campaign.folderId}` : 'root';
 
@@ -110,7 +123,7 @@ export const getCampaigns = createTool({
 
           const addDetailNode = (name: string, type: string) => {
             detailNodes.push({
-              id: campaignNodeId * 100 + detailIdCounter++, // Unique ID for detail node
+              id: campaignNodeId * 100 + detailIdCounter++, // Unique ID for detail node.
               name,
               type,
             });
@@ -134,7 +147,7 @@ export const getCampaigns = createTool({
               children: [],
             };
             campaign.layouts.forEach((layout: any, index: number) => {
-              // Ensure unique ID for layout items
+              // Ensure unique ID for layout items.
               const layoutId = layout.layoutId ? campaignNodeId * 1000 + layout.layoutId : campaignNodeId * 10000 + index;
               layoutParentNode.children?.push({
                 id: layoutId,
@@ -148,7 +161,7 @@ export const getCampaigns = createTool({
 
           const { type, ...restOfCampaign } = campaign;
           nodes[id] = {
-            id: campaignNodeId, // Use the unique, offsetted ID for the campaign node
+            id: campaignNodeId, // Use the unique, offsetted ID for the campaign node.
             parentId: parentId,
             name: campaign.campaign,
             type: 'campaign',
@@ -157,7 +170,7 @@ export const getCampaigns = createTool({
           };
         });
         
-        // 3. Build the tree from the flat list of nodes
+        // 3. Build the tree from the flat list of nodes.
         const tree: TreeNode[] = [];
         Object.values(nodes).forEach(node => {
           if (node.parentId && node.parentId !== 'root' && nodes[node.parentId]) {
@@ -165,12 +178,12 @@ export const getCampaigns = createTool({
             parent.children = parent.children || [];
             parent.children.push(node);
           } else {
-            // It's a root node
+            // It's a root node.
             tree.push(node);
           }
         });
 
-        // 4. Prune empty folders from the tree
+        // 4. Prune empty folders from the tree.
         const pruneEmptyFolders = (node: TreeNode): boolean => {
           if (node.type === 'campaign') {
             return true;
@@ -186,38 +199,41 @@ export const getCampaigns = createTool({
         };
 
         const finalTree = tree.filter(pruneEmptyFolders);
-
+        
+        logger.info({ nodeCount: finalTree.length }, 'Successfully generated campaign tree view.');
         return createTreeViewResponse(campaignsData, finalTree, (node) => {
             if (node.type === 'folder') return `📁 ${node.name}`;
             if (node.type === 'campaign') return `🎬 ${node.name} (ID: ${node.campaignId})`;
             if (node.type === 'detail-group') return `ℹ️ ${node.name}`;
             if (node.type === 'layout-item') return `${node.name} (ID: ${node.layoutId})`;
-            // For simple details and layout items, just return the name.
-            // generateTreeView will handle the prefix characters (├─, └─).
+            // For simple details, generateTreeView will handle the prefix characters.
             return node.name;
         });
 
       } catch (error) {
+        // Log any unexpected errors in tree view mode.
+        logger.error({ error }, 'An unexpected error occurred in getCampaigns (tree view).');
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        logger.error('getCampaigns (tree view): An unexpected error occurred', { error });
         return { success: false, message: `An unexpected error occurred: ${errorMessage}` };
       }
     }
 
+    // Default logic for fetching a flat list of campaigns.
     try {
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
       
       Object.entries(input).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
-          // Do not include 'treeView' in the params for the flat list API call
+          // Do not include 'treeView' in the params for the flat list API call.
           if (key === 'treeView') return;
           params.append(key, String(value));
         }
       });
 
       const url = `${config.cmsUrl}/api/campaign?${params.toString()}`;
-      logger.debug(`getCampaigns: Requesting URL = ${url}`);
+      // Log the request details before sending.
+      logger.debug({ url }, 'Sending GET request to fetch campaigns.');
 
       const response = await fetch(url, {
         method: 'GET',
@@ -227,22 +243,26 @@ export const getCampaigns = createTool({
       const responseData = await response.json();
 
       if (!response.ok) {
-        logger.error(`getCampaigns: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+        // Log the HTTP error.
+        const message = `HTTP error! status: ${response.status}`;
+        logger.error({ status: response.status, responseData }, message);
+        return { success: false, message, error: responseData };
       }
 
       const validatedData = z.array(campaignSchema).parse(responseData);
-      logger.info('getCampaigns: Successfully retrieved and validated campaigns.');
+      // Log the successful retrieval.
+      logger.info({ count: validatedData.length }, 'Successfully retrieved and validated campaigns.');
       return { success: true, message: 'Campaigns retrieved successfully.', data: validatedData };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('getCampaigns: An unexpected error occurred', { error });
+      // Log any unexpected errors.
+      logger.error({ error, input }, 'An unexpected error occurred in getCampaigns.');
       
       if (error instanceof z.ZodError) {
         return { success: false, message: 'Validation error occurred.', error: error.issues };
       }
       
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       return { success: false, message: `An unexpected error occurred: ${errorMessage}` };
     }
   },
