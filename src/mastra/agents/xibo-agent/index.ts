@@ -46,7 +46,6 @@ export const xiboAgent = new Agent({
   name: 'Xibo Agent',
   instructions: xiboAgentInstructions,
   model: google('gemini-1.5-pro-latest'),
-  //model: google('gemini-2.0-flash-exp'),
   tools: getTools(),
   memory: new Memory({
     options: {

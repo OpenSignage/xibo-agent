@@ -21,7 +21,7 @@
  */
 import { Agent } from '@mastra/core/agent';
 import { google } from '@ai-sdk/google';
-import { xiboManualTool } from '../../tools/xibo-manual/manual';
+import { getTools } from '../../tools/xibo-manual/manual';
 import { xiboManualInstructions } from './instructions';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
@@ -32,7 +32,7 @@ export const xiboManualAgent = new Agent({
   name: 'Xibo Manual Agent',
   instructions: xiboManualInstructions,
   model: google('gemini-1.5-pro-latest'),
-  tools: { xiboManualTool },
+  tools: getTools(),
   memory: new Memory({
     options: {
       // Retain the last 40 messages for context.

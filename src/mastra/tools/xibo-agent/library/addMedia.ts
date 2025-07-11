@@ -11,179 +11,180 @@
  */
 
 /**
- * Xibo CMS Media Addition Tool
- * 
- * This module provides functionality to add new media to the Xibo CMS library.
- * It implements the media addition API endpoint and handles the necessary validation
- * and data transformation for media operations.
- * 
- * The tool expects the file to be already present in the standard upload directory:
- * {uploadDir}/
- *   ├── images/
- *   ├── videos/
- *   ├── documents/
- *   ├── fonts/
- *   └── sketchs/
- * 
- * Where {uploadDir} is configured in config.ts (default: ./upload)
- * 
- * Usage example:
- * {
- *   filePath: "./upload/images/example.jpg",
- *   name: "My Media",
- *   type: "image",
- *   duration: 0
- * }
+ * Add Media Tool
+ *
+ * This module provides a tool to upload a local media file to the Xibo CMS library.
+ * It implements the 'POST /library' endpoint and handles the multipart/form-data upload.
  */
-
 import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
+import { createTool } from '@mastra/core';
 import { logger } from '../../../index';
-import path from 'path';
-import fs from 'fs';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { librarySchema } from './schemas';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import axios, { AxiosError } from 'axios';
+import FormData from 'form-data';
 
-/**
- * Schema for API response validation
- */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.object({
-    id: z.number(),
+// Schema for a successful file upload entry in the response
+const uploadSuccessSchema = z.object({
     name: z.string(),
-    type: z.string(),
-    duration: z.number(),
-    fileName: z.string(),
     size: z.number(),
+    type: z.string(),
+    mediaId: z.number(),
+    storedas: z.string(),
+    duration: z.number(),
+    retired: z.number(),
+    fileSize: z.number(),
     md5: z.string(),
-    createdAt: z.string(),
-    modifiedAt: z.string(),
-    modifiedBy: z.string(),
-  }),
+    enableStat: z.string().optional(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+    mediaType: z.string(),
+    fileName: z.string(),
 });
 
+// Schema for a failed file upload entry in the response
+const uploadErrorSchema = z.object({
+    name: z.string(),
+    size: z.number(),
+    type: z.string(),
+    error: z.string(),
+});
+
+// This specific tool has a unique response structure which can contain success and error objects.
+const addMediaResponseSchema = z.object({
+    files: z.array(z.union([uploadSuccessSchema, uploadErrorSchema])),
+});
+
+// Schema for the input, based on the POST /library endpoint parameters
+const inputSchema = z.object({
+    fileName: z.string().describe("The name of the file to upload (e.g., 'image.png')."),
+    filePath: z.string().optional().default('persistent_data/uploads/').describe("The relative path to the file from the project root. Defaults to 'persistent_data/uploads/'."),
+    name: z.string().optional().describe("Optional name for the new media item."),
+    oldMediaId: z.number().optional().describe("Id of an existing media file which should be replaced with the new upload."),
+    updateInLayouts: z.number().optional().describe("Flag (0, 1), set to 1 to update this media in all layouts (use with oldMediaId)."),
+    deleteOldRevisions: z.number().optional().describe("Flag (0, 1), to either remove or leave the old file revisions (use with oldMediaId)."),
+    tags: z.string().optional().describe("Comma separated string of Tags that should be assigned to uploaded Media."),
+    expires: z.string().optional().describe("Date in Y-m-d H:i:s format, will set expiration date on the uploaded Media."),
+    playlistId: z.number().optional().describe("A playlistId to add this uploaded media to."),
+    widgetFromDt: z.string().optional().describe("Date in Y-m-d H:i:s format, will set widget start date. Requires a playlistId."),
+    widgetToDt: z.string().optional().describe("Date in Y-m-d H:i:s format, will set widget end date. Requires a playlistId."),
+    deleteOnExpiry: z.number().optional().describe("Flag (0, 1), set to 1 to remove the Widget from the Playlist when the widgetToDt has been reached."),
+    applyToMedia: z.number().optional().describe("Flag (0, 1), set to 1 to apply the widgetFromDt as the expiry date on the Media."),
+    folderId: z.number().optional().describe("Folder ID to which this object should be assigned to."),
+});
+
+// The API returns an array containing the new media object.
+const outputSchema = z.union([
+    z.object({
+        success: z.literal(true),
+        data: addMediaResponseSchema,
+    }),
+    z.object({
+        success: z.literal(false),
+        message: z.string(),
+        error: z.any().optional(),
+        errorData: z.any().optional(),
+    }),
+]);
+
 /**
- * Tool for adding media to Xibo CMS library
- * 
- * This tool provides functionality to:
- * - Add new media to the library
- * - Upload media files to the CMS
- * - Set media properties (name, type, duration, etc.)
- * - Handle media data validation and transformation
+ * Tool for Uploading a Local Media File
+ *
+ * This tool uploads a file from the local filesystem to the Xibo Library.
+ * It uses the 'form-data' library for robust multipart/form-data request creation.
  */
 export const addMedia = createTool({
-  id: "add-media",
-  description: "Add new media to Xibo CMS library",
-  inputSchema: z.object({
-    filePath: z.string().describe("Path to media file in the standard upload directory"),
-    name: z.string().describe("Name of the media"),
-    type: z.string().describe("Type of the media"),
-    duration: z.number().describe("Duration of the media in seconds"),
-    tags: z.string().optional().describe("Tags for the media"),
-    folderId: z.number().optional().describe("ID of the folder to store the media"),
-    enableStat: z.string().optional().describe("Enable statistics for the media"),
-  }),
-  outputSchema: apiResponseSchema,
-  execute: async ({ context }) => {
-    try {
-      if (!config.cmsUrl) {
-        throw new Error("CMS URL is not set");
-      }
+    id: 'add-media',
+    description: 'Uploads a local media file to the Library.',
+    inputSchema,
+    outputSchema,
+    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+        const { fileName, filePath, ...otherParams } = input;
 
-      const url = new URL(`${config.cmsUrl}/api/library`);
-      const formData = new FormData();
-      
-      // Validate file exists
-      if (!fs.existsSync(context.filePath)) {
-        throw new Error(`File not found: ${context.filePath}`);
-      }
-      
-      // Create file object from local file
-      const fileStream = fs.createReadStream(context.filePath);
-      const fileBlob = new Blob([await streamToBuffer(fileStream)]);
-      const fileName = path.basename(context.filePath);
-      
-      // Add to form data
-      formData.append("files", new File([fileBlob], fileName));
-      
-      // Add other parameters
-      formData.append("name", context.name);
-      formData.append("type", context.type);
-      formData.append("duration", context.duration.toString());
-      if (context.tags) formData.append("tags", context.tags);
-      if (context.folderId) formData.append("folderId", context.folderId.toString());
-      if (context.enableStat) formData.append("enableStat", context.enableStat);
-
-      logger.debug(`Requesting media addition to: ${url.toString()}`);
-
-      const response = await fetch(url.toString(), {
-        method: "POST",
-        headers: {
-          ...await getAuthHeaders(),
-          // Don't set Content-Type header, let the browser set it with the boundary
-        },
-        body: formData,
-      });
-
-      // Handle error response
-      if (!response.ok) {
-        const errorText = await response.text();
-        logger.error('Failed to add media:', {
-          status: response.status,
-          error: errorText,
-          fileName: context.filePath,
-          mediaName: context.name
-        });
-        try {
-          // Try to parse error response as JSON
-          return JSON.parse(errorText);
-        } catch {
-          // If parsing fails, return error in standard format
-          return {
-            success: false,
-            error: errorText
-          };
+        if (!config.cmsUrl) {
+            return { success: false, message: 'CMS URL is not configured.' };
         }
-      }
 
-      // Parse and validate the response
-      const rawData = await response.json();
-      logger.debug(`Raw upload response: ${JSON.stringify(rawData)}`);
-      
-      try {
-        const validatedData = apiResponseSchema.parse(rawData);
-        logger.info(`Media uploaded successfully: ${validatedData.data.name} (ID: ${validatedData.data.id})`);
-        return validatedData;
-      } catch (validationError) {
-        logger.error(`Response validation error: ${validationError instanceof Error ? validationError.message : "Unknown validation error"}`, {
-          rawData,
-          error: validationError
-        });
-        
-        // Fallback: Return raw data with success flag if validation fails
-        logger.warn("Returning unvalidated response due to schema mismatch");
-        return { 
-          success: true, 
-          data: rawData.data || rawData 
-        };
-      }
-    } catch (error) {
-      logger.error(`addMedia: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      throw error;
-    }
-  },
-});
+        const absoluteFilePath = path.resolve(config.projectRoot, filePath, fileName);
 
-/**
- * Helper function to convert a readable stream to a buffer
- */
-async function streamToBuffer(stream: fs.ReadStream): Promise<Buffer> {
-  return new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    
-    stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on('error', (err) => reject(err));
-    stream.on('end', () => resolve(Buffer.concat(chunks)));
-  });
-} 
+        try {
+            // Read the file from the local path
+            const fileBuffer = await fs.readFile(absoluteFilePath);
+            
+            const form = new FormData();
+
+            // Append the file with an explicit filename. This is the key to solving the issue.
+            form.append('files', fileBuffer, { filename: fileName });
+
+            // Append other optional parameters
+            for (const [key, value] of Object.entries(otherParams)) {
+                if (value !== undefined) {
+                    form.append(key, String(value));
+                }
+            }
+
+            const url = `${config.cmsUrl}/api/library`;
+            logger.debug(`addMedia: Posting to URL: ${url}`);
+            
+            const authHeaders = await getAuthHeaders();
+            
+            // Use form.getHeaders() to get the correct Content-Type with boundary
+            const response = await axios.post(url, form, {
+                headers: {
+                    ...authHeaders,
+                    ...form.getHeaders(),
+                },
+            });
+
+            // The success response for adding a single media item is an object with a "files" key containing an array.
+            const parsedData = addMediaResponseSchema.safeParse(response.data);
+
+            if (!parsedData.success) {
+                logger.error('addMedia: Zod validation failed', { error: parsedData.error.format(), rawData: response.data });
+                return { success: false, message: 'Validation failed for the API response.', error: parsedData.error.format(), errorData: response.data };
+            }
+
+            // Check for business logic errors within the successful response
+            const firstError = parsedData.data.files.find(file => 'error' in file && file.error);
+            if (firstError && 'error' in firstError) {
+                logger.warn('addMedia: Business logic error reported by CMS', { error: firstError.error, rawData: parsedData.data });
+                return {
+                    success: false,
+                    message: firstError.error,
+                    errorData: parsedData.data,
+                };
+            }
+
+            return { success: true, data: parsedData.data };
+
+        } catch (error) {
+            if (error instanceof AxiosError) {
+                const errorDetails = {
+                    status: error.response?.status,
+                    data: error.response?.data,
+                    headers: error.response?.headers,
+                };
+                logger.error('addMedia: HTTP error', { error: error.message, details: errorDetails });
+                return { 
+                    success: false, 
+                    message: `HTTP error! status: ${error.response?.status}`, 
+                    error: error.message,
+                    errorData: error.response?.data 
+                };
+            }
+            
+            let errorMessage = "An unexpected error occurred.";
+            if (error instanceof Error) {
+                errorMessage = error.message;
+                if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                    errorMessage = `File not found at path: ${absoluteFilePath}`;
+                }
+            }
+            logger.error('addMedia: Unexpected error', { error: errorMessage, details: error });
+            return { success: false, message: errorMessage, error };
+        }
+    },
+}); 

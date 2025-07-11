@@ -18,40 +18,94 @@
  */
 import { z } from "zod";
 
+// Schema for tags within a display group
+const tagSchema = z.object({
+  tag: z.string().nullable(),
+  tagId: z.number(),
+  value: z.string().nullable(),
+});
+
+// Schema for a display group associated with a schedule event
+const displayGroupSchema = z.object({
+  displayGroupId: z.number(),
+  displayGroup: z.string(),
+  description: z.string().nullable(),
+  isDisplaySpecific: z.number(),
+  isDynamic: z.number(),
+  dynamicCriteria: z.string().nullable(),
+  dynamicCriteriaLogicalOperator: z.string().nullable(),
+  dynamicCriteriaTags: z.string().nullable(),
+  dynamicCriteriaExactTags: z.number(),
+  dynamicCriteriaTagsLogicalOperator: z.string().nullable(),
+  userId: z.number(),
+  tags: z.array(tagSchema).optional(),
+  bandwidthLimit: z.number().nullable(),
+  groupsWithPermissions: z.string().nullable(),
+  createdDt: z.string().nullable(),
+  modifiedDt: z.string().nullable(),
+  folderId: z.number().nullable(),
+  permissionsFolderId: z.number().nullable(),
+  ref1: z.string().nullable(),
+  ref2: z.string().nullable(),
+  ref3: z.string().nullable(),
+  ref4: z.string().nullable(),
+  ref5: z.string().nullable(),
+});
+
+// Schema for schedule reminders
+const scheduleReminderSchema = z.object({
+  scheduleReminderId: z.number(),
+  eventId: z.number(),
+  value: z.number(),
+  type: z.number(),
+  option: z.number(),
+  isEmail: z.number(),
+  reminderDt: z.number(),
+  lastReminderDt: z.number(),
+});
+
 /**
- * A comprehensive schema for a Xibo schedule event.
- * It includes all possible fields returned from various schedule-related endpoints.
- * Fields that are not universally present are marked as optional.
+ * A comprehensive schema for a Xibo schedule event, based on the full API response.
+ * It includes all possible fields returned from the /schedule endpoint.
  */
 export const scheduleEventSchema = z.object({
-    eventId: z.number().describe("The unique identifier for the event."),
-    eventTypeId: z.number().describe("The type of the event."),
-    fromDt: z.string().describe("The start date and time of the event in 'YYYY-MM-DD HH:mm:ss' format."),
-    toDt: z.string().describe("The end date and time of the event in 'YYYY-MM-DD HH:mm:ss' format."),
-    isAlways: z.number().describe("Flag indicating if the event is always running (1 for yes, 0 for no)."),
-    displayOrder: z.number().describe("The display order of the event."),
-    isPriority: z.number().describe("Flag indicating if the event has priority (1 for yes, 0 for no)."),
-    displayGroupIds: z.array(z.number()).describe("An array of display group IDs this event is scheduled on."),
-    userId: z.number().describe("The ID of the user who created the event."),
-    daypartId: z.number().nullable().describe("The ID of the daypart, if applicable."),
-    
-    // Fields from the main /schedule endpoint
-    commandId: z.number().nullable().optional().describe("The ID of the command, if applicable."),
-    campaignId: z.number().optional().describe("The ID of the campaign associated with the event."),
-    syncTimezone: z.number().optional().describe("Flag to sync with the display timezone (1 for yes, 0 for no)."),
-    recurrenceType: z.string().nullable().optional().describe("The type of recurrence (e.g., 'Minute', 'Hour')."),
-    recurrenceDetail: z.string().nullable().optional().describe("The recurrence details."),
-    recurrenceRange: z.number().nullable().optional().describe("The range for the recurrence."),
-    campaign: z.string().optional().describe("The name of the campaign."),
-    command: z.string().nullable().optional().describe("The command string, if applicable."),
-    code: z.string().nullable().optional().describe("The command code, if applicable."),
-
-    // Fields from the /schedule/dataSet endpoint
-    dataSetId: z.number().optional().describe("The ID of the dataSet associated with this event."),
-    dataSetColumnId: z.number().optional().describe("The ID of the dataSet column used for filtering."),
-    filter: z.string().optional().describe("The filter query applied to the dataSet column."),
-    operator: z.string().optional().describe("The operator used for filtering (e.g., '=', '!=')."),
-
-    // Fields from the /schedule/displaygroup endpoint
-    displayGroupId: z.number().optional().describe("The ID of the display group this event is scheduled on."),
+  eventId: z.number(),
+  eventTypeId: z.number(),
+  campaignId: z.number(),
+  commandId: z.number().nullable(),
+  displayGroups: z.array(displayGroupSchema),
+  scheduleReminders: z.array(scheduleReminderSchema),
+  criteria: z.array(z.string()).optional(),
+  userId: z.number(),
+  fromDt: z.number().describe("The start timestamp of the event."),
+  toDt: z.number().describe("The end timestamp of the event."),
+  isPriority: z.number(),
+  displayOrder: z.number(),
+  recurrenceType: z.string().nullable(),
+  recurrenceDetail: z.number().nullable(),
+  recurrenceRange: z.number().nullable(),
+  recurrenceRepeatsOn: z.string().nullable(),
+  recurrenceMonthlyRepeatsOn: z.number().nullable(),
+  campaign: z.string().nullable(),
+  command: z.string().nullable(),
+  dayPartId: z.number().nullable(),
+  isAlways: z.number(),
+  isCustom: z.number(),
+  syncEvent: z.number(),
+  syncTimezone: z.number(),
+  shareOfVoice: z.number(),
+  maxPlaysPerHour: z.number(),
+  isGeoAware: z.number(),
+  geoLocation: z.string().nullable(),
+  actionTriggerCode: z.string().nullable(),
+  actionType: z.string().nullable(),
+  actionLayoutCode: z.string().nullable(),
+  parentCampaignId: z.number().nullable(),
+  syncGroupId: z.number().nullable(),
+  dataSetId: z.number().nullable(),
+  dataSetParams: z.any().nullable().describe("Parameters for the dataSet, can be of any type."),
+  modifiedBy: z.number(),
+  createdOn: z.string(),
+  updatedOn: z.string(),
+  name: z.string().nullable(),
 }); 

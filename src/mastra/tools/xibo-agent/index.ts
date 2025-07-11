@@ -44,7 +44,9 @@ import { getPlaylists, addPlaylist, editPlaylist, deletePlaylist, copyPlaylist,
    selectPlaylistFolder } from './playlist';
 import { getStats, getTimeDisconnected, getExportStatsCount } from './statistics';
 import { getTags, addTag, editTag, deleteTag } from './tags';
-import { getLibrary, searchAllLibrary, addMedia, uploadMediaFromURL } from './library';
+import { getLibrary, addMedia, uploadMediaFromURL, downloadThumbnail, editMedia,
+  deleteMedia, downloadMedia, assignTagsToMedia, unassignTagsFromMedia,
+  setEnableStatToMedia, getMediaUsage, getUsageLayouts } from './library';
 import { generateImage, updateImage, getImageHistory } from './generateImage';
 import { videoGeneration, videoUpdate, getVideoHistory } from './generateVideo';
 import { getNotifications, deleteNotification, addNotification, editNotification } from './notification';
@@ -81,7 +83,7 @@ import { addMenuBoard, addMenuBoardCategory, addMenuBoardProduct, deleteMenuBoar
   editMenuBoardProduct, getMenuBoardCategories, getMenuBoardProducts, getMenuBoards,
   selectMenuBoardFolder, getMenuBoardTree } from './menuBoard';
 import { deleteSchedule, deleteScheduleRecurrence, getSchedule, getScheduleDataEvents,
-  getScheduleDisplayGroupIdEvents, addSchedule, editSchedule, scheduleEventSchema } from './schedule';
+  getScheduleDisplayGroupIdEvents, addSchedule, editSchedule } from './schedule';
 
 // Basic functionality - module exports
 export * from './misc';         // System information and utilities
@@ -175,7 +177,9 @@ export function getTools() {
     // Tags
     getTags,addTag,editTag,deleteTag,
     // Library
-    getLibrary,searchAllLibrary,addMedia,uploadMediaFromURL,
+    getLibrary,addMedia,uploadMediaFromURL,downloadThumbnail,editMedia,
+      deleteMedia,downloadMedia,assignTagsToMedia,unassignTagsFromMedia,
+      setEnableStatToMedia,getMediaUsage,getUsageLayouts,
     // Generation
     generateImage,updateImage,getImageHistory,generateQRCode,
     videoGeneration, videoUpdate, getVideoHistory,
@@ -231,6 +235,6 @@ export function getTools() {
     selectMenuBoardFolder,getMenuBoardTree,
     // Schedule
     deleteSchedule,deleteScheduleRecurrence,getSchedule,getScheduleDataEvents,
-    getScheduleDisplayGroupIdEvents,addSchedule,editSchedule,scheduleEventSchema,
+    getScheduleDisplayGroupIdEvents,addSchedule,editSchedule,
   };
 }
