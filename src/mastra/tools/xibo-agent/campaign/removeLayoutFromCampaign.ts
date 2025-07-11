@@ -22,6 +22,7 @@ import { config } from '../config';
 import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 
+// Schema for the tool's input.
 const inputSchema = z.object({
   campaignId: z
     .number()
@@ -33,6 +34,7 @@ const inputSchema = z.object({
     .describe('The display order. Omit to remove all occurences of the layout'),
 });
 
+// Schema for the tool's output.
 const outputSchema = z.union([
   z.object({
     success: z.literal(true),
@@ -45,6 +47,9 @@ const outputSchema = z.union([
   }),
 ]);
 
+/**
+ * Tool to remove a layout from a campaign in the Xibo CMS.
+ */
 export const removeLayoutFromCampaign = createTool({
   id: 'remove-layout-from-campaign',
   description: 'Removes a layout from a campaign in the Xibo CMS.',
@@ -53,10 +58,14 @@ export const removeLayoutFromCampaign = createTool({
   execute: async ({
     context: input,
   }): Promise<z.infer<typeof outputSchema>> => {
+    // Log the start of the execution.
+    logger.info({ input }, 'Executing removeLayoutFromCampaign tool.');
     const { campaignId, layoutId, displayOrder } = input;
 
     if (!config.cmsUrl) {
-      return { success: false, message: 'CMS URL is not configured.' };
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
     }
 
     const url = `${config.cmsUrl}/api/campaign/layout/remove/${campaignId}`;
@@ -74,9 +83,8 @@ export const removeLayoutFromCampaign = createTool({
         params.append('displayOrder', displayOrder.toString());
       }
 
-      logger.debug(`removeLayoutFromCampaign: Requesting URL = ${url}`, {
-        body: params.toString(),
-      });
+      // Log the request details before sending.
+      logger.debug({ url, body: params.toString() }, 'Sending DELETE request to remove layout from campaign.');
 
       const response = await fetch(url, {
         method: 'DELETE',
@@ -85,29 +93,26 @@ export const removeLayoutFromCampaign = createTool({
       });
 
       if (response.status === 204) {
-        logger.info(
-          `Successfully removed layout ${layoutId} from campaign ${campaignId}.`,
-        );
+        // Log the successful removal.
+        logger.info({ layoutId, campaignId }, 'Successfully removed layout from campaign.');
         return { success: true, message: 'Layout removed successfully.' };
       }
 
       const errorData = await response.json().catch(() => response.statusText);
-      logger.error(
-        `removeLayoutFromCampaign: HTTP error: ${response.status}`,
-        { error: errorData },
-      );
+      // Log the HTTP error.
+      const message = `HTTP error! status: ${response.status}`;
+      logger.error({ status: response.status, errorData }, message);
       return {
         success: false,
-        message: `HTTP error! status: ${response.status}`,
+        message,
         error: errorData,
       };
     } catch (error) {
+      // Log any unexpected errors.
+      logger.error({ error, input }, 'An unexpected error occurred in removeLayoutFromCampaign.');
       const errorMessage =
         error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('removeLayoutFromCampaign: An unexpected error occurred', {
-        error,
-      });
-
+      
       if (error instanceof z.ZodError) {
         return {
           success: false,

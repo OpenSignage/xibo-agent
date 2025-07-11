@@ -23,11 +23,13 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 import { campaignSchema } from './schemas';
 
+// Schema for the tool's input.
 const inputSchema = z.object({
   campaignId: z.number().describe('The ID of the campaign to move.'),
   folderId: z.number().optional().describe('The ID of the folder to assign the campaign to. If omitted, it may be moved to the root.'),
 });
 
+// Schema for the tool's output.
 const outputSchema = z.union([
   z.object({
     success: z.literal(true),
@@ -41,16 +43,23 @@ const outputSchema = z.union([
   }),
 ]);
 
+/**
+ * Tool to assign a campaign to a specific folder.
+ */
 export const selectCampaignFolder = createTool({
   id: 'select-campaign-folder',
   description: 'Assigns a campaign to a specific folder.',
   inputSchema,
   outputSchema,
   execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+    // Log the start of the execution.
+    logger.info({ input }, 'Executing selectCampaignFolder tool.');
     const { campaignId, folderId } = input;
 
     if (!config.cmsUrl) {
-      return { success: false, message: 'CMS URL is not configured.' };
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
     }
 
     try {
@@ -63,7 +72,8 @@ export const selectCampaignFolder = createTool({
       }
       
       const url = `${config.cmsUrl}/api/campaign/${campaignId}/selectfolder`;
-      logger.debug(`selectCampaignFolder: Requesting URL = ${url}`, { body: params.toString() });
+      // Log the request details before sending.
+      logger.debug({ url, body: params.toString() }, 'Sending PUT request to select campaign folder.');
 
       const response = await fetch(url, {
         method: 'PUT',
@@ -74,22 +84,26 @@ export const selectCampaignFolder = createTool({
       const responseData = await response.json();
 
       if (!response.ok) {
-        logger.error(`selectCampaignFolder: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+        // Log the HTTP error.
+        const message = `HTTP error! status: ${response.status}`;
+        logger.error({ status: response.status, responseData }, message);
+        return { success: false, message, error: responseData };
       }
 
       const validatedData = campaignSchema.parse(responseData);
-      logger.info(`selectCampaignFolder: Successfully moved campaign ${validatedData.campaignId} to folder.`);
+      // Log the successful move.
+      logger.info({ campaignId: validatedData.campaignId, folderId }, 'Successfully moved campaign to folder.');
       return { success: true, message: 'Campaign folder updated successfully.', data: validatedData };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('selectCampaignFolder: An unexpected error occurred', { error });
+      // Log any unexpected errors.
+      logger.error({ error, input }, 'An unexpected error occurred in selectCampaignFolder.');
 
       if (error instanceof z.ZodError) {
         return { success: false, message: 'Validation error occurred.', error: error.issues };
       }
       
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
     }
   },

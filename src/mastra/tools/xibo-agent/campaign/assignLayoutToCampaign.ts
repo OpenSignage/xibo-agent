@@ -23,14 +23,16 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 import { URLSearchParams } from 'url';
 
+// Schema for the tool's input.
 const inputSchema = z.object({
   campaignId: z.number().describe('The Campaign ID'),
-  layoutId: z.number().describe('Layout ID to Assign: Please note that as of v3.0.0 this API no longer accepts multiple layoutIds.',),
+  layoutId: z.number().describe('Layout ID to Assign: Please note that as of v3.0.0 this API no longer accepts multiple layoutIds.'),
   daysOfWeek: z.array(z.number()).optional().describe('Ad campaigns: restrict this to certain days of the week (iso week)'),
   dayPartId: z.number().optional().describe('Ad campaigns: restrict this to a day part'),
   geoFence: z.string().optional().describe('Ad campaigns: restrict this to a geofence'),
 });
 
+// Schema for the tool's output.
 const outputSchema = z.union([
   z.object({
     success: z.literal(true),
@@ -43,6 +45,9 @@ const outputSchema = z.union([
   }),
 ]);
 
+/**
+ * Tool to assign a layout to a campaign in the Xibo CMS.
+ */
 export const assignLayoutToCampaign = createTool({
   id: 'assign-layout-to-campaign',
   description: 'Assigns a layout to a campaign in the Xibo CMS.',
@@ -51,12 +56,16 @@ export const assignLayoutToCampaign = createTool({
   execute: async ({
     context: input,
   }): Promise<z.infer<typeof outputSchema>> => {
+    // Log the start of the execution.
+    logger.info({ input }, 'Executing assignLayoutToCampaign tool.');
     const { campaignId, layoutId, daysOfWeek, dayPartId, geoFence } = input;
 
     if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
       return {
         success: false,
-        message: 'CMS URL is not configured.',
+        message,
       };
     }
 
@@ -86,7 +95,8 @@ export const assignLayoutToCampaign = createTool({
         'Content-Type': 'application/x-www-form-urlencoded',
       };
 
-      logger.debug(`assignLayoutToCampaign: Requesting URL = ${url}`, { body: params.toString() });
+      // Log the request details before sending.
+      logger.debug({ url, body: params.toString() }, 'Sending POST request to assign layout to campaign.');
 
       const response = await fetch(url, {
         method: 'POST',
@@ -95,7 +105,8 @@ export const assignLayoutToCampaign = createTool({
       });
 
       if (response.status === 204) {
-        logger.info(`Successfully assigned layout ${layoutId} to campaign ${campaignId}.`);
+        // Log the successful assignment.
+        logger.info({ layoutId, campaignId }, 'Successfully assigned layout to campaign.');
         return {
           success: true,
           message: `Layout ${layoutId} successfully assigned to campaign ${campaignId}.`,
@@ -103,19 +114,22 @@ export const assignLayoutToCampaign = createTool({
       }
 
       const errorData = await response.json().catch(() => response.statusText);
-      logger.error(`assignLayoutToCampaign: HTTP error: ${response.status}`, { error: errorData });
+      // Log the HTTP error.
+      const message = `HTTP error! status: ${response.status}`;
+      logger.error({ status: response.status, error: errorData }, message);
       return {
         success: false,
-        message: `HTTP error! status: ${response.status}`,
+        message,
         error: errorData,
       };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error(`An error occurred while assigning layout: ${errorMessage}`, { error });
+      // Log any unexpected errors.
+      logger.error({ error }, 'An unexpected error occurred in assignLayoutToCampaign.');
       if (error instanceof z.ZodError) {
         return { success: false, message: 'Validation error occurred.', error: error.issues };
       }
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       return {
         success: false,
         message: `An unexpected error occurred: ${errorMessage}`,

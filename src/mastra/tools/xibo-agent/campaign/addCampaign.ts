@@ -23,6 +23,7 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 import { campaignSchema } from './schemas';
 
+// Schema for the tool's input, based on the API endpoint.
 const inputSchema = z.object({
   type: z.string().describe('Type of campaign (list|ad).'),
   name: z.string().describe('Name of the campaign.'),
@@ -35,6 +36,7 @@ const inputSchema = z.object({
   target: z.number().optional().describe('For ad campaigns, the target number of plays for the entire campaign.'),
 });
 
+// Schema for the tool's output.
 const outputSchema = z.union([
   z.object({
     success: z.literal(true),
@@ -48,6 +50,9 @@ const outputSchema = z.union([
   }),
 ]);
 
+/**
+ * Tool to add a new campaign in the Xibo CMS.
+ */
 export const addCampaign = createTool({
   id: 'add-campaign',
   description: 'Add a new campaign in the Xibo CMS.',
@@ -56,8 +61,13 @@ export const addCampaign = createTool({
   execute: async ({
     context: input,
   }): Promise<z.infer<typeof outputSchema>> => {
+    // Log the start of the execution.
+    logger.info({ input }, 'Executing addCampaign tool');
+
     if (!config.cmsUrl) {
-      return { success: false, message: 'CMS URL is not configured.' };
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
     }
 
     try {
@@ -68,9 +78,8 @@ export const addCampaign = createTool({
       Object.entries(input).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
           if (key === 'layoutIds' && Array.isArray(value)) {
-            // The API likely expects a specific format for arrays, often not standard URL encoding.
-            // Assuming it expects comma-separated values for a parameter like this.
-            // This might need adjustment based on actual API behavior.
+            // The API expects a specific format for arrays, which may need adjustment.
+            // Currently sending as a JSON string.
             params.append(key, JSON.stringify(value));
           } else {
             params.append(key, String(value));
@@ -79,7 +88,8 @@ export const addCampaign = createTool({
       });
       
       const url = `${config.cmsUrl}/api/campaign`;
-      logger.debug(`postCampaign: Requesting URL = ${url}`, { body: params.toString() });
+      // Log the request details before sending.
+      logger.debug({ url, body: params.toString() }, 'Sending POST request to add campaign.');
 
       const response = await fetch(url, {
         method: 'POST',
@@ -90,22 +100,26 @@ export const addCampaign = createTool({
       const responseData = await response.json();
 
       if (!response.ok) {
-        logger.error(`postCampaign: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+        // Log the HTTP error.
+        const message = `HTTP error! status: ${response.status}`;
+        logger.error({ status: response.status, errorData: responseData }, message);
+        return { success: false, message, error: responseData };
       }
 
       const validatedData = campaignSchema.parse(responseData);
-      logger.info(`postCampaign: Successfully created campaign ${validatedData.campaignId}.`);
+      // Log the successful creation.
+      logger.info({ campaignId: validatedData.campaignId }, 'Successfully created campaign.');
       return { success: true, message: 'Campaign created successfully.', data: validatedData };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('postCampaign: An unexpected error occurred', { error });
+      // Log any unexpected errors.
+      logger.error({ error }, 'An unexpected error occurred in addCampaign.');
 
       if (error instanceof z.ZodError) {
         return { success: false, message: 'Validation error occurred.', error: error.issues };
       }
       
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       return { success: false, message: `An unexpected error occurred: ${errorMessage}` };
     }
   },

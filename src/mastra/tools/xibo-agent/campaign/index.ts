@@ -10,10 +10,16 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
+/**
+ * @module
+ * This module serves as the entry point for all campaign-related tools.
+ * It exports all the tools available for campaign management in the Xibo CMS.
+ */
+
 export { getCampaigns } from './getCampaigns';
 export { addCampaign } from './addCampaign';
 export { editCampaign } from './editCampaign';
-export { deleteCampaign} from './deleteCampaign';
+export { deleteCampaign } from './deleteCampaign';
 export { assignLayoutToCampaign } from './assignLayoutToCampaign';
 export { removeLayoutFromCampaign } from './removeLayoutFromCampaign';
 export { selectCampaignFolder } from './selectCampaignFolder';
