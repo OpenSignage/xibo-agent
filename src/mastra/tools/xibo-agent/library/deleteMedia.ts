@@ -30,17 +30,12 @@ const inputSchema = z.object({
 });
 
 // Schema for the tool's output
-const outputSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        message: z.string(),
-    }),
-    z.object({
-        success: z.literal(false),
-        message: z.string(),
-        error: z.any().optional(),
-    }),
-]);
+const outputSchema = z.object({
+    success: z.boolean(),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+});
 
 /**
  * Tool for Deleting a Media Item
@@ -53,10 +48,11 @@ export const deleteMedia = createTool({
     description: 'Deletes a media item from the Library.',
     inputSchema,
     outputSchema,
-    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+    execute: async ({ context: input }) => {
         const { mediaId, forceDelete, purge } = input;
 
         if (!config.cmsUrl) {
+            logger.error({}, 'deleteMedia: CMS URL is not configured.');
             return { success: false, message: 'CMS URL is not configured.' };
         }
 
@@ -86,17 +82,18 @@ export const deleteMedia = createTool({
 
             // A successful deletion returns a 204 No Content response.
             if (response.status === 204) {
+                logger.info(`deleteMedia: Media item ${mediaId} deleted successfully.`);
                 return { success: true, message: `Media item ${mediaId} deleted successfully.` };
             }
 
             const errorData = await response.json().catch(() => response.statusText);
-            logger.error('deleteMedia: HTTP error', { status: response.status, error: errorData });
-            return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+            logger.error({ status: response.status, data: errorData }, 'deleteMedia: HTTP error');
+            return { success: false, message: `HTTP error! status: ${response.status}`, errorData: errorData };
 
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
-            logger.error('deleteMedia: Unexpected error', { error: errorMessage, details: error });
-            return { success: false, message: errorMessage, error };
+            logger.error({ error: errorMessage, details: error }, 'deleteMedia: Unexpected error');
+            return { success: false, message: errorMessage, errorData: error };
         }
     },
 }); 

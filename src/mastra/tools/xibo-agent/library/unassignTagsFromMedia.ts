@@ -30,17 +30,13 @@ const inputSchema = z.object({
 });
 
 // The API returns the updated media object on success.
-const outputSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        data: librarySchema,
-    }),
-    z.object({
-        success: z.literal(false),
-        message: z.string(),
-        error: z.any().optional(),
-    }),
-]);
+const outputSchema = z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    data: librarySchema.optional(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+});
 
 /**
  * Tool for Unassigning Tags from a Media Item
@@ -52,10 +48,11 @@ export const unassignTagsFromMedia = createTool({
     description: 'Unassigns tags from a media item.',
     inputSchema,
     outputSchema,
-    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+    execute: async ({ context: input }) => {
         const { mediaId, tags } = input;
 
         if (!config.cmsUrl) {
+            logger.error({}, 'unassignTagsFromMedia: CMS URL is not configured.');
             return { success: false, message: 'CMS URL is not configured.' };
         }
 
@@ -81,23 +78,31 @@ export const unassignTagsFromMedia = createTool({
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => response.statusText);
-                logger.error('unassignTagsFromMedia: HTTP error', { status: response.status, error: errorData });
-                return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+                logger.error({ status: response.status, data: errorData }, 'unassignTagsFromMedia: HTTP error');
+                return { success: false, message: `HTTP error! status: ${response.status}`, errorData: errorData };
             }
 
             const data = await response.json();
             const parsedData = librarySchema.safeParse(data);
 
             if (!parsedData.success) {
-                logger.error('unassignTagsFromMedia: Zod validation failed', { error: parsedData.error.format(), rawData: data });
-                return { success: false, message: 'Validation failed for the API response.', error: parsedData.error.format() };
+                logger.error(
+                    { error: parsedData.error.format(), rawData: data },
+                    'unassignTagsFromMedia: Zod validation failed'
+                );
+                return { 
+                    success: false, 
+                    message: 'Validation failed for the API response.', 
+                    error: parsedData.error.format(),
+                    errorData: data 
+                };
             }
 
             return { success: true, data: parsedData.data };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
-            logger.error('unassignTagsFromMedia: Unexpected error', { error: errorMessage, details: error });
-            return { success: false, message: errorMessage, error };
+            logger.error({ error: errorMessage, details: error }, 'unassignTagsFromMedia: Unexpected error');
+            return { success: false, message: errorMessage, errorData: error };
         }
     },
 }); 
