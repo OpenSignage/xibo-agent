@@ -43,26 +43,15 @@ const inputSchema = z.object({
 });
 
 // Schema for the tool's output, including tree view
-const outputSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        data: librarySearchResponseSchema,
-        tree: z.array(z.object({
-            id: z.number(),
-            name: z.string(),
-            type: z.string(),
-            depth: z.number(),
-            isLast: z.boolean(),
-            path: z.string(),
-        })).optional(),
-        treeViewText: z.string().optional(),
-    }),
-    z.object({
-        success: z.literal(false),
-        message: z.string(),
-        error: z.any().optional(),
-    }),
-]);
+const outputSchema = z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    data: librarySearchResponseSchema.optional(),
+    tree: z.array(z.any()).optional(),
+    treeViewText: z.string().optional(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+});
 
 /**
  * Builds a hierarchical tree structure from a flat list of media items.
@@ -128,10 +117,11 @@ export const getLibrary = createTool({
     description: 'Search for media items in the Xibo Library and optionally display results as a tree.',
     inputSchema,
     outputSchema,
-    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
-        logger.info('Starting getLibrary tool execution with input:', input);
+    execute: async ({ context: input }) => {
+        logger.info({ input }, 'Starting getLibrary tool execution');
 
         if (!config.cmsUrl) {
+            logger.error({}, 'getLibrary: CMS URL is not configured.');
             return { success: false, message: 'CMS URL is not configured.' };
         }
 
@@ -154,7 +144,8 @@ export const getLibrary = createTool({
 
             if (!mediaResponse.ok) {
                 const errorData = await mediaResponse.json().catch(() => mediaResponse.statusText);
-                return { success: false, message: `HTTP error fetching media! status: ${mediaResponse.status}`, error: errorData };
+                logger.error({ status: mediaResponse.status, data: errorData }, 'getLibrary: HTTP error fetching media!');
+                return { success: false, message: `HTTP error fetching media! status: ${mediaResponse.status}`, errorData: errorData };
             }
 
             const mediaData = await mediaResponse.json();
@@ -163,8 +154,16 @@ export const getLibrary = createTool({
             const parsedMedia = librarySearchResponseSchema.safeParse(mediaData);
 
             if (!parsedMedia.success) {
-                logger.error('getLibrary: Zod validation failed for media data', { error: parsedMedia.error.format(), rawData: mediaData });
-                return { success: false, message: 'Validation failed for the received library data.', error: parsedMedia.error.format() };
+                logger.error(
+                    { error: parsedMedia.error.format(), rawData: mediaData },
+                    'getLibrary: Zod validation failed for media data'
+                );
+                return { 
+                    success: false, 
+                    message: 'Validation failed for the received library data.', 
+                    error: parsedMedia.error.format(),
+                    errorData: mediaData
+                };
             }
             
             const allMedia = parsedMedia.data;
@@ -196,8 +195,8 @@ export const getLibrary = createTool({
 
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
-            logger.error('getLibrary: Unexpected error', { error: errorMessage, details: error });
-            return { success: false, message: errorMessage, error };
+            logger.error({ error: errorMessage, details: error }, 'getLibrary: Unexpected error');
+            return { success: false, message: errorMessage, errorData: error };
         }
     },
 }); 

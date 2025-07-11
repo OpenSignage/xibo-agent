@@ -40,6 +40,7 @@ const outputSchema = z.object({
     success: z.boolean().describe("Indicates whether the operation was successful."),
     message: z.string().describe("A summary message of the operation result."),
     error: z.any().optional().describe("Detailed error information if the operation failed."),
+    errorData: z.any().optional().describe("Raw error data from the API response."),
 });
 
 /**
@@ -53,11 +54,11 @@ export const setEnableStatToMedia = createTool({
     description: 'Enables or disables statistics collection for a media item.',
     inputSchema,
     outputSchema,
-    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+    execute: async ({ context: input }) => {
         const { mediaId, enableStat } = input;
 
         if (!config.cmsUrl) {
-            logger.error('setEnableStatToMedia: CMS URL is not configured.');
+            logger.error({}, 'setEnableStatToMedia: CMS URL is not configured.');
             return { success: false, message: 'CMS URL is not configured.' };
         }
 
@@ -82,26 +83,32 @@ export const setEnableStatToMedia = createTool({
             // A 204 No Content response indicates a successful operation.
             if (response.status === 204) {
                 const successMessage = `Successfully set enableStat to '${enableStat}' for media ${mediaId}.`;
-                logger.info(`setEnableStatToMedia: ${successMessage}`);
+                logger.info({}, successMessage);
                 return { success: true, message: successMessage };
             }
 
             // Handle non-204 responses as errors.
             const errorData = await response.json().catch(() => response.statusText);
-            logger.error('setEnableStatToMedia: HTTP error occurred.', { 
-                status: response.status,
-                statusText: response.statusText,
-                error: errorData 
-            });
-            return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+            logger.error(
+                { 
+                    status: response.status,
+                    statusText: response.statusText,
+                    data: errorData 
+                },
+                'setEnableStatToMedia: HTTP error occurred.'
+            );
+            return { success: false, message: `HTTP error! status: ${response.status}`, errorData: errorData };
 
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
-            logger.error('setEnableStatToMedia: An unexpected error occurred during execution.', { 
-                error: errorMessage, 
-                details: error 
-            });
-            return { success: false, message: errorMessage, error };
+            logger.error(
+                { 
+                    error: errorMessage, 
+                    details: error 
+                },
+                'setEnableStatToMedia: An unexpected error occurred during execution.'
+            );
+            return { success: false, message: errorMessage, errorData: error };
         }
     },
 }); 

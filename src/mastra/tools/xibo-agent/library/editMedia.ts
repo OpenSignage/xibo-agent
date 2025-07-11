@@ -35,18 +35,13 @@ const inputSchema = z.object({
 });
 
 // Schema for the tool's output, allowing for detailed error reporting
-const outputSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        data: librarySchema,
-    }),
-    z.object({
-        success: z.literal(false),
-        message: z.string(),
-        error: z.any().optional(),
-        errorData: z.any().optional(),
-    }),
-]);
+const outputSchema = z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    data: librarySchema.optional(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+});
 
 /**
  * Tool for Editing a Media Item
@@ -58,11 +53,12 @@ export const editMedia = createTool({
     description: 'Edits a media item in the Library.',
     inputSchema,
     outputSchema,
-    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+    execute: async ({ context: input }) => {
         const { mediaId, ...bodyParams } = input;
         logger.debug(`editMedia: Initiating edit for mediaId: ${mediaId}`);
 
         if (!config.cmsUrl) {
+            logger.error({}, 'editMedia: CMS URL is not configured.');
             return { success: false, message: 'CMS URL is not configured.' };
         }
 
@@ -98,8 +94,8 @@ export const editMedia = createTool({
             // Check if the request was successful
             if (!response.ok) {
                 const errorData = await response.json().catch(() => response.statusText);
-                logger.error('editMedia: HTTP error', { status: response.status, error: errorData });
-                return { success: false, message: `HTTP error! status: ${response.status}`, errorData };
+                logger.error({ status: response.status, data: errorData }, 'editMedia: HTTP error');
+                return { success: false, message: `HTTP error! status: ${response.status}`, errorData: errorData };
             }
 
             // Parse and validate the response data
@@ -107,7 +103,10 @@ export const editMedia = createTool({
             const parsedData = librarySchema.safeParse(data);
 
             if (!parsedData.success) {
-                logger.error('editMedia: Zod validation failed', { error: parsedData.error.format(), rawData: data });
+                logger.error(
+                    { error: parsedData.error.format(), rawData: data },
+                    'editMedia: Zod validation failed'
+                );
                 return { 
                     success: false, 
                     message: 'Validation failed for the API response.', 
@@ -117,13 +116,14 @@ export const editMedia = createTool({
             }
 
             // Return the successful response
+            logger.info({ mediaId: parsedData.data.mediaId }, 'editMedia: Successfully edited media.');
             return { success: true, data: parsedData.data };
             
         } catch (error) {
             // Handle unexpected errors (e.g., network issues)
             const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
-            logger.error('editMedia: Unexpected error', { error: errorMessage, details: error });
-            return { success: false, message: errorMessage, error };
+            logger.error({ error: errorMessage, details: error }, 'editMedia: Unexpected error');
+            return { success: false, message: errorMessage, errorData: error };
         }
     },
 }); 

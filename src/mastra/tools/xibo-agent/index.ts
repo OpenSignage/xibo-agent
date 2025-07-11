@@ -46,7 +46,8 @@ import { getStats, getTimeDisconnected, getExportStatsCount } from './statistics
 import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, addMedia, uploadMediaFromURL, downloadThumbnail, editMedia,
   deleteMedia, downloadMedia, assignTagsToMedia, unassignTagsFromMedia,
-  setEnableStatToMedia, getMediaUsage, getUsageLayouts } from './library';
+  setEnableStatToMedia, getMediaUsage, getMediaUsageLayouts, copyMedia, isMediaUsed,
+  selectMediaFolder, tidyLibrary } from './library';
 import { generateImage, updateImage, getImageHistory } from './generateImage';
 import { videoGeneration, videoUpdate, getVideoHistory } from './generateVideo';
 import { getNotifications, deleteNotification, addNotification, editNotification } from './notification';
@@ -179,7 +180,8 @@ export function getTools() {
     // Library
     getLibrary,addMedia,uploadMediaFromURL,downloadThumbnail,editMedia,
       deleteMedia,downloadMedia,assignTagsToMedia,unassignTagsFromMedia,
-      setEnableStatToMedia,getMediaUsage,getUsageLayouts,
+      setEnableStatToMedia,getMediaUsage,getMediaUsageLayouts,
+      copyMedia,isMediaUsed,selectMediaFolder,tidyLibrary,
     // Generation
     generateImage,updateImage,getImageHistory,generateQRCode,
     videoGeneration, videoUpdate, getVideoHistory,

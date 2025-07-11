@@ -11,9 +11,8 @@
  */
 
 /**
- * Get Media Usage Report Tool
- *
- * This module provides a tool to retrieve the usage report for a specific
+ * @module getMediaUsage
+ * @description Provides a tool to retrieve the usage report for a specific
  * media item from the Xibo CMS library. It implements the
  * 'GET /library/usage/{mediaId}' endpoint.
  */
@@ -23,43 +22,58 @@ import { logger } from '../../../index';
 import { getAuthHeaders } from '../auth';
 import { config } from '../config';
 
-// Schema for the input, based on the GET /library/usage/{mediaId} endpoint
-const inputSchema = z.object({
+/**
+ * Zod schema for the tool's input.
+ * Corresponds to the parameters for the GET /library/usage/{mediaId} endpoint.
+ */
+const getMediaUsageInputSchema = z.object({
     mediaId: z.number().describe("The ID of the media item to get the usage report for."),
 });
 
-// The API documentation does not specify a schema for the response.
-const outputSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        data: z.any().describe("The usage report data."),
-    }),
-    z.object({
-        success: z.literal(false),
-        message: z.string(),
-        error: z.any().optional(),
-    }),
-]);
+/**
+ * Defines the structure for a single usage entry, which could be a layout or a playlist.
+ */
+const usageEntrySchema = z.object({
+    type: z.string().describe("The type of the item where the media is used (e.g., 'layout', 'playlist')."),
+    id: z.number().describe("The ID of the item."),
+    name: z.string().describe("The name of the item."),
+});
 
 /**
- * Tool for Retrieving a Media Item's Usage Report
- *
- * Fetches the usage report, showing where a specific media item is being used.
+ * Zod schema for the successful output of the tool.
+ * The API returns an array of objects detailing where the media is used.
+ */
+const getMediaUsageOutputSchema = z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    data: z.array(usageEntrySchema).optional(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+});
+
+
+/**
+ * @tool getMediaUsage
+ * @description A tool for retrieving a media item's usage report.
+ * This tool fetches the usage report, which shows where a specific media item is being used
+ * across layouts, playlists, etc.
  */
 export const getMediaUsage = createTool({
     id: 'get-media-usage',
     description: "Gets a media item's usage report.",
-    inputSchema,
-    outputSchema,
-    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+    inputSchema: getMediaUsageInputSchema,
+    outputSchema: getMediaUsageOutputSchema,
+    execute: async ({ context: input }) => {
         const { mediaId } = input;
+        const { cmsUrl } = config;
 
-        if (!config.cmsUrl) {
+        if (!cmsUrl) {
+            logger.error({}, 'getMediaUsage: CMS URL is not configured.');
             return { success: false, message: 'CMS URL is not configured.' };
         }
 
-        const url = `${config.cmsUrl}/api/library/usage/${mediaId}`;
-        logger.debug(`getMediaUsage: GETting from URL: ${url}`);
+        const url = `${cmsUrl}/api/library/usage/${mediaId}`;
+        logger.debug(`getMediaUsage: Attempting to GET from URL: ${url}`);
 
         try {
             const authHeaders = await getAuthHeaders();
@@ -70,19 +84,57 @@ export const getMediaUsage = createTool({
                 headers,
             });
 
+            const responseData = await response.json();
+
             if (!response.ok) {
-                const errorData = await response.json().catch(() => response.statusText);
-                logger.error('getMediaUsage: HTTP error', { status: response.status, error: errorData });
-                return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+                logger.error(
+                    { 
+                        status: response.status,
+                        statusText: response.statusText,
+                        data: responseData 
+                    },
+                    'getMediaUsage: HTTP error occurred.'
+                );
+                return { success: false, message: `HTTP error! status: ${response.status}`, errorData: responseData };
             }
 
-            const data = await response.json();
-            return { success: true, data };
+            // The API returns an empty object {} if the media is not used.
+            // We should treat this as a success case with an empty array.
+            const dataToParse = (responseData && typeof responseData === 'object' && !Array.isArray(responseData) && Object.keys(responseData).length === 0)
+                ? []
+                : responseData;
+
+            const parsedData = z.array(usageEntrySchema).safeParse(dataToParse);
+            
+            if (!parsedData.success) {
+                logger.error(
+                    { 
+                        error: parsedData.error.format(), 
+                        rawData: responseData 
+                    },
+                    'getMediaUsage: Zod validation failed for the API response.'
+                );
+                return { 
+                    success: false, 
+                    message: 'Validation failed for the API response.', 
+                    error: parsedData.error.format(),
+                    errorData: responseData
+                };
+            }
+
+            logger.info(`getMediaUsage: Successfully retrieved usage report for media ${mediaId}.`);
+            return { success: true, data: parsedData.data };
 
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
-            logger.error('getMediaUsage: Unexpected error', { error: errorMessage, details: error });
-            return { success: false, message: errorMessage, error };
+            logger.error(
+                {
+                    error: errorMessage,
+                    details: error
+                },
+                'getMediaUsage: An unexpected error occurred during execution.'
+            );
+            return { success: false, message: errorMessage, errorData: error };
         }
     },
 }); 

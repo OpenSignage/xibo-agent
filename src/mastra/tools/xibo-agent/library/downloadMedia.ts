@@ -33,17 +33,13 @@ const inputSchema = z.object({
 });
 
 // Schema for the tool's output
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    filePath: z.string().describe('The full path to the downloaded file.'),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+const outputSchema = z.object({
+  success: z.boolean(),
+  message: z.string().optional(),
+  filePath: z.string().optional().describe('The full path to the downloaded file.'),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
  * @tool Tool for Downloading a Media File
@@ -56,14 +52,12 @@ export const downloadMedia = createTool({
   description: 'Downloads a media file from the Library and saves it locally.',
   inputSchema,
   outputSchema,
-  execute: async ({
-    context: input,
-  }): Promise<z.infer<typeof outputSchema>> => {
-    logger.info('Starting downloadMedia tool execution with input:', input);
+  execute: async ({ context: input }) => {
+    logger.info({ input }, 'Starting downloadMedia tool execution');
     const { mediaId, destinationPath: relativeDestPath, fileName } = input;
 
     if (!config.cmsUrl) {
-      logger.error('CMS URL is not configured.');
+      logger.error({}, 'downloadMedia: CMS URL is not configured.');
       return { success: false, message: 'CMS URL is not configured.' };
     }
 
@@ -72,7 +66,7 @@ export const downloadMedia = createTool({
     const resolvedPath = path.resolve(destinationPath);
     const resolvedDownloadsDir = path.resolve(config.downloadsDir);
     if (!resolvedPath.startsWith(resolvedDownloadsDir)) {
-      logger.error('Path traversal attempt detected', { destinationPath });
+      logger.error({ destinationPath }, 'Path traversal attempt detected');
       return {
         success: false,
         message: 'Invalid destination path. Path traversal is not allowed.',
@@ -88,14 +82,17 @@ export const downloadMedia = createTool({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => response.statusText);
-        logger.error('downloadMedia: HTTP error', {
-          status: response.status,
-          error: errorData,
-        });
+        logger.error(
+          {
+            status: response.status,
+            data: errorData,
+          },
+          'downloadMedia: HTTP error'
+        );
         return {
           success: false,
           message: `HTTP error! status: ${response.status}`,
-          error: errorData,
+          errorData: errorData,
         };
       }
 
@@ -116,7 +113,7 @@ export const downloadMedia = createTool({
       // If a filename could not be determined, return an error.
       if (!finalFileName) {
         const message = 'File name could not be determined from response headers. Please specify a `fileName` in the input.';
-        logger.error(message);
+        logger.error({}, message);
         return {
           success: false,
           message: message,
@@ -132,16 +129,19 @@ export const downloadMedia = createTool({
       const buffer = await response.arrayBuffer();
       await fs.writeFile(filePath, Buffer.from(buffer));
 
-      logger.info(`File downloaded successfully to ${filePath}`);
-      return { success: true, filePath };
+      logger.info({ filePath }, `File downloaded successfully`);
+      return { success: true, filePath, message: `File downloaded successfully to ${filePath}` };
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'An unexpected error occurred.';
-      logger.error('downloadMedia: Unexpected error', {
-        error: errorMessage,
-        details: error,
-      });
-      return { success: false, message: errorMessage, error };
+      logger.error(
+        {
+          error: errorMessage,
+          details: error,
+        },
+        'downloadMedia: Unexpected error'
+      );
+      return { success: false, message: errorMessage, errorData: error };
     }
   },
 }); 

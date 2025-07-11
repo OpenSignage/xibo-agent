@@ -16,15 +16,19 @@
  * This module serves as an index for all tools related to media library
  * management in the Xibo CMS. It explicitly exports each tool.
  */
-export { getLibrary } from './getLibrary';
 export { addMedia } from './addMedia';
-export { uploadMediaFromURL } from './uploadMediaFromURL';
-export { downloadThumbnail } from './downloadThumbnail';
-export { editMedia } from './editMedia';
+export { assignTagsToMedia } from './assignTagsToMedia';
+export { copyMedia } from './copyMedia';
 export { deleteMedia } from './deleteMedia';
 export { downloadMedia } from './downloadMedia';
-export { assignTagsToMedia } from './assignTagsToMedia';
-export { unassignTagsFromMedia } from './unassignTagsFromMedia';
-export { setEnableStatToMedia } from './setEnableStatToMedia';
+export { downloadThumbnail } from './downloadThumbnail';
+export { editMedia } from './editMedia';
+export { getLibrary } from './getLibrary';
 export { getMediaUsage } from './getMediaUsage';
-export { getUsageLayouts } from './getUsageLayouts';
+export { getMediaUsageLayouts } from './getMediaUsageLayouts';
+export { isMediaUsed } from './isMediaUsed';
+export { selectMediaFolder } from './selectMediaFolder';
+export { setEnableStatToMedia } from './setEnableStatToMedia';
+export { tidyLibrary } from './tidyLibrary';
+export { unassignTagsFromMedia } from './unassignTagsFromMedia';
+export { uploadMediaFromURL } from './uploadMediaFromURL';

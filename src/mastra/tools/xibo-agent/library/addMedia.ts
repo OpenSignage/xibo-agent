@@ -77,18 +77,13 @@ const inputSchema = z.object({
 });
 
 // The API returns an array containing the new media object.
-const outputSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        data: addMediaResponseSchema,
-    }),
-    z.object({
-        success: z.literal(false),
-        message: z.string(),
-        error: z.any().optional(),
-        errorData: z.any().optional(),
-    }),
-]);
+const outputSchema = z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    data: addMediaResponseSchema.optional(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+});
 
 /**
  * Tool for Uploading a Local Media File
@@ -101,10 +96,11 @@ export const addMedia = createTool({
     description: 'Uploads a local media file to the Library.',
     inputSchema,
     outputSchema,
-    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+    execute: async ({ context: input }) => {
         const { fileName, filePath, ...otherParams } = input;
 
         if (!config.cmsUrl) {
+            logger.error({}, 'addMedia: CMS URL is not configured.');
             return { success: false, message: 'CMS URL is not configured.' };
         }
 
@@ -143,14 +139,17 @@ export const addMedia = createTool({
             const parsedData = addMediaResponseSchema.safeParse(response.data);
 
             if (!parsedData.success) {
-                logger.error('addMedia: Zod validation failed', { error: parsedData.error.format(), rawData: response.data });
+                logger.error(
+                    { error: parsedData.error.format(), rawData: response.data },
+                    'addMedia: Zod validation failed'
+                );
                 return { success: false, message: 'Validation failed for the API response.', error: parsedData.error.format(), errorData: response.data };
             }
 
             // Check for business logic errors within the successful response
             const firstError = parsedData.data.files.find(file => 'error' in file && file.error);
             if (firstError && 'error' in firstError) {
-                logger.warn('addMedia: Business logic error reported by CMS', { error: firstError.error, rawData: parsedData.data });
+                logger.warn({ error: firstError.error, rawData: parsedData.data }, 'addMedia: Business logic error reported by CMS');
                 return {
                     success: false,
                     message: firstError.error,
@@ -167,7 +166,7 @@ export const addMedia = createTool({
                     data: error.response?.data,
                     headers: error.response?.headers,
                 };
-                logger.error('addMedia: HTTP error', { error: error.message, details: errorDetails });
+                logger.error({ error: error.message, details: errorDetails }, 'addMedia: HTTP error');
                 return { 
                     success: false, 
                     message: `HTTP error! status: ${error.response?.status}`, 
@@ -183,8 +182,8 @@ export const addMedia = createTool({
                     errorMessage = `File not found at path: ${absoluteFilePath}`;
                 }
             }
-            logger.error('addMedia: Unexpected error', { error: errorMessage, details: error });
-            return { success: false, message: errorMessage, error };
+            logger.error({ error: errorMessage, details: error }, 'addMedia: Unexpected error');
+            return { success: false, message: errorMessage, errorData: error };
         }
     },
 }); 

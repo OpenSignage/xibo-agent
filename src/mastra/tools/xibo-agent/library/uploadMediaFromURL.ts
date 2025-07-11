@@ -11,10 +11,11 @@
  */
 
 /**
+ * @module
  * Upload Media from URL Tool
- *
+ * 
  * This module provides a tool to upload a media file to the Xibo CMS library
- * from a given URL. It implements the 'POST /library/url' endpoint.
+ * from a given URL. It implements the 'POST /library/uploadUrl' endpoint.
  */
 import { z } from "zod";
 import { createTool } from '@mastra/core';
@@ -23,45 +24,52 @@ import { getAuthHeaders } from '../auth';
 import { config } from '../config';
 import { librarySchema } from './schemas';
 
-// Schema for the input, based on the POST /library/url endpoint parameters
+/**
+ * @const
+ * @description Zod schema for the input, based on the POST /library/uploadUrl endpoint parameters.
+ */
 const inputSchema = z.object({
     url: z.string().url().describe("The direct URL to the media file to upload."),
-    name: z.string().optional().describe("An optional name for the new media item."),
-    oldMediaId: z.number().optional().describe("The ID of an existing media item to replace."),
-    updateInLayouts: z.number().optional().describe("A flag (0 or 1) to indicate that Layouts should be updated with this new version of the media."),
-    deleteOldRevisions: z.number().optional().describe("A flag (0 or 1) to delete old revisions of the media item being replaced."),
+    type: z.string().describe("The type of the media, e.g., 'image', 'video'."),
+    extension: z.string().optional().describe("Optional extension of the media, e.g., 'jpg', 'png'. If not set, it will be retrieved from headers."),
+    enableStat: z.string().optional().describe("Option to enable Media Proof of Play statistics: 'On', 'Off', or 'Inherit'."),
+    optionalName: z.string().optional().describe("An optional name for this media file; defaults to the file name if empty."),
+    expires: z.string().optional().describe("Date in 'Y-m-d H:i:s' format to set the expiration date on the Media item."),
     folderId: z.number().optional().describe("The ID of the folder to upload the media into."),
 });
 
-// Schema for the tool's output, handling both success and error cases
-const outputSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        data: librarySchema,
-    }),
-    z.object({
-        success: z.literal(false),
-        message: z.string(),
-        error: z.any().optional(),
-    }),
-]);
+/**
+ * @const
+ * @description Zod schema for the tool's output, handling both success and error cases.
+ * On success, it returns the newly created Library object.
+ */
+const outputSchema = z.object({
+    success: z.boolean(),
+    message: z.string().optional(),
+    data: librarySchema.optional(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+});
 
 /**
- * Tool for Uploading Media from a URL
- *
+ * @tool
+ * @description Tool for Uploading Media from a URL.
+ * 
  * This tool uploads a file from a specified URL to the Xibo Library. It can
- * be used to add new media or replace existing media items.
+ * be used to add new media items.
  */
 export const uploadMediaFromURL = createTool({
     id: 'upload-media-from-url',
     description: 'Uploads a media file to the Library from a URL.',
     inputSchema,
     outputSchema,
-    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+    execute: async ({ context: input }) => {
         if (!config.cmsUrl) {
+            logger.error({}, "uploadMediaFromURL: CMS URL is not configured.");
             return { success: false, message: 'CMS URL is not configured.' };
         }
 
+        // Prepare form data from input, excluding undefined values.
         const params = new URLSearchParams();
         for (const [key, value] of Object.entries(input)) {
             if (value !== undefined) {
@@ -69,8 +77,8 @@ export const uploadMediaFromURL = createTool({
             }
         }
 
-        const url = `${config.cmsUrl}/api/library/url`;
-        logger.debug(`uploadMediaFromURL: Posting to URL: ${url}`);
+        const url = `${config.cmsUrl}/api/library/uploadUrl`;
+        logger.debug(`uploadMediaFromURL: Attempting to POST to URL: ${url}`);
 
         try {
             const authHeaders = await getAuthHeaders();
@@ -79,31 +87,44 @@ export const uploadMediaFromURL = createTool({
                 'Content-Type': 'application/x-www-form-urlencoded',
             };
 
+            // Make the API request to upload the media from the URL
             const response = await fetch(url, {
                 method: 'POST',
                 headers,
                 body: params,
             });
 
+            // Handle non-successful HTTP responses
             if (!response.ok) {
                 const errorData = await response.json().catch(() => response.statusText);
-                logger.error('uploadMediaFromURL: HTTP error', { status: response.status, error: errorData });
-                return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+                logger.error({ status: response.status, error: errorData }, 'uploadMediaFromURL: HTTP error occurred.');
+                return { success: false, message: `HTTP error! status: ${response.status}`, errorData: errorData };
             }
 
             const data = await response.json();
+            
+            // Validate the response data against the library schema
             const parsedData = librarySchema.safeParse(data);
-
             if (!parsedData.success) {
-                logger.error('uploadMediaFromURL: Zod validation failed', { error: parsedData.error.format(), rawData: data });
-                return { success: false, message: 'Validation failed for the API response.', error: parsedData.error.format() };
+                logger.error(
+                    { error: parsedData.error.format(), rawData: data },
+                    'uploadMediaFromURL: Zod validation failed for API response.'
+                );
+                return { 
+                    success: false, 
+                    message: 'Validation failed for the API response.', 
+                    error: parsedData.error.format(),
+                    errorData: data
+                };
             }
 
+            logger.info(`uploadMediaFromURL: Successfully uploaded media from URL and created media item with ID ${parsedData.data.mediaId}.`);
             return { success: true, data: parsedData.data };
+            
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
-            logger.error('uploadMediaFromURL: Unexpected error', { error: errorMessage, details: error });
-            return { success: false, message: errorMessage, error };
+            logger.error({ error: errorMessage, details: error }, 'uploadMediaFromURL: An unexpected error occurred during execution.');
+            return { success: false, message: errorMessage, errorData: error };
         }
     },
 }); 

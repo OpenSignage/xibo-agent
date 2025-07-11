@@ -1,8 +1,3 @@
----
-description: 
-globs: 
-alwaysApply: false
----
 # Xibo Agent Tools コーディングルール
 
 ## ファイル構造
@@ -166,10 +161,25 @@ import { logger } from "../../../index";
 
 3. ログフォーマット：
 ```typescript
+// メッセージのみ
 logger.info("Operation message");
-logger.debug("Debug message", { contextData });
-logger.error("Error message", { error: errorDetails });
+
+// オブジェクトを含む場合 (オブジェクトが第一引数)
+logger.debug({ contextData }, "Debug message");
+logger.error({ error: errorDetails }, "Error message");
 ```
+
+4. **引数の順序に関する重要な注意**:
+   - `pino`ロガーでオブジェクトとメッセージを同時にログに出力する場合、**必ずオブジェクトを第一引数に、メッセージ文字列を第二引数に指定してください。**
+   - 逆の順序で指定すると、オブジェクトがログに出力されません。
+
+   ```typescript
+   // 正しい例
+   logger.info({ user: 'test' }, 'User logged in');
+
+   // 間違った例 (オブジェクトがログに出力されない)
+   logger.info('User logged in', { user: 'test' });
+   ```
 
 ## データバリデーション
 
@@ -225,6 +235,11 @@ headers: {
 5. 意味のある変数名と関数名を使用します
 6. 複雑なロジックには適切なコメントを追加します
 7. 一貫したコードフォーマットに従います
+8. エッジケースとnull値を処理します
+9. デバッグのための適切なロギングを実装します
+10. トラブルシューティングのための適切なエラーメッセージを使用します
+11. **コメントは全て英語**で行います。
+
 8. エッジケースとnull値を処理します
 9. デバッグのための適切なロギングを実装します
 10. トラブルシューティングのための適切なエラーメッセージを使用します

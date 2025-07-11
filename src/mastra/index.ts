@@ -47,6 +47,7 @@ const pinoLogger = pino(
           levelFirst: true,
           translateTime: 'SYS:yyyy-mm-dd HH:MM:ss',
           ignore: 'pid,hostname',
+          singleLine: false,
         },
       },
       {
