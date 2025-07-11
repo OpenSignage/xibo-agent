@@ -11,16 +11,9 @@
  */
 
 /**
- * Xibo CMS About Information Tool
- * 
- * This module provides functionality to retrieve version and source information
- * from the Xibo CMS API. It accesses the /api/about endpoint to get details
- * about the CMS version and source code repository URL.
- * 
- * The tool is useful for:
- * - Checking CMS version compatibility
- * - Verifying installation status
- * - Accessing source code repository information
+ * @module
+ * This module provides a tool to retrieve version and source information from the Xibo CMS.
+ * It implements the GET /about endpoint.
  */
 
 import { z } from "zod";
@@ -31,82 +24,71 @@ import { decodeErrorMessage } from "../utility/error";
 import { logger } from '../../../index';
 
 /**
- * Schema for the about response from Xibo API
- * 
- * The API returns:
- * - version: Current CMS version (e.g., "3.0.0")
- * - sourceUrl: URL to the source code repository (can be null)
+ * Schema for the 'about' response from the Xibo API.
  */
 const aboutResponseSchema = z.object({
-  version: z.string(),
-  sourceUrl: z.string().nullable(),
+  version: z.string().describe("Current CMS version (e.g., '3.0.0')."),
+  sourceUrl: z.string().nullable().describe("URL to the source code repository."),
 });
 
 /**
- * Tool for retrieving Xibo CMS version information
- * 
- * This tool doesn't require any input parameters and returns
- * a JSON object containing:
- * - version: Current CMS version
- * - sourceUrl: Source code repository URL (if available)
+ * Schema for the tool's output, covering both success and failure cases.
+ */
+const outputSchema = z.object({
+  success: z.boolean().describe("Indicates whether the operation was successful."),
+  data: aboutResponseSchema.optional().describe("The 'about' information on success."),
+  message: z.string().describe("A message providing details about the operation outcome."),
+  error: z.string().optional().describe("Error details if the operation failed."),
+});
+
+/**
+ * Tool for retrieving Xibo CMS version and source information.
  */
 export const getAbout = createTool({
   id: 'get-about',
-  description: 'Get Xibo CMS version and source information',
-  inputSchema: z.object({
-    _placeholder: z.string().optional().describe('This tool does not require input parameters')
-  }),
-  outputSchema: z.object({
-    success: z.boolean(),
-    data: aboutResponseSchema.optional(),
-    message: z.string(),
-    error: z.string().optional()
-  }),
+  description: 'Get Xibo CMS version and source information.',
+  inputSchema: z.object({}), // This tool does not require any input.
+  outputSchema,
   execute: async ({ context }) => {
+    logger.info({ context }, "Executing getAbout tool.");
+    
     try {
-      // Check if CMS URL is configured
       if (!config.cmsUrl) {
-        return {
-          success: false,
-          message: "Failed to get CMS information",
-          error: "CMS URL is not configured"
-        };
+        const message = "CMS URL is not configured.";
+        logger.error(message);
+        return { success: false, message, error: message };
       }
 
-      // Get authentication headers
       const headers = await getAuthHeaders();
+      const url = `${config.cmsUrl}/api/about`;
+      logger.debug({ url }, "Sending GET request for 'about' information.");
       
-      // Call CMS API
-      const response = await fetch(`${config.cmsUrl}/api/about`, {
-        headers,
-      });
+      const response = await fetch(url, { headers });
 
-      // Handle API errors
       if (!response.ok) {
         const text = await response.text();
-        return {
-          success: false,
-          message: "Failed to get CMS information",
-          error: decodeErrorMessage(text)
-        };
+        const error = decodeErrorMessage(text);
+        const message = "Failed to get CMS information.";
+        logger.error({ status: response.status, error }, message);
+        return { success: false, message, error };
       }
 
-      // Parse and validate response
       const data = await response.json();
       const validatedData = aboutResponseSchema.parse(data);
 
-      // Return formatted response
+      logger.info("Successfully retrieved CMS 'about' information.");
       return {
         success: true,
         data: validatedData,
-        message: "Successfully retrieved CMS information"
+        message: "Successfully retrieved CMS information."
       };
     } catch (error) {
-      logger.error(`getAbout: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.error({ error }, "An unexpected error occurred in getAbout.");
       return {
         success: false,
         message: "Failed to get CMS information",
-        error: error instanceof Error ? error.message : "Unknown error"
+        error: errorMessage,
       };
     }
   },
