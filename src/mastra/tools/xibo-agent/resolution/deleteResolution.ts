@@ -11,10 +11,9 @@
  */
 
 /**
- * Xibo CMS Resolution Deletion Tool
- * 
- * This module provides functionality to delete resolutions from the Xibo CMS system.
- * It implements the resolution deletion API endpoint and handles proper response validation.
+ * @module
+ * This module provides a tool for deleting a resolution from the Xibo CMS.
+ * It implements the DELETE /resolution/{id} endpoint.
  */
 
 import { z } from "zod";
@@ -28,12 +27,15 @@ import { decodeErrorMessage } from "../utility/error";
  * Schema for the tool's output, covering both success and failure cases.
  */
 const outputSchema = z.object({
-  success: z.boolean(),
-  message: z.string().optional(),
-  error: z.any().optional(),
-  errorData: z.any().optional(),
+  success: z.boolean().describe("Indicates whether the operation was successful."),
+  message: z.string().optional().describe("A message providing details about the operation outcome."),
+  error: z.any().optional().describe("Error details if the operation failed."),
+  errorData: z.any().optional().describe("Raw error data from the API."),
 });
 
+/**
+ * Tool to delete a resolution from the Xibo CMS.
+ */
 export const deleteResolution = createTool({
   id: "delete-resolution",
   description: "Delete a resolution from Xibo CMS",
@@ -42,17 +44,17 @@ export const deleteResolution = createTool({
   }),
   outputSchema,
   execute: async ({ context }) => {
-    const logContext = { ...context };
-    logger.info("Attempting to delete a resolution.", logContext);
+    logger.info({ context }, "Executing deleteResolution tool.");
 
     if (!config.cmsUrl) {
-      logger.error("CMS URL is not configured.", logContext);
-      return { success: false, message: "CMS URL is not configured." };
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false, message };
     }
 
     try {
       const url = new URL(`${config.cmsUrl}/api/resolution/${context.resolutionId}`);
-      logger.debug(`Requesting to delete resolution at: ${url.toString()}`, logContext);
+      logger.debug({ url: url.toString() }, "Sending DELETE request to delete resolution.");
 
       const headers = await getAuthHeaders();
 
@@ -62,33 +64,21 @@ export const deleteResolution = createTool({
       });
 
       if (response.status === 204) {
-        logger.info(`Successfully deleted resolution ID ${context.resolutionId}.`, logContext);
+        logger.info({ resolutionId: context.resolutionId }, "Successfully deleted resolution.");
         return { success: true, message: `Resolution with ID ${context.resolutionId} deleted successfully.` };
       }
 
       const responseText = await response.text();
       const errorData = decodeErrorMessage(responseText);
+      const message = `API request failed with status ${response.status}.`;
       
-      logger.error("Failed to delete resolution via CMS API.", {
-        ...logContext,
-        status: response.status,
-        errorData,
-      });
-      return {
-        success: false,
-        message: `API request failed with status ${response.status}.`,
-        errorData,
-      };
+      logger.error({ status: response.status, errorData, context }, message);
+      return { success: false, message, errorData };
 
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-      logger.error("An unexpected error occurred in deleteResolution.", {
-        ...logContext,
-        error: errorMessage,
-      });
+      logger.error({ error: errorMessage, context }, "An unexpected error occurred in deleteResolution.");
       return { success: false, message: "An unexpected error occurred.", error: errorMessage };
     }
   },
-});
-
-export default deleteResolution; 
+}); 

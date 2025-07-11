@@ -11,11 +11,9 @@
  */
 
 /**
- * Xibo CMS Resolution Retrieval Tool
- * 
- * This module provides functionality to retrieve resolution information from the Xibo CMS system.
- * It implements the resolution search API endpoint and handles the necessary validation
- * and data transformation for retrieving resolutions with various filtering options.
+ * @module
+ * This module provides a tool for retrieving resolution information from the Xibo CMS.
+ * It implements the GET /resolution endpoint with filtering options.
  */
 
 import { z } from "zod";
@@ -26,31 +24,34 @@ import { logger } from '../../../index';
 import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for a single resolution object.
+ * Schema for a single resolution object returned by the API.
  */
 const resolutionSchema = z.object({
-  resolutionId: z.number(),
-  resolution: z.string(),
-  width: z.number(),
-  height: z.number(),
-  designerWidth: z.number(),
-  designerHeight: z.number(),
-  version: z.number(),
-  enabled: z.number(),
-  userId: z.number(),
+  resolutionId: z.number().describe("The unique ID of the resolution."),
+  resolution: z.string().describe("The name of the resolution."),
+  width: z.number().describe("The width of the resolution in pixels."),
+  height: z.number().describe("The height of the resolution in pixels."),
+  designerWidth: z.number().describe("The designer width."),
+  designerHeight: z.number().describe("The designer height."),
+  version: z.number().describe("The version number of the resolution."),
+  enabled: z.number().describe("Flag indicating if the resolution is enabled (1 or 0)."),
+  userId: z.number().describe("The ID of the user associated with the resolution."),
 }).passthrough();
 
 /**
  * Schema for the tool's output, covering both success and failure cases.
  */
 const outputSchema = z.object({
-  success: z.boolean(),
-  data: z.array(resolutionSchema).optional(),
-  message: z.string().optional(),
-  error: z.any().optional(),
-  errorData: z.any().optional(),
+  success: z.boolean().describe("Indicates whether the operation was successful."),
+  data: z.array(resolutionSchema).optional().describe("An array of resolution objects on success."),
+  message: z.string().optional().describe("A message providing details about the operation outcome."),
+  error: z.any().optional().describe("Error details if the operation failed."),
+  errorData: z.any().optional().describe("Raw error data from the API."),
 });
 
+/**
+ * Tool to retrieve resolutions from the Xibo CMS, with optional filters.
+ */
 export const getResolutions = createTool({
   id: "get-resolutions",
   description: "Retrieve resolutions from Xibo CMS",
@@ -64,12 +65,12 @@ export const getResolutions = createTool({
   }),
   outputSchema,
   execute: async ({ context }) => {
-    const logContext = { ...context };
-    logger.info("Attempting to retrieve resolutions.", logContext);
+    logger.info({ context }, "Executing getResolutions tool.");
 
     if (!config.cmsUrl) {
-      logger.error("CMS URL is not configured.", logContext);
-      return { success: false, message: "CMS URL is not configured." };
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false, message };
     }
 
     try {
@@ -83,7 +84,7 @@ export const getResolutions = createTool({
       const url = new URL(`${config.cmsUrl}/api/resolution`);
       url.search = params.toString();
       
-      logger.debug(`Requesting resolutions from: ${url.toString()}`, logContext);
+      logger.debug({ url: url.toString() }, "Sending GET request to retrieve resolutions.");
 
       const headers = await getAuthHeaders();
       const response = await fetch(url.toString(), {
@@ -95,61 +96,35 @@ export const getResolutions = createTool({
       
       if (!response.ok) {
         const errorData = decodeErrorMessage(responseText);
-        logger.error("Failed to retrieve resolutions from CMS API.", {
-          ...logContext,
-          status: response.status,
-          errorData,
-        });
-        return {
-          success: false,
-          message: `API request failed with status ${response.status}.`,
-          errorData,
-        };
+        const message = `API request failed with status ${response.status}.`;
+        logger.error({ status: response.status, errorData, context }, message);
+        return { success: false, message, errorData };
       }
       
       let responseData;
       try {
         responseData = JSON.parse(responseText);
       } catch (e) {
-        logger.error("Failed to parse JSON response from CMS API.", {
-          ...logContext,
-          responseText,
-        });
-        return {
-          success: false,
-          message: "Invalid JSON response from server.",
-          errorData: responseText,
-        };
+        const message = "Invalid JSON response from server.";
+        logger.error({ responseText, context }, message);
+        return { success: false, message, errorData: responseText, };
       }
       
       const validationResult = z.array(resolutionSchema).safeParse(responseData);
 
       if (!validationResult.success) {
-        logger.warn("API response validation failed for getResolutions.", {
-          ...logContext,
-          error: validationResult.error.flatten(),
-          responseData,
-        });
-        return {
-          success: false,
-          message: "Response validation failed.",
-          error: validationResult.error.flatten(),
-          errorData: responseData,
-        };
+        const message = "Response validation failed.";
+        logger.warn({ error: validationResult.error.flatten(), responseData, context }, message);
+        return { success: false, message, error: validationResult.error.flatten(), errorData: responseData, };
       }
 
-      logger.info(`Successfully retrieved ${validationResult.data.length} resolutions.`, logContext);
+      logger.info({ count: validationResult.data.length }, "Successfully retrieved resolutions.");
       return { success: true, data: validationResult.data };
 
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-      logger.error("An unexpected error occurred in getResolutions.", {
-        ...logContext,
-        error: errorMessage,
-      });
+      logger.error({ error: errorMessage, context }, "An unexpected error occurred in getResolutions.");
       return { success: false, message: "An unexpected error occurred.", error: errorMessage };
     }
   },
-});
-
-export default getResolutions; 
+}); 
