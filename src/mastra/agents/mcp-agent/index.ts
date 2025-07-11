@@ -62,7 +62,9 @@ export const mcpAgent = new Agent({
     6. Web検索は必ず適切なクエリを指定してください
   `,
   model: google('gemini-1.5-pro-latest'),
-  tools: await mcp.getTools()
+  async getTools() {
+    return await mcp.getTools();
+  }
 });
 
 // エージェントの実行時にツールセットを取得

@@ -1,0 +1,95 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * @module Search All Library Tool
+ *
+ * This module provides a tool to search all media items in the Xibo CMS library.
+ * It is designed to hit the 'GET /library/search' endpoint.
+ * NOTE: This endpoint might not be officially documented for GET, but is used here
+ * for specific debugging or legacy purposes.
+ */
+import { z } from "zod";
+import { createTool } from '@mastra/core';
+import { logger } from '../../../index';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { librarySearchResponseSchema } from './schemas';
+
+// Schema for the input, indicating no parameters are needed.
+const inputSchema = z.object({
+    _placeholder: z.string().optional().describe("This tool does not require input parameters."),
+});
+
+// Schema for the tool's output, handling both success and error cases
+const outputSchema = z.union([
+    z.object({
+        success: z.literal(true),
+        data: librarySearchResponseSchema,
+    }),
+    z.object({
+        success: z.literal(false),
+        message: z.string(),
+        error: z.any().optional(),
+    }),
+]);
+
+/**
+ * @tool Tool for searching all media items from the Library
+ *
+ * This tool allows fetching all media items from the Xibo CMS Library
+ * without any filters by using the /library/search endpoint.
+ */
+export const searchAllLibrary = createTool({
+    id: 'search-all-library',
+    description: 'Gets all media items from the Library using the search endpoint.',
+    inputSchema,
+    outputSchema,
+    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+        logger.info('Starting searchAllLibrary tool execution.');
+        if (!config.cmsUrl) {
+            logger.error('CMS URL is not configured.');
+            return { success: false, message: 'CMS URL is not configured.' };
+        }
+
+        const url = `${config.cmsUrl}/api/library`;
+        logger.info(`searchAllLibrary: Fetching from URL: ${url}`);
+
+        try {
+            const headers = await getAuthHeaders();
+            // Explicitly set the method to 'GET' for the fetch request.
+            const response = await fetch(url, { method: 'GET', headers });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => response.statusText);
+                logger.error('searchAllLibrary: HTTP error', { status: response.status, error: errorData });
+                return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+            }
+
+            const data = await response.json();
+            logger.info(`Successfully fetched ${Array.isArray(data) ? data.length : 0} items from library search.`);
+            
+            const parsedData = librarySearchResponseSchema.safeParse(data);
+
+            if (!parsedData.success) {
+                logger.error('searchAllLibrary: Zod validation failed', { error: parsedData.error.format(), rawData: data });
+                return { success: false, message: 'Validation failed for the received library data.', error: parsedData.error.format() };
+            }
+
+            return { success: true, data: parsedData.data };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
+            logger.error('searchAllLibrary: Unexpected error', { error: errorMessage, details: error });
+            return { success: false, message: errorMessage, error };
+        }
+    },
+}); 

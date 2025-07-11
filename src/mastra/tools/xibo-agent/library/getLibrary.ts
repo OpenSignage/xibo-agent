@@ -11,176 +11,193 @@
  */
 
 /**
- * Xibo CMS Library Management Tool
- * 
- * This module provides functionality to search and retrieve media from the Xibo CMS library.
- * It implements the library API endpoint and handles the necessary validation
- * and data transformation for library operations.
+ * @module Get Library Tool
+ *
+ * This module provides a tool to search for media items in the Xibo CMS library
+ * and display the results as a tree view.
+ * It implements the 'GET /library' endpoint.
  */
-
 import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
+import { createTool } from '@mastra/core';
 import { logger } from '../../../index';
-import { decodeErrorMessage } from "../utility/error";
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { librarySearchResponseSchema } from './schemas';
+import { createTreeViewResponse, TreeNode } from '../utility/treeView';
 
-// Schema for a single media item in the library, based on actual API response
-const mediaSchema = z.object({
-  mediaId: z.number(),
-  ownerId: z.number(),
-  parentId: z.number().nullable(),
-  name: z.string(),
-  mediaType: z.string(),
-  storedAs: z.string(),
-  fileName: z.string(),
-  tags: z.array(
+// Schema for the input, based on the GET /library endpoint parameters
+const inputSchema = z.object({
+    mediaId: z.number().optional().describe("Filter by a specific Media ID."),
+    media: z.string().optional().describe("Filter by Media item name (partial match)."),
+    type: z.string().optional().describe("Filter by media type (e.g., 'image', 'video')."),
+    ownerId: z.number().optional().describe("Filter by the User ID of the owner."),
+    retired: z.number().int().min(0).max(1).optional().describe("Filter by retired status (0 or 1)."),
+    tags: z.string().optional().describe("Filter by a comma-separated list of tags."),
+    exactTags: z.number().int().min(0).max(1).optional().describe("A flag (0 or 1) indicating whether to treat the tags filter as an exact match."),
+    logicalOperator: z.enum(['AND', 'OR']).optional().describe("When filtering by multiple Tags, which logical operator should be used? AND|OR."),
+    duration: z.string().optional().describe("Filter by duration, e.g., '10', 'lt|10', 'gt|10', 'le|10', 'ge|10'."),
+    fileSize: z.string().optional().describe("Filter by file size in bytes, e.g., '1024', 'lt|1024'."),
+    ownerUserGroupId: z.number().optional().describe("Filter by users belonging to a specific User Group ID."),
+    folderId: z.number().optional().describe("Filter by Folder ID."),
+    treeView: z.boolean().optional().default(false).describe("If true, a tree view of the library structure will be generated."),
+});
+
+// Schema for the tool's output, including tree view
+const outputSchema = z.union([
     z.object({
-      tag: z.string(),
-      tagId: z.number(),
-      value: z.string().nullable(),
-    })
-  ).optional(),
-  fileSize: z.number(),
-  duration: z.number(),
-  valid: z.number(),
-  moduleSystemFile: z.number(),
-  expires: z.number(),
-  retired: z.number(),
-  isEdited: z.number(),
-  md5: z.string().nullable(),
-  owner: z.string(),
-  groupsWithPermissions: z.string().nullable(),
-  released: z.number(),
-  apiRef: z.string().nullable(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
-  enableStat: z.string().nullable(),
-  orientation: z.string().nullable(),
-  width: z.number(),
-  height: z.number(),
-  folderId: z.number(),
-  permissionsFolderId: z.number(),
-  
-  // Add new fields from the actual response data
-  thumbnail: z.string().nullable().optional(),
-  fileSizeFormatted: z.string().nullable().optional(),
-  isSaveRequired: z.any().nullable().optional(),
-  isRemote: z.any().nullable().optional(),
-  cloned: z.boolean().nullable().optional(),
-  newExpiry: z.any().nullable().optional(),
-  alwaysCopy: z.boolean().nullable().optional(),
-  revised: z.number().nullable().optional(),
-}).passthrough(); // Allow other fields not explicitly defined
+        success: z.literal(true),
+        data: librarySearchResponseSchema,
+        tree: z.array(z.object({
+            id: z.number(),
+            name: z.string(),
+            type: z.string(),
+            depth: z.number(),
+            isLast: z.boolean(),
+            path: z.string(),
+        })).optional(),
+        treeViewText: z.string().optional(),
+    }),
+    z.object({
+        success: z.literal(false),
+        message: z.string(),
+        error: z.any().optional(),
+    }),
+]);
 
 /**
- * Tool for searching and retrieving media from Xibo CMS library
+ * Builds a hierarchical tree structure from a flat list of media items.
+ * This function is used to create a detailed, nested view for each media item,
+ * organizing its properties like type, duration, and tags into a tree.
  * 
- * This tool provides functionality to:
- * - Search media by various criteria (ID, name, type, owner, etc.)
- * - Filter media based on tags and folder structure
- * - Handle media data validation and transformation
+ * @param mediaItems The array of media items from the API.
+ * @returns An array of TreeNode objects representing the library structure.
+ */
+function buildLibraryTree(mediaItems: z.infer<typeof librarySearchResponseSchema>): TreeNode[] {
+    return mediaItems.map(media => {
+        // Create the root node for the media item.
+        const mediaNode: TreeNode = {
+            id: media.mediaId,
+            name: media.name,
+            type: 'media',
+            children: []
+        };
+
+        // Create a child node for general information.
+        const infoNode: TreeNode = {
+            id: -media.mediaId * 10 - 1,
+            name: 'Information',
+            type: 'info',
+            children: [
+                { id: -media.mediaId * 100 - 1, type: 'name', name: `Name: ${media.name}` },
+                { id: -media.mediaId * 100 - 2, type: 'type', name: `Type: ${media.mediaType}` },
+                { id: -media.mediaId * 100 - 3, type: 'duration', name: `Duration: ${media.duration}s` },
+                { id: -media.mediaId * 100 - 4, type: 'size', name: `File Size: ${media.fileSize} bytes` },
+                { id: -media.mediaId * 100 - 5, type: 'owner', name: `Owner ID: ${media.ownerId}` },
+                { id: -media.mediaId * 100 - 6, type: 'folder', name: `Folder ID: ${media.folderId || 'N/A'}` },
+            ]
+        };
+        mediaNode.children?.push(infoNode);
+
+        // If the media has tags, create a child node for them.
+        if (media.tags && media.tags.length > 0) {
+            const tagsNode: TreeNode = {
+                id: -media.mediaId * 20 - 1,
+                name: 'Tags',
+                type: 'tags',
+                children: media.tags.map(tag => ({
+                    id: tag.tagId,
+                    name: tag.tag,
+                    type: 'tag'
+                }))
+            };
+            mediaNode.children?.push(tagsNode);
+        }
+
+        return mediaNode;
+    });
+}
+
+/**
+ * @tool Tool for Searching the Library with a Tree View
+ *
+ * This tool allows searching for media items in the Xibo CMS Library
+ * and displays their properties in a tree structure.
  */
 export const getLibrary = createTool({
-  id: "get-library",
-  description: "Search and retrieve media from Xibo CMS library",
-  inputSchema: z.object({
-    mediaId: z.number().optional().describe("Filter by media ID"),
-    media: z.string().optional().describe("Filter by media name (partial match)"),
-    type: z.string().optional().describe("Filter by media type"),
-    ownerId: z.number().optional().describe("Filter by owner ID"),
-    retired: z.number().optional().describe("Filter by retired status (0-1)"),
-    tags: z.string().optional().describe("Filter by tags"),
-    folderId: z.number().optional().describe("Filter by folder ID"),
-  }),
-  outputSchema: z.object({
-    success: z.boolean(),
-    data: z.array(mediaSchema).optional(),
-    message: z.string().optional(),
-    error: z.string().optional(),
-    errorData: z.any().optional(),
-  }),
-  execute: async ({ context }) => {
-    const logContext = { ...context };
-    logger.info("Attempting to retrieve library media", logContext);
+    id: 'get-library',
+    description: 'Search for media items in the Xibo Library and optionally display results as a tree.',
+    inputSchema,
+    outputSchema,
+    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+        logger.info('Starting getLibrary tool execution with input:', input);
 
-    if (!config.cmsUrl) {
-      logger.error("CMS URL is not configured.", logContext);
-      return { success: false, error: "CMS URL is not configured." };
-    }
-
-    try {
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
-
-      Object.entries(context).forEach(([key, value]) => {
-        if (value !== undefined) {
-          params.append(key, String(value));
+        if (!config.cmsUrl) {
+            return { success: false, message: 'CMS URL is not configured.' };
         }
-      });
-      
-      const url = new URL(`${config.cmsUrl}/api/library`);
-      url.search = params.toString();
 
-      logger.debug(`Requesting library data from: ${url.toString()}`, logContext);
+        try {
+            const { treeView, ...mediaInput } = input;
+            const headers = await getAuthHeaders();
 
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers,
-      });
+            // Dynamically build query parameters from the input, excluding 'treeView'.
+            const mediaParams = new URLSearchParams();
+            for (const [key, value] of Object.entries(mediaInput)) {
+                if (value !== undefined) {
+                    mediaParams.append(key, String(value));
+                }
+            }
+            const mediaUrl = `${config.cmsUrl}/api/library?${mediaParams.toString()}`;
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        const errorData = decodeErrorMessage(errorText);
-        logger.error('Failed to retrieve library data from CMS API.', {
-          ...logContext,
-          status: response.status,
-          statusText: response.statusText,
-          errorData,
-        });
-        return { 
-          success: false, 
-          message: `API request failed with status ${response.status}.`,
-          error: "Failed to fetch library media.", 
-          errorData 
-        };
-      }
+            logger.debug(`getLibrary: Fetching from URL: ${mediaUrl}`);
 
-      const data = await response.json();
-      
-      // Handle cases where the API returns an empty array for "not found"
-      if (Array.isArray(data) && data.length === 0) {
-        logger.info("No media found matching the criteria.", logContext);
-        return { success: true, data: [] };
-      }
+            const mediaResponse = await fetch(mediaUrl, { headers });
 
-      // Validate the received data against our schema
-      const validationResult = z.array(mediaSchema).safeParse(data);
+            if (!mediaResponse.ok) {
+                const errorData = await mediaResponse.json().catch(() => mediaResponse.statusText);
+                return { success: false, message: `HTTP error fetching media! status: ${mediaResponse.status}`, error: errorData };
+            }
 
-      if (!validationResult.success) {
-        logger.warn("API response validation failed for getLibrary.", {
-          ...logContext,
-          error: validationResult.error.flatten(),
-          rawData: data,
-        });
-        return { 
-          success: false, 
-          error: "Response validation failed.", 
-          errorData: validationResult.error.issues 
-        };
-      }
-      
-      logger.info("Successfully retrieved and validated library media.", logContext);
-      return { success: true, data: validationResult.data };
+            const mediaData = await mediaResponse.json();
+            logger.info(`Successfully fetched ${Array.isArray(mediaData) ? mediaData.length : 0} media items.`);
+            
+            const parsedMedia = librarySearchResponseSchema.safeParse(mediaData);
 
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-      logger.error("An unexpected error occurred in getLibrary.", {
-        ...logContext,
-        error: errorMessage,
-        stack: error instanceof Error ? error.stack : undefined,
-      });
-      return { success: false, error: "An unexpected error occurred.", message: errorMessage };
-    }
-  },
+            if (!parsedMedia.success) {
+                logger.error('getLibrary: Zod validation failed for media data', { error: parsedMedia.error.format(), rawData: mediaData });
+                return { success: false, message: 'Validation failed for the received library data.', error: parsedMedia.error.format() };
+            }
+            
+            const allMedia = parsedMedia.data;
+
+            // If tree view is not requested, return the flat list of media items.
+            if (!treeView) {
+                logger.info('Tree view not requested. Returning flat list of media.');
+                return { success: true, data: allMedia };
+            }
+            
+            // --- Tree View Generation ---
+            logger.info('Tree view requested. Building library tree structure.');
+            const libraryTree = buildLibraryTree(allMedia);
+            
+            logger.info('Successfully built library tree. Generating final response.');
+            return createTreeViewResponse(allMedia, libraryTree, (node: TreeNode) => {
+              // Custom formatter for the tree nodes to provide a better visual representation.
+              if (node.type === 'media') {
+                  return `📄 Media: ${node.name} (ID: ${node.id})`;
+              }
+              if (node.type === 'info') {
+                  return `ℹ️ ${node.name}`;
+              }
+              if (node.type === 'tags') {
+                  return `🏷️ ${node.name}`;
+              }
+              return node.name;
+            });
+
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
+            logger.error('getLibrary: Unexpected error', { error: errorMessage, details: error });
+            return { success: false, message: errorMessage, error };
+        }
+    },
 }); 

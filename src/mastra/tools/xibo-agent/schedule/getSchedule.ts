@@ -13,9 +13,8 @@
 /**
  * Get Schedule Tool
  *
- * This module provides a tool to retrieve schedule information from the Xibo CMS.
- * It allows querying for schedule events based on various filters like display
- * group IDs and event IDs.
+ * This module provides a tool to retrieve a filtered list of schedule events 
+ * from the Xibo CMS.
  */
 import { z } from "zod";
 import { createTool } from '@mastra/core';
@@ -40,31 +39,39 @@ const outputSchema = z.union([
 ]);
 
 /**
- * A tool to retrieve schedule events from the Xibo CMS.
- * It can filter events by display group IDs and a specific event ID.
+ * A tool to retrieve a filtered list of schedule events from the Xibo CMS.
  */
 export const getSchedule = createTool({
     id: 'get-schedule',
-    description: 'Retrieves schedule events. Can be filtered by display groups or a specific event.',
+    description: 'Retrieves a filtered list of schedule events.',
     inputSchema: z.object({
-        displayGroupIds: z.array(z.number()).optional().describe("An array of display group IDs to filter the schedule events."),
-        eventId: z.number().optional().describe("A specific event ID to retrieve.")
+        eventTypeId: z.number().optional().describe("Filter by event type ID. 1=Layout, 2=Command, 3=Overlay, 4=Interrupt, 5=Campaign, 6=Action, 7=Media Library, 8=Playlist"),
+        displayGroupIds: z.array(z.number()).optional().describe("Filter events by an array of Display Group Ids."),
+        fromDt: z.string().optional().describe("Filter for events starting from this date. Format: YYYY-MM-DD HH:mm:ss"),
+        toDt: z.string().optional().describe("Filter for events ending by this date. Format: YYYY-MM-DD HH:mm:ss"),
+        geoAware: z.number().optional().describe("Flag (0 or 1) to return events using Geo Location."),
+        recurring: z.number().optional().describe("Flag (0 or 1) to return recurring events."),
+        campaignId: z.number().optional().describe("Filter events by a specific campaign ID."),
     }),
     outputSchema,
     execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
-        const { displayGroupIds, eventId } = input;
-        
         if (!config.cmsUrl) {
             return { success: false, message: 'CMS URL is not configured.' };
         }
 
         const params = new URLSearchParams();
-        if (displayGroupIds) {
-            params.append('displayGroupIds', displayGroupIds.join(','));
-        }
 
-        const endpoint = eventId ? `/api/schedule/${eventId}` : '/api/schedule';
-        const url = `${config.cmsUrl}${endpoint}?${params.toString()}`;
+        for (const [key, value] of Object.entries(input)) {
+            if (value !== undefined) {
+                if (Array.isArray(value)) {
+                    params.append(key, value.join(','));
+                } else {
+                    params.append(key, String(value));
+                }
+            }
+        }
+        
+        const url = `${config.cmsUrl}/api/schedule?${params.toString()}`;
 
         try {
             const headers = await getAuthHeaders();
@@ -77,12 +84,10 @@ export const getSchedule = createTool({
             }
 
             const data = await response.json();
-            // If a single event is requested, the API returns an object, not an array. Wrap it.
-            const dataArray = Array.isArray(data) ? data : [data];
-            const parsedData = responseDataSchema.safeParse(dataArray);
+            const parsedData = responseDataSchema.safeParse(data);
 
             if (!parsedData.success) {
-                logger.error('getSchedule: Zod validation failed', { error: parsedData.error });
+                logger.error('getSchedule: Zod validation failed', { error: parsedData.error, rawData: data });
                 return { success: false, message: 'Validation failed for the received schedule data.', error: parsedData.error.format() };
             }
 

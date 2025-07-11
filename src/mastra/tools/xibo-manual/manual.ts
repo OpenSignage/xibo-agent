@@ -213,4 +213,15 @@ export const xiboManualTool = createTool({
       relevantSection
     };
   },
-}); 
+});
+
+/**
+ * Returns the Xibo manual tool in a structured object.
+ * This function is the recommended way to get the tool for agent initialization.
+ * @returns An object containing the xiboManualTool.
+ */
+export function getTools() {
+  return {
+    xiboManualTool,
+  };
+} 

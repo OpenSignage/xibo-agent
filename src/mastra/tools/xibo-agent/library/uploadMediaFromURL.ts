@@ -11,145 +11,99 @@
  */
 
 /**
- * Xibo CMS Media Upload from URL Tool
- * 
- * This module provides functionality to upload media to the Xibo CMS library from an external URL.
- * It implements the media upload API endpoint and handles the necessary validation
- * and data transformation for media operations.
- * 
- * Usage example:
- * {
- *   url: "https://example.com/image.jpg",
- *   name: "My Media",
- *   type: "image",
- *   duration: 0
- * }
+ * Upload Media from URL Tool
+ *
+ * This module provides a tool to upload a media file to the Xibo CMS library
+ * from a given URL. It implements the 'POST /library/url' endpoint.
  */
-
 import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
+import { createTool } from '@mastra/core';
 import { logger } from '../../../index';
-import path from 'path';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { librarySchema } from './schemas';
 
-/**
- * Schema for API response validation
- */
-const apiResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.object({
-    id: z.number(),
-    name: z.string(),
-    type: z.string(),
-    duration: z.number(),
-    fileName: z.string(),
-    size: z.number(),
-    md5: z.string(),
-    createdAt: z.string(),
-    modifiedAt: z.string(),
-    modifiedBy: z.string(),
-  }),
+// Schema for the input, based on the POST /library/url endpoint parameters
+const inputSchema = z.object({
+    url: z.string().url().describe("The direct URL to the media file to upload."),
+    name: z.string().optional().describe("An optional name for the new media item."),
+    oldMediaId: z.number().optional().describe("The ID of an existing media item to replace."),
+    updateInLayouts: z.number().optional().describe("A flag (0 or 1) to indicate that Layouts should be updated with this new version of the media."),
+    deleteOldRevisions: z.number().optional().describe("A flag (0 or 1) to delete old revisions of the media item being replaced."),
+    folderId: z.number().optional().describe("The ID of the folder to upload the media into."),
 });
 
+// Schema for the tool's output, handling both success and error cases
+const outputSchema = z.union([
+    z.object({
+        success: z.literal(true),
+        data: librarySchema,
+    }),
+    z.object({
+        success: z.literal(false),
+        message: z.string(),
+        error: z.any().optional(),
+    }),
+]);
+
 /**
- * Tool for uploading media to Xibo CMS library from URL
- * 
- * This tool provides functionality to:
- * - Upload media from external URL to CMS
- * - Set media properties (name, type, duration, etc.)
- * - Handle media data validation and transformation
+ * Tool for Uploading Media from a URL
+ *
+ * This tool uploads a file from a specified URL to the Xibo Library. It can
+ * be used to add new media or replace existing media items.
  */
 export const uploadMediaFromURL = createTool({
-  id: "upload-media-from-url",
-  description: "Upload media to Xibo CMS library from external URL",
-  inputSchema: z.object({
-    url: z.string().describe("The URL to the media"),
-    type: z.enum(['image', 'video', 'font', 'document']).describe("The type of the media"),
-    extension: z.string().optional().describe("Optional extension of the media (jpg, png etc.)"),
-    enableStat: z.enum(['On', 'Off', 'Inherit']).optional().describe("Enable Media Proof of Play statistics"),
-    optionalName: z.string().optional().describe("Optional name for the media file"),
-    expires: z.string().optional().describe("Expiration date in Y-m-d H:i:s format"),
-    folderId: z.number().optional().describe("Folder ID to assign the media to"),
-  }),
-  outputSchema: apiResponseSchema,
-  execute: async ({ context }) => {
-    try {
-      if (!config.cmsUrl) {
-        throw new Error("CMS URL is not set");
-      }
-
-      // Upload to CMS
-      const url = new URL(`${config.cmsUrl}/api/library/uploadUrl`);
-      const params = new URLSearchParams();
-      
-      // Add required parameters
-      params.append("url", context.url);
-      params.append("type", context.type);
-      
-      // Add optional parameters
-      if (context.extension) params.append("extension", context.extension);
-      if (context.enableStat) params.append("enableStat", context.enableStat);
-      if (context.optionalName) params.append("optionalName", context.optionalName);
-      if (context.expires) params.append("expires", context.expires);
-      if (context.folderId) params.append("folderId", context.folderId.toString());
-
-      logger.debug(`Requesting media addition to: ${url.toString()}`);
-
-      const response = await fetch(url.toString(), {
-        method: "POST",
-        headers: {
-          ...await getAuthHeaders(),
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: params.toString()
-      });
-
-      // Handle error response
-      if (!response.ok) {
-        const errorText = await response.text();
-        logger.error('Failed to add media:', {
-          status: response.status,
-          error: errorText,
-          url: context.url,
-          mediaName: context.optionalName || context.type
-        });
-        try {
-          // Try to parse error response as JSON
-          return JSON.parse(errorText);
-        } catch {
-          // If parsing fails, return error in standard format
-          return {
-            success: false,
-            error: errorText
-          };
+    id: 'upload-media-from-url',
+    description: 'Uploads a media file to the Library from a URL.',
+    inputSchema,
+    outputSchema,
+    execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+        if (!config.cmsUrl) {
+            return { success: false, message: 'CMS URL is not configured.' };
         }
-      }
 
-      // Parse and validate the response
-      const rawData = await response.json();
-      logger.debug(`Raw upload response: ${JSON.stringify(rawData)}`);
-      
-      try {
-        const validatedData = apiResponseSchema.parse(rawData);
-        logger.info(`Media uploaded successfully: ${validatedData.data.name} (ID: ${validatedData.data.id})`);
-        return validatedData;
-      } catch (validationError) {
-        logger.error(`Response validation error: ${validationError instanceof Error ? validationError.message : "Unknown validation error"}`, {
-          rawData,
-          error: validationError
-        });
-        
-        // Fallback: Return raw data with success flag if validation fails
-        logger.warn("Returning unvalidated response due to schema mismatch");
-        return { 
-          success: true, 
-          data: rawData.data || rawData 
-        };
-      }
-    } catch (error) {
-      logger.error(`uploadMediaFromURL: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
-      throw error;
-    }
-  },
+        const params = new URLSearchParams();
+        for (const [key, value] of Object.entries(input)) {
+            if (value !== undefined) {
+                params.append(key, String(value));
+            }
+        }
+
+        const url = `${config.cmsUrl}/api/library/url`;
+        logger.debug(`uploadMediaFromURL: Posting to URL: ${url}`);
+
+        try {
+            const authHeaders = await getAuthHeaders();
+            const headers = {
+                ...authHeaders,
+                'Content-Type': 'application/x-www-form-urlencoded',
+            };
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers,
+                body: params,
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => response.statusText);
+                logger.error('uploadMediaFromURL: HTTP error', { status: response.status, error: errorData });
+                return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+            }
+
+            const data = await response.json();
+            const parsedData = librarySchema.safeParse(data);
+
+            if (!parsedData.success) {
+                logger.error('uploadMediaFromURL: Zod validation failed', { error: parsedData.error.format(), rawData: data });
+                return { success: false, message: 'Validation failed for the API response.', error: parsedData.error.format() };
+            }
+
+            return { success: true, data: parsedData.data };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
+            logger.error('uploadMediaFromURL: Unexpected error', { error: errorMessage, details: error });
+            return { success: false, message: errorMessage, error };
+        }
+    },
 }); 
