@@ -11,132 +11,72 @@
  */
 
 /**
- * Notification Tool for Xibo CMS
- * 
- * This module provides functionality to retrieve notifications from the Xibo CMS.
- * It supports filtering by notification ID and subject, and can include related data.
+ * @module GetNotifications
+ * @description This module provides a tool to retrieve notifications from the Xibo CMS.
+ * It supports filtering by notification ID and subject, and can embed related data like
+ * user groups and display groups. It also supports generating a tree view.
  */
-
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
 import { decodeErrorMessage } from "../utility/error";
-
-// Schemas for embedded data, based on actual API response
-const tagSchema = z.object({
-  tag: z.string().nullable(),
-  tagId: z.number(),
-  value: z.string().nullable(),
-}).passthrough();
-
-const userGroupSchema = z.object({
-  groupId: z.number(),
-  group: z.string(),
-  isUserSpecific: z.number(),
-  isEveryone: z.number(),
-  description: z.string().nullable(),
-  libraryQuota: z.number().nullable(),
-  isSystemNotification: z.number().nullable(),
-  isDisplayNotification: z.number().nullable(),
-  isDataSetNotification: z.number().nullable(),
-  isLayoutNotification: z.number().nullable(),
-  isLibraryNotification: z.number().nullable(),
-  isReportNotification: z.number().nullable(),
-  isScheduleNotification: z.number().nullable(),
-  isCustomNotification: z.number().nullable(),
-  isShownForAddUser: z.number().nullable(),
-  defaultHomepageId: z.string().nullable(),
-  features: z.array(z.string()).nullable(),
-}).passthrough();
-
-const displayGroupSchema = z.object({
-  displayGroupId: z.number(),
-  displayGroup: z.string(),
-  description: z.string().nullable(),
-  isDisplaySpecific: z.number(),
-  isDynamic: z.number(),
-  dynamicCriteria: z.string().nullable(),
-  dynamicCriteriaLogicalOperator: z.string().nullable(),
-  dynamicCriteriaTags: z.string().nullable(),
-  dynamicCriteriaExactTags: z.number(),
-  dynamicCriteriaTagsLogicalOperator: z.string().nullable(),
-  userId: z.number(),
-  tags: z.array(tagSchema).nullable(),
-  bandwidthLimit: z.number().nullable(),
-  groupsWithPermissions: z.string().nullable(),
-  createdDt: z.string().nullable(),
-  modifiedDt: z.string().nullable(),
-  folderId: z.number().nullable(),
-  permissionsFolderId: z.number().nullable(),
-  ref1: z.string().nullable(),
-  ref2: z.string().nullable(),
-  ref3: z.string().nullable(),
-  ref4: z.string().nullable(),
-  ref5: z.string().nullable(),
-}).passthrough();
-
+import { notificationSchema } from './schemas';
+import { createTreeViewResponse, TreeNode } from '../utility/treeView';
 
 /**
- * Schema for notification data
+ * Defines the output schema for the getNotifications tool.
+ * It can be a successful response with an array of notifications or a failure response.
+ * It also supports an optional tree view structure.
  */
-const notificationSchema = z.object({
-  notificationId: z.number(),
-  subject: z.string(),
-  body: z.string(),
-  createDt: z.union([z.string(), z.number()]).optional(),
-  releaseDt: z.union([z.string(), z.number()]).optional(),
-  type: z.string().optional(),
-  isEmail: z.number().optional(),
-  isInterrupt: z.number(),
-  isSystem: z.number(),
-  userId: z.number(),
-  filename: z.string().nullable().optional(),
-  originalFileName: z.string().nullable().optional(),
-  nonusers: z.string().nullable().optional(),
-  userGroups: z.array(userGroupSchema).nullable().optional(),
-  displayGroups: z.array(displayGroupSchema).nullable().optional(),
-  displayGroupIds: z.array(z.number()).optional(),
-  displayGroupNames: z.array(z.string()).optional(),
-  read: z.number().optional(),
-  readDt: z.string().nullable().optional(),
-  readBy: z.string().nullable().optional()
-}).passthrough();
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    data: z.array(notificationSchema),
+    message: z.string(),
+    tree: z.array(z.any()).optional(),
+    treeViewText: z.string().optional(),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
 
 /**
- * Schema for the tool's output, covering both success and failure cases.
- */
-const outputSchema = z.object({
-  success: z.boolean(),
-  data: z.array(notificationSchema).optional(),
-  message: z.string().optional(),
-  error: z.any().optional(),
-  errorData: z.any().optional(),
-});
-
-/**
- * Tool for retrieving notifications from Xibo CMS
+ * Tool to retrieve notifications from the Xibo CMS.
+ * It allows filtering, embedding of related data, and generating a tree view.
  */
 export const getNotifications = createTool({
   id: 'get-notifications',
-  description: 'Retrieve notifications from Xibo CMS',
+  description: 'Retrieve notifications from the Xibo CMS, with optional filters and tree view.',
   inputSchema: z.object({
-    notificationId: z.number().optional().describe('Filter by notification ID'),
-    subject: z.string().optional().describe('Filter by subject'),
-    embed: z.string().optional().describe('Include related data (userGroups, displayGroups)')
+    notificationId: z.number().optional().describe('Filter by a specific notification ID.'),
+    subject: z.string().optional().describe('Filter notifications by subject (supports LIKE %...%).'),
+    embed: z.string().optional().describe('Embed related data, e.g., "userGroups,displayGroups".'),
+    treeView: z.boolean().optional().describe('If true, generates a tree view of notifications and their assigned groups.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
-    const logContext = { ...context };
-    logger.info("Attempting to retrieve notifications.", logContext);
-    
     if (!config.cmsUrl) {
-      logger.error("CMS URL is not configured.", logContext);
-      return { success: false, message: "CMS URL is not configured." };
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
 
+    const url = new URL(`${config.cmsUrl}/api/notification`);
     try {
+      let embedValue = context.embed || '';
+      if (context.treeView) {
+        const requiredEmbeds = ['userGroups', 'displayGroups'];
+        const existingEmbeds = embedValue.split(',').map(s => s.trim()).filter(Boolean);
+        const newEmbeds = [...new Set([...existingEmbeds, ...requiredEmbeds])];
+        embedValue = newEmbeds.join(',');
+      }
+
       const params = new URLSearchParams();
       if (context.notificationId) {
         params.append('notificationId', context.notificationId.toString());
@@ -144,14 +84,12 @@ export const getNotifications = createTool({
       if (context.subject) {
         params.append('subject', context.subject);
       }
-      if (context.embed) {
-        params.append('embed', context.embed);
+      if (embedValue) {
+        params.append('embed', embedValue);
       }
-
-      const url = new URL(`${config.cmsUrl}/api/notification`);
       url.search = params.toString();
       
-      logger.debug(`Requesting notifications from: ${url.toString()}`, logContext);
+      logger.info({ url: url.toString() }, "Attempting to retrieve notifications.");
 
       const headers = await getAuthHeaders();
       const response = await fetch(url.toString(), {
@@ -159,63 +97,112 @@ export const getNotifications = createTool({
         headers
       });
       
-      const responseText = await response.text();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const errorData = decodeErrorMessage(responseText);
-        logger.error("Failed to retrieve notifications from CMS API.", {
-          ...logContext,
-          status: response.status,
-          errorData,
-        });
+        const decodedError = decodeErrorMessage(responseData);
+        const message = `Failed to retrieve notifications. API responded with status ${response.status}.`;
+        logger.error({ response: decodedError, status: response.status }, message);
         return {
-          success: false,
-          message: `API request failed with status ${response.status}.`,
-          errorData,
-        };
-      }
-      
-      let responseData;
-      try {
-        responseData = JSON.parse(responseText);
-      } catch (e) {
-        logger.error("Failed to parse JSON response from CMS API.", {
-          ...logContext,
-          responseText,
-        });
-        return {
-          success: false,
-          message: "Invalid JSON response from server.",
-          errorData: responseText,
+          success: false as const,
+          message,
+          errorData: decodedError,
         };
       }
 
       const validationResult = z.array(notificationSchema).safeParse(responseData);
 
       if (!validationResult.success) {
-        logger.warn("API response validation failed for getNotifications.", {
-          ...logContext,
-          error: validationResult.error.flatten(),
-          responseData,
-        });
+        const message = "Notification response validation failed.";
+        logger.error({ error: validationResult.error, data: responseData }, message);
         return {
-          success: false,
-          message: "Response validation failed.",
-          error: validationResult.error.flatten(),
+          success: false as const,
+          message,
+          error: validationResult.error,
           errorData: responseData,
         };
       }
 
-      logger.info(`Successfully retrieved ${validationResult.data.length} notifications.`, logContext);
-      return { success: true, data: validationResult.data };
+      const message = `Successfully retrieved ${validationResult.data.length} notifications.`;
+      logger.info({ count: validationResult.data.length }, message);
+
+      if (context.treeView) {
+        const tree: TreeNode[] = validationResult.data.map(notification => {
+          const children: TreeNode[] = [];
+          if (notification.displayGroups) {
+            children.push(...notification.displayGroups.map(dg => {
+              const node: TreeNode = {
+                id: (dg as any).displayGroupId,
+                name: (dg as any).displayGroup,
+                type: 'Display Group',
+                description: (dg as any).description,
+              };
+              return node;
+            }));
+          }
+          if (notification.userGroups) {
+            children.push(...notification.userGroups.map(ug => {
+              const node: TreeNode = {
+                id: (ug as any).userGroupId,
+                name: (ug as any).userGroup,
+                type: 'User Group',
+                description: (ug as any).description,
+              };
+              return node;
+            }));
+          }
+
+          return {
+            id: notification.notificationId,
+            name: notification.subject,
+            type: 'Notification',
+            children: children,
+            isInterrupt: notification.isInterrupt,
+            body: notification.body,
+          };
+        });
+
+        const nodeFormatter = (node: TreeNode) => {
+          if (node.type === 'Notification') {
+            const isInterrupt = (node as any).isInterrupt;
+            const body = (node as any).body;
+            let result = `${node.type}: ${node.name} (ID: ${node.id}, Interrupt: ${isInterrupt === 1 ? 'Yes' : 'No'})`;
+            if (body) {
+              result += `\n` + ' '.repeat(node.depth * 3 + 3) + `└─ Body: ${body}`;
+            }
+            return result;
+          }
+          if (node.type === 'Display Group' || node.type === 'User Group') {
+            const description = (node as any).description;
+            let result = `${node.type}: ${node.name} (ID: ${node.id})`;
+            if (description) {
+                result += ` - ${description}`;
+            }
+            return result;
+          }
+          return `${node.type}: ${node.name} (ID: ${node.id})`;
+        };
+        
+        const treeResponse = createTreeViewResponse(validationResult.data, tree, nodeFormatter);
+        const { success, ...restOfTreeResponse } = treeResponse;
+
+        return {
+          ...restOfTreeResponse,
+          success: true as const,
+          message,
+        };
+      }
+
+      return { success: true as const, data: validationResult.data, message };
 
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-      logger.error("An unexpected error occurred in getNotifications.", {
-        ...logContext,
-        error: errorMessage,
-      });
-      return { success: false, message: "An unexpected error occurred.", error: errorMessage };
+      const message = "An unexpected error occurred while retrieving notifications.";
+      logger.error({ error }, message);
+      return { 
+        success: false as const, 
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error
+      };
     }
   },
 }); 

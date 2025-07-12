@@ -11,209 +11,121 @@
  */
 
 /**
- * Xibo CMS Notification Creation Tool
- * 
- * This module provides functionality to create notifications in the Xibo CMS system.
- * It implements the notification creation API endpoint and handles the necessary validation
- * and data transformation for creating notification information.
+ * @module AddNotification
+ * @description This module provides a tool for creating notifications in the Xibo CMS.
+ * It handles the API request, data validation, and response formatting for
+ * adding a new notification.
  */
-
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
-
-// Schema for tag information in display groups
-const tagSchema = z.object({
-  tag: z.string().nullable(),
-  tagId: z.number(),
-  value: z.string().nullable(),
-}).passthrough();
-
-// Schema for user group information
-const userGroupSchema = z.object({
-  groupId: z.number(),
-  group: z.string(),
-  isUserSpecific: z.number(),
-  isEveryone: z.number(),
-  description: z.string().nullable(),
-  libraryQuota: z.number().nullable(),
-  isSystemNotification: z.number().nullable(),
-  isDisplayNotification: z.number().nullable(),
-  isDataSetNotification: z.number().nullable(),
-  isLayoutNotification: z.number().nullable(),
-  isLibraryNotification: z.number().nullable(),
-  isReportNotification: z.number().nullable(),
-  isScheduleNotification: z.number().nullable(),
-  isCustomNotification: z.number().nullable(),
-  isShownForAddUser: z.number().nullable(),
-  defaultHomepageId: z.string().nullable(),
-  features: z.array(z.string()).nullable(),
-}).passthrough();
-
-// Schema for display group information
-const displayGroupSchema = z.object({
-  displayGroupId: z.number(),
-  displayGroup: z.string(),
-  description: z.string().nullable(),
-  isDisplaySpecific: z.number(),
-  isDynamic: z.number(),
-  dynamicCriteria: z.string().nullable(),
-  dynamicCriteriaLogicalOperator: z.string().nullable(),
-  dynamicCriteriaTags: z.string().nullable(),
-  dynamicCriteriaExactTags: z.number(),
-  dynamicCriteriaTagsLogicalOperator: z.string().nullable(),
-  userId: z.number(),
-  tags: z.array(tagSchema).nullable(),
-  bandwidthLimit: z.number().nullable(),
-  groupsWithPermissions: z.string().nullable(),
-  createdDt: z.string().nullable(),
-  modifiedDt: z.string().nullable(),
-  folderId: z.number().nullable(),
-  permissionsFolderId: z.number().nullable(),
-  ref1: z.string().nullable(),
-  ref2: z.string().nullable(),
-  ref3: z.string().nullable(),
-  ref4: z.string().nullable(),
-  ref5: z.string().nullable(),
-}).passthrough();
-
-// Schema for notification data validation
-const notificationSchema = z.object({
-  notificationId: z.number(),
-  createDt: z.union([z.string(), z.number()]),
-  releaseDt: z.union([z.string(), z.number()]),
-  subject: z.string(),
-  type: z.string(),
-  body: z.string(),
-  isInterrupt: z.number(),
-  isSystem: z.number(),
-  userId: z.number(),
-  filename: z.string().nullable(),
-  originalFileName: z.string().nullable(),
-  nonusers: z.string().nullable(),
-  userGroups: z.array(userGroupSchema).nullable(),
-  displayGroups: z.array(displayGroupSchema).nullable(),
-}).passthrough();
-
-// Schema for API response validation
-const outputSchema = z.object({
-  success: z.boolean(),
-  data: notificationSchema.optional(),
-  message: z.string().optional(),
-  error: z.any().optional(),
-  errorData: z.any().optional(),
-});
+import { notificationSchema } from './schemas';
 
 /**
- * Tool for creating notifications in Xibo CMS
- * 
- * This tool accepts notification details and creates a new notification
- * in the Xibo CMS system.
+ * Defines the output schema for the addNotification tool.
+ * It represents a successful response with the created notification data or a failure.
+ */
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    data: notificationSchema,
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
+
+/**
+ * Tool for creating a new notification in the Xibo CMS.
+ * This tool sends a POST request with the notification details.
  */
 export const addNotification = createTool({
   id: 'add-notification',
-  description: 'Create a new notification',
+  description: 'Create a new notification in the Xibo CMS.',
   inputSchema: z.object({
-    subject: z.string().describe('Notification subject'),
-    body: z.string().optional().describe('Notification body'),
-    releaseDt: z.string().describe('Notification release date and time (ISO 8601 format)'),
-    isInterrupt: z.number().describe('Flag to interrupt web portal navigation/login (0-1)'),
-    displayGroupIds: z.array(z.number()).describe('Array of display group IDs to assign the notification to'),
-    userGroupIds: z.array(z.number()).describe('Array of user group IDs to assign the notification to')
+    subject: z.string().describe('The subject of the notification.'),
+    body: z.string().optional().describe('The main content of the notification.'),
+    releaseDt: z.string().describe('The release date and time for the notification in ISO 8601 format.'),
+    isInterrupt: z.number().describe('Flag to determine if the notification should interrupt users. Use 1 for true, 0 for false.'),
+    displayGroupIds: z.array(z.number()).describe('An array of display group IDs to which this notification will be sent.'),
+    userGroupIds: z.array(z.number()).describe('An array of user group IDs to which this notification will be sent.')
   }),
   outputSchema,
   execute: async ({ context }) => {
-    const logContext = { ...context };
-    logger.info("Attempting to create a new notification.", logContext);
-
     if (!config.cmsUrl) {
-      logger.error("CMS URL is not configured.", logContext);
-      return { success: false, message: "CMS URL is not configured." };
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
 
-    try {
-      const url = new URL(`${config.cmsUrl}/api/notification`);
-      logger.debug(`Requesting to create notification at: ${url.toString()}`, logContext);
+    const url = new URL(`${config.cmsUrl}/api/notification`);
+    logger.info({ subject: context.subject }, "Attempting to create a new notification.");
 
+    try {
       const formData = new URLSearchParams();
       formData.append("subject", context.subject);
       if (context.body) {
         formData.append("body", context.body);
       }
-      formData.append("releaseDt", context.releaseDt);
+      formData.append("releaseDt", new Date(context.releaseDt).toISOString());
       formData.append("isInterrupt", context.isInterrupt.toString());
       context.displayGroupIds.forEach(id => formData.append('displayGroupIds[]', id.toString()));
       context.userGroupIds.forEach(id => formData.append('userGroupIds[]', id.toString()));
 
-      const headers = await getAuthHeaders();
-      headers['Content-Type'] = 'application/x-www-form-urlencoded';
-
       const response = await fetch(url.toString(), {
         method: 'POST',
-        headers,
+        headers: {
+          ...await getAuthHeaders(),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
         body: formData.toString(),
       });
 
-      const responseText = await response.text();
-      
+      const responseData = await response.json();
+
       if (!response.ok) {
-        const errorData = decodeErrorMessage(responseText);
-        logger.error("Failed to create notification via CMS API.", {
-          ...logContext,
-          status: response.status,
-          errorData,
-        });
+        const decodedError = decodeErrorMessage(responseData);
+        const message = `Failed to create notification. API responded with status ${response.status}.`;
+        logger.error({ response: decodedError, status: response.status }, message);
         return {
-          success: false,
-          message: `API request failed with status ${response.status}.`,
-          errorData,
-        };
-      }
-      
-      let responseData;
-      try {
-        responseData = JSON.parse(responseText);
-      } catch (e) {
-        logger.error("Failed to parse JSON response from CMS API.", {
-          ...logContext,
-          responseText,
-        });
-        return {
-          success: false,
-          message: "Invalid JSON response from server.",
-          errorData: responseText,
+          success: false as const,
+          message,
+          errorData: decodedError,
         };
       }
       
       const validationResult = notificationSchema.safeParse(responseData);
 
       if (!validationResult.success) {
-        logger.warn("API response validation failed for postNotification.", {
-          ...logContext,
-          error: validationResult.error.flatten(),
-          responseData,
-        });
+        const message = "Notification response validation failed.";
+        logger.error({ error: validationResult.error, data: responseData }, message);
         return {
-          success: false,
-          message: "Response validation failed.",
-          error: validationResult.error.flatten(),
+          success: false as const,
+          message,
+          error: validationResult.error,
           errorData: responseData,
         };
       }
 
-      logger.info(`Successfully created notification "${validationResult.data.subject}".`, logContext);
-      return { success: true, data: validationResult.data };
+      const message = `Successfully created notification: "${validationResult.data.subject}".`;
+      logger.info({ notificationId: validationResult.data.notificationId }, message);
+      return { success: true as const, data: validationResult.data, message };
 
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-      logger.error("An unexpected error occurred in postNotification.", {
-        ...logContext,
-        error: errorMessage,
-      });
-      return { success: false, message: "An unexpected error occurred.", error: errorMessage };
+      const message = "An unexpected error occurred while creating the notification.";
+      logger.error({ error }, message);
+      return { 
+        success: false as const, 
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error
+      };
     }
   },
 }); 

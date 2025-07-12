@@ -10,6 +10,11 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
+/**
+ * @module NotificationTools
+ * @description This index file exports all the tools related to notification management.
+ */
+
 export { getNotifications } from './getNotifications';
 export { addNotification } from './addNotification';
 export { editNotification } from './editNotification';
