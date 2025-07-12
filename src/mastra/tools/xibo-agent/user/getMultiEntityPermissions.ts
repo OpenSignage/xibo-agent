@@ -1,117 +1,112 @@
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
 
-const permissionSchema = z.object({
-  groupId: z.number(),
-  group: z.string(),
-  view: z.number(),
-  edit: z.number(),
-  delete: z.number(),
+/**
+ * @module getMultiEntityPermissions
+ * @description This module provides a tool to retrieve aggregated permissions for multiple entities of the same type.
+ */
+import { z } from 'zod';
+import { createTool } from '@mastra/core/tools';
+import { config } from '../config';
+import { getAuthHeaders } from '../auth';
+import { logger } from '../../../index';
+import { decodeErrorMessage } from '../utility/error';
+
+// Schema for a single permission entry in a multi-entity response.
+const multiEntityPermissionSchema = z.object({
+  groupId: z.number().describe('The ID of the group.'),
+  group: z.string().describe('The name of the group.'),
+  view: z.number().describe('View permission flag (0 or 1).'),
+  edit: z.number().describe('Edit permission flag (0 or 1).'),
+  delete: z.number().describe('Delete permission flag (0 or 1).'),
 });
 
-const successSchema = z.object({
-  success: z.literal(true),
-  data: z.array(permissionSchema),
-});
-
-const errorSchema = z.object({
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
   success: z.literal(false),
-  message: z.string().describe("A human-readable error message."),
-  error: z
-    .any()
-    .optional()
-    .describe("Optional technical details about the error."),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
 });
 
+// Schema for a successful response.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(multiEntityPermissionSchema),
+});
+
+/**
+ * Schema for the tool's output, which can be a success or error response.
+ */
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+/**
+ * @tool getMultiEntityPermissions
+ * @description A tool to get aggregated permissions for multiple entities of the same type.
+ */
 export const getMultiEntityPermissions = createTool({
-  id: "get-multi-entity-permissions",
-  description: "Gets permissions for multiple entities.",
+  id: 'get-multi-entity-permissions',
+  description: 'Gets permissions for multiple entities of the same type.',
   inputSchema: z.object({
-    entity: z.string(),
-    ids: z.string(),
+    entity: z.string().describe("The entity type (e.g., 'layout', 'campaign')."),
+    ids: z.array(z.number()).describe('An array of object IDs for the specified entity.'),
   }),
-  outputSchema: z.union([successSchema, errorSchema]),
-  execute: async ({
-    context,
-  }): Promise<
-    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
-  > => {
+  outputSchema,
+  execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      const errorMessage = "CMS URL is not configured.";
-      logger.error(errorMessage);
-      return {
-        success: false,
-        message: errorMessage,
-      };
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false as const, message };
     }
 
-    const url = new URL(
-      `${config.cmsUrl}/api/user/permissions/${context.entity}`
-    );
-    url.searchParams.append("ids", context.ids);
-
-    logger.info(`Requesting multi-entity permissions from: ${url.toString()}`);
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: await getAuthHeaders(),
-    });
-
-    const responseText = await response.text();
-    let responseData: any;
+    const { entity, ids } = context;
+    const url = new URL(`${config.cmsUrl}/api/user/permissions/${entity}`);
+    url.searchParams.append('ids', ids.join(','));
 
     try {
-      responseData = JSON.parse(responseText);
-    } catch (e) {
-      responseData = responseText;
-    }
+      logger.info({ entity, ids }, 'Attempting to retrieve multi-entity permissions.');
 
-    if (!response.ok) {
-      const decodedText = decodeErrorMessage(responseText);
-      const errorMessage = `Failed to get multi-entity permissions. API responded with status ${response.status}.`;
-      logger.error(errorMessage, {
-        status: response.status,
-        response: decodedText,
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: await getAuthHeaders(),
       });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        const decodedError = decodeErrorMessage(responseData);
+        const message = `Failed to get multi-entity permissions. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: decodedError, entity, ids }, message);
+        return { success: false as const, message, errorData: decodedError };
+      }
+
+      const validationResult = z.array(multiEntityPermissionSchema).safeParse(responseData);
+
+      if (!validationResult.success) {
+        const message = 'Multi-entity permissions response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return { success: false as const, message, error: validationResult.error, errorData: responseData };
+      }
+
+      logger.info({ count: validationResult.data.length }, `Successfully retrieved ${validationResult.data.length} aggregated permission records.`);
+      return { success: true as const, data: validationResult.data };
+    } catch (error: unknown) {
+      const message = 'An unexpected error occurred while retrieving multi-entity permissions.';
+      logger.error({ error, entity, ids }, message);
       return {
-        success: false,
-        message: `${errorMessage} Message: ${decodedText}`,
-        error: {
-          statusCode: response.status,
-          responseBody: decodedText,
-        },
+        success: false as const,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
       };
     }
-
-    const validationResult = successSchema.safeParse({
-      success: true, // Assuming success if response is ok
-      data: responseData,
-    });
-
-    if (!validationResult.success) {
-      const errorMessage =
-        "Multi-entity permissions response validation failed.";
-      logger.error(errorMessage, {
-        error: validationResult.error.issues,
-        data: responseData,
-      });
-      return {
-        success: false,
-        message: errorMessage,
-        error: {
-          validationIssues: validationResult.error.issues,
-          receivedData: responseData,
-        },
-      };
-    }
-
-    logger.info("Multi-entity permissions retrieved successfully");
-    return validationResult.data;
   },
-});
-
-export default getMultiEntityPermissions; 
+}); 

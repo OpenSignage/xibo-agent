@@ -11,9 +11,8 @@
  */
 
 /**
- * @module getUserPermissions
- * @description This module provides a tool to retrieve the permissions
- * for a specific entity (like a layout or campaign) from the Xibo CMS.
+* @module editUserPref
+ * @description This module provides a tool for editing the preferences of a specific user.
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
@@ -22,13 +21,14 @@ import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 import { decodeErrorMessage } from '../utility/error';
 import {
-  permissionSchema,
+  userSchema,
+  preferenceSchema,
 } from './schemas';
 
-// Schema for a successful response, containing an array of permissions.
+// Schema for a successful response, containing the updated user object.
 const successResponseSchema = z.object({
   success: z.literal(true),
-  data: z.array(permissionSchema),
+  data: userSchema,
 });
 
 // Schema for a generic error response.
@@ -45,15 +45,15 @@ const errorResponseSchema = z.object({
 const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
- * @tool getUserPermissions
- * @description A tool to get the permissions for a specific entity from the Xibo CMS.
+ * @tool editUserPref
+ * @description A tool for editing the preferences of a specific user.
  */
-export const getUserPermissions = createTool({
-  id: 'get-user-permissions',
-  description: "Get permissions for a specific entity (e.g., 'layout', 'campaign').",
+export const editUserPref = createTool({
+  id: 'edit-user-pref',
+  description: 'Edits preferences for a specific user.',
   inputSchema: z.object({
-    entity: z.string().describe("The type of entity (e.g., 'layout', 'campaign')."),
-    objectId: z.number().describe('The ID of the object to get permissions for.'),
+    userId: z.number().describe('The ID of the user whose preferences are to be edited.'),
+    preferences: z.array(preferenceSchema.omit({ userId: true })).describe('An array of preference objects to set.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -63,39 +63,44 @@ export const getUserPermissions = createTool({
       return { success: false as const, message };
     }
 
-    const { entity, objectId } = context;
-    const url = new URL(`${config.cmsUrl}/api/user/permissions/${entity}/${objectId}`);
+    const { userId, preferences } = context;
+    const url = new URL(`${config.cmsUrl}/api/user/pref/${userId}`);
 
     try {
-      logger.info({ entity, objectId }, 'Attempting to retrieve permissions.');
+      logger.info({ userId, preferences }, 'Attempting to edit user preferences.');
 
       const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: await getAuthHeaders(),
+        method: 'PUT',
+        headers: {
+          ...(await getAuthHeaders()),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(preferences),
       });
 
       const responseData = await response.json();
 
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
-        const message = `Failed to get permissions. API responded with status ${response.status}.`;
-        logger.error({ status: response.status, response: decodedError, entity, objectId }, message);
+        const message = `Failed to edit user preferences. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: decodedError, userId }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
-      const validationResult = z.array(permissionSchema).safeParse(responseData);
+      const validationResult = userSchema.safeParse(responseData);
 
       if (!validationResult.success) {
-        const message = 'Permissions response validation failed.';
+        const message = 'User preferences edit response validation failed.';
         logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return { success: false as const, message, error: validationResult.error, errorData: responseData };
       }
-
-      logger.info({ count: validationResult.data.length }, `Successfully retrieved ${validationResult.data.length} permission records.`);
+      
+      logger.info({ userId }, `Successfully edited preferences for user ID ${userId}.`);
       return { success: true as const, data: validationResult.data };
+
     } catch (error: unknown) {
-      const message = 'An unexpected error occurred while retrieving permissions.';
-      logger.error({ error, entity, objectId }, message);
+      const message = `An unexpected error occurred while editing user preferences for user ID ${userId}.`;
+      logger.error({ error, userId }, message);
       return {
         success: false as const,
         message,
@@ -103,4 +108,4 @@ export const getUserPermissions = createTool({
       };
     }
   },
-}); 
+});

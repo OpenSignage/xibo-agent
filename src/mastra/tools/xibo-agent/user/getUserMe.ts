@@ -12,701 +12,180 @@
 
 /**
  * @module getUserMe
- * @description Tool to retrieve current authenticated user information from Xibo CMS API,
- * with optional tree view formatting.
+ * @description This module provides a tool to retrieve the currently authenticated user's information
+ * from the Xibo CMS, with optional tree view formatting.
  */
-
-import { z } from "zod";
+import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
+import { config } from '../config';
+import { getAuthHeaders } from '../auth';
+import { TreeNode, createTreeViewResponse } from '../utility/treeView';
 import { logger } from '../../../index';
-import { 
-  TreeNode, 
-  treeResponseSchema, 
-  createTreeViewResponse 
-} from "../utility/treeView";
+import { decodeErrorMessage } from '../utility/error';
+import {
+  userSchema,
+} from './schemas';
 
-// =================================================================
-// Schema Definitions
-// =================================================================
-
-// Schema for tags associated with various Xibo entities.
-const tagSchema = z.object({
-  tag: z.string(),
-  tagId: z.number(),
-  value: z.string().optional(),
-});
-
-// Schema for permission details on Xibo entities.
-const permissionSchema = z.object({
-  permissionId: z.number(),
-  entityId: z.number(),
-  groupId: z.number(),
-  objectId: z.number(),
-  isUser: z.number(),
-  entity: z.string(),
-  objectIdString: z.string(),
-  group: z.string(),
-  view: z.number(),
-  edit: z.number(),
-  delete: z.number(),
-  modifyPermissions: z.number(),
-});
-
-// Schemas for widget components (options, audio).
-const widgetOptionSchema = z.object({
-  widgetId: z.number(),
-  type: z.string().optional(),
-  option: z.string(),
-  value: z.string(),
-});
-const audioSchema = z.object({
-  widgetId: z.number(),
-  mediaId: z.number(),
-  volume: z.number(),
-  loop: z.number(),
-});
-
-// Schema for a widget within a playlist.
-const widgetSchema = z.object({
-  widgetId: z.number(),
-  playlistId: z.number(),
-  ownerId: z.number(),
-  type: z.string(),
-  duration: z.number(),
-  displayOrder: z.number(),
-  useDuration: z.number(),
-  calculatedDuration: z.number(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
-  fromDt: z.number().nullable(),
-  toDt: z.number().nullable(),
-  schemaVersion: z.number(),
-  transitionIn: z.number().nullable(),
-  transitionOut: z.number().nullable(),
-  transitionDurationIn: z.number().nullable(),
-  transitionDurationOut: z.number().nullable(),
-  widgetOptions: z.array(widgetOptionSchema).optional(),
-  mediaIds: z.array(z.number()).optional(),
-  audio: z.array(audioSchema).optional(),
-  permissions: z.array(permissionSchema).optional(),
-  playlist: z.string().optional(),
-});
-
-// Schema for a playlist, which contains widgets.
-const playlistSchema = z.object({
-  playlistId: z.number(),
-  ownerId: z.number(),
-  name: z.string(),
-  regionId: z.number().nullable(),
-  isDynamic: z.number(),
-  filterMediaName: z.string().nullable(),
-  filterMediaNameLogicalOperator: z.string().nullable(),
-  filterMediaTags: z.string().nullable(),
-  filterExactTags: z.number().nullable(),
-  filterMediaTagsLogicalOperator: z.string().nullable(),
-  filterFolderId: z.number().nullable(),
-  maxNumberOfItems: z.number().nullable(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
-  duration: z.number(),
-  requiresDurationUpdate: z.number(),
-  enableStat: z.string().nullable(),
-  tags: z.array(tagSchema).optional(),
-  widgets: z.array(widgetSchema).optional(),
-  permissions: z.array(permissionSchema).optional(),
-  folderId: z.number().nullable(),
-  permissionsFolderId: z.number().nullable(),
-});
-
-// Schemas for layout regions and their options.
-const regionOptionSchema = z.object({
-  regionId: z.number(),
-  option: z.string(),
-  value: z.string(),
-});
-const regionSchema = z.object({
-  regionId: z.number(),
-  layoutId: z.number(),
-  ownerId: z.number(),
-  type: z.string().nullable(),
-  name: z.string(),
-  width: z.number(),
-  height: z.number(),
-  top: z.number(),
-  left: z.number(),
-  zIndex: z.number(),
-  syncKey: z.string().nullable(),
-  regionOptions: z.array(regionOptionSchema).optional(),
-  permissions: z.array(permissionSchema).optional(),
-  duration: z.number(),
-  isDrawer: z.number().nullable(),
-  regionPlaylist: playlistSchema.optional(),
-});
-
-// Schema for a layout, which is composed of regions.
-const layoutSchema = z.object({
-  layoutId: z.number(),
-  ownerId: z.number(),
-  campaignId: z.number().nullable(),
-  parentId: z.number().nullable(),
-  publishedStatusId: z.number(),
-  publishedStatus: z.string(),
-  publishedDate: z.string().nullable(),
-  backgroundImageId: z.number().nullable(),
-  schemaVersion: z.number(),
-  layout: z.string(),
-  description: z.string().nullable(),
-  backgroundColor: z.string().nullable(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
-  status: z.number(),
-  retired: z.number(),
-  backgroundzIndex: z.number().nullable(),
-  width: z.number(),
-  height: z.number(),
-  orientation: z.string().nullable(),
-  displayOrder: z.number().nullable(),
-  duration: z.number(),
-  statusMessage: z.string().nullable(),
-  enableStat: z.number().optional(),
-  autoApplyTransitions: z.number().nullable(),
-  code: z.string().nullable(),
-  isLocked: z.boolean().optional(),
-  regions: z.array(regionSchema).optional(),
-  tags: z.array(tagSchema).optional(),
-  folderId: z.number().nullable(),
-  permissionsFolderId: z.number().nullable(),
-});
-
-// Schema for a campaign, which is a collection of layouts.
-const campaignSchema = z.object({
-  campaignId: z.number(),
-  ownerId: z.number(),
-  type: z.string(),
-  campaign: z.string(),
-  isLayoutSpecific: z.number(),
-  numberLayouts: z.number().optional(),
-  totalDuration: z.number().optional(),
-  tags: z.array(tagSchema).optional(),
-  folderId: z.number().nullable(),
-  permissionsFolderId: z.number().nullable(),
-  cyclePlaybackEnabled: z.number().nullable(),
-  playCount: z.number().nullable(),
-  listPlayOrder: z.string().nullable(),
-  targetType: z.string().nullable(),
-  target: z.number().nullable(),
-  startDt: z.number().nullable(),
-  endDt: z.number().nullable(),
-  plays: z.number().optional(),
-  spend: z.number().optional(),
-  impressions: z.number().optional(),
-  lastPopId: z.number().nullable(),
-  ref1: z.string().nullable(),
-  ref2: z.string().nullable(),
-  ref3: z.string().nullable(),
-  ref4: z.string().nullable(),
-  ref5: z.string().nullable(),
-});
-
-// Schema for a media item in the library.
-const mediaSchema = z.object({
-  mediaId: z.number(),
-  ownerId: z.number(),
-  parentId: z.number().nullable(),
-  name: z.string(),
-  mediaType: z.string(),
-  storedAs: z.string().nullable(),
-  fileName: z.string().nullable(),
-  tags: z.array(tagSchema).optional(),
-  fileSize: z.number(),
-  duration: z.number().nullable(),
-  valid: z.number(),
-  moduleSystemFile: z.number().nullable(),
-  expires: z.number().nullable(),
-  retired: z.number(),
-  isEdited: z.number().nullable(),
-  md5: z.string().nullable(),
-  owner: z.string().nullable(),
-  groupsWithPermissions: z.string().nullable(),
-  released: z.number().nullable(),
-  apiRef: z.string().nullable(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
-  enableStat: z.string().nullable(),
-  orientation: z.string().nullable(),
-  width: z.number().nullable(),
-  height: z.number().nullable(),
-  folderId: z.number().nullable(),
-  permissionsFolderId: z.number().nullable(),
-});
-
-// Schema for a display group, which can be assigned to campaigns or events.
-const displayGroupSchema = z.object({
-  displayGroupId: z.number(),
-  displayGroup: z.string(),
-  description: z.string().nullable(),
-  isDisplaySpecific: z.number(),
-  isDynamic: z.number(),
-  dynamicCriteria: z.string().nullable(),
-  dynamicCriteriaLogicalOperator: z.string().nullable(),
-  dynamicCriteriaTags: z.string().nullable(),
-  dynamicCriteriaExactTags: z.number().nullable(),
-  dynamicCriteriaTagsLogicalOperator: z.string().nullable(),
-  userId: z.number().nullable(),
-  tags: z.array(tagSchema).optional(),
-  bandwidthLimit: z.number().nullable(),
-  groupsWithPermissions: z.string().nullable(),
-  createdDt: z.string(),
-  modifiedDt: z.string(),
-  folderId: z.number().nullable(),
-  permissionsFolderId: z.number().nullable(),
-  ref1: z.string().nullable(),
-  ref2: z.string().nullable(),
-  ref3: z.string().nullable(),
-  ref4: z.string().nullable(),
-  ref5: z.string().nullable(),
-});
-
-// Schema for schedule reminders.
-const scheduleReminderSchema = z.object({
-  scheduleReminderId: z.number(),
-  eventId: z.number(),
-  value: z.number(),
-  type: z.number(),
-  option: z.number(),
-  isEmail: z.number(),
-  reminderDt: z.number().nullable(),
-  lastReminderDt: z.number().nullable(),
-});
-
-// Schema for a scheduled event.
-const eventSchema = z.object({
-  eventId: z.number(),
-  eventTypeId: z.number(),
-  campaignId: z.number().nullable(),
-  commandId: z.number().nullable(),
-  displayGroups: z.array(displayGroupSchema).optional(),
-  scheduleReminders: z.array(scheduleReminderSchema).optional(),
-  criteria: z.array(z.string()).optional(),
-  userId: z.number(),
-  fromDt: z.number().nullable(),
-  toDt: z.number().nullable(),
-  isPriority: z.number(),
-  displayOrder: z.number(),
-  recurrenceType: z.string(),
-  recurrenceDetail: z.number().nullable(),
-  recurrenceRange: z.number().nullable(),
-  recurrenceRepeatsOn: z.string().nullable(),
-  recurrenceMonthlyRepeatsOn: z.number().nullable(),
-  campaign: z.string().nullable(),
-  command: z.string().nullable(),
-  dayPartId: z.number().nullable(),
-  isAlways: z.number().nullable(),
-  isCustom: z.number().nullable(),
-  syncEvent: z.number().nullable(),
-  syncTimezone: z.number().nullable(),
-  shareOfVoice: z.number().nullable(),
-  maxPlaysPerHour: z.number().nullable(),
-  isGeoAware: z.number().nullable(),
-  geoLocation: z.string().nullable(),
-  actionTriggerCode: z.string().nullable(),
-  actionType: z.string().nullable(),
-  actionLayoutCode: z.string().nullable(),
-  parentCampaignId: z.number().nullable(),
-  syncGroupId: z.number().nullable(),
-  dataSetId: z.number().nullable(),
-  dataSetParams: z.number().nullable(),
-  modifiedBy: z.number().nullable(),
-  createdOn: z.string().nullable(),
-  updatedOn: z.string().nullable(),
-  name: z.string().nullable(),
-});
-
-// Schema for day parts used in scheduling.
-const dayPartSchema = z.object({
-  dayPartId: z.number(),
-  isAlways: z.number(),
-  isCustom: z.number(),
-});
-
-// Schema for user groups and their properties.
-const groupSchema = z.object({
-  groupId: z.number(),
-  group: z.string(),
-  isUserSpecific: z.number(),
-  isEveryone: z.number(),
-  description: z.string().nullable(),
-  libraryQuota: z.number(),
-  isSystemNotification: z.number(),
-  isDisplayNotification: z.number(),
-  isDataSetNotification: z.number(),
-  isLayoutNotification: z.number(),
-  isLibraryNotification: z.number(),
-  isReportNotification: z.number(),
-  isScheduleNotification: z.number(),
-  isCustomNotification: z.number(),
-  isShownForAddUser: z.number(),
-  defaultHomepageId: z.string().nullable(),
-  features: z.array(z.string()),
-  buttons: z.array(z.unknown()).optional(),
-});
-
-// Schema for the full user response from the /user/me endpoint.
-// This is a comprehensive schema that aggregates many of the schemas above.
-const userResponseSchema = z.object({
-  userId: z.number(),
-  userName: z.string(),
-  userTypeId: z.number(),
-  loggedIn: z.union([z.string(), z.number()]).nullable(),
-  email: z.string(),
-  homePageId: z.union([z.string(), z.number()]),
-  homeFolderId: z.number(),
-  lastAccessed: z.string(),
-  newUserWizard: z.number(),
-  retired: z.number(),
-  isPasswordChangeRequired: z.number(),
-  groupId: z.number(),
-  group: z.union([z.string(), z.number()]),
-  libraryQuota: z.number(),
-  firstName: z.string().nullable(),
-  lastName: z.string().nullable(),
-  phone: z.string().nullable(),
-  ref1: z.string().nullable(),
-  ref2: z.string().nullable(),
-  ref3: z.string().nullable(),
-  ref4: z.string().nullable(),
-  ref5: z.string().nullable(),
-  groups: z.array(groupSchema),
-  campaigns: z.array(campaignSchema).optional(),
-  layouts: z.array(layoutSchema).optional(),
-  media: z.array(mediaSchema).optional(),
-  events: z.array(eventSchema).optional(),
-  playlists: z.array(playlistSchema).optional(),
-  displayGroups: z.array(displayGroupSchema).optional(),
-  dayParts: z.array(dayPartSchema).optional(),
-  isSystemNotification: z.number(),
-  isDisplayNotification: z.number(),
-  isDataSetNotification: z.number(),
-  isLayoutNotification: z.number(),
-  isLibraryNotification: z.number(),
-  isReportNotification: z.number(),
-  isScheduleNotification: z.number(),
-  isCustomNotification: z.number(),
-  twoFactorTypeId: z.number(),
-  twoFactorSecret: z.string().optional(),
-  twoFactorRecoveryCodes: z.array(z.string()).optional(),
-  homeFolder: z.string().optional(),
-});
-
-const successResponseSchema = z.object({
+// The API returns a single user object, not in an array for this endpoint.
+const userMeSuccessResponseSchema = z.object({
     success: z.literal(true),
-    data: z.union([userResponseSchema, treeResponseSchema]),
-    message: z.string(),
+    data: userSchema,
 });
 
+const treeViewSuccessResponseSchema = z.object({
+  success: z.literal(true),
+  data: userSchema,
+  tree: z.array(z.any()),
+  treeViewText: z.string(),
+});
+
+// Schema for a generic error response.
 const errorResponseSchema = z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
 });
 
-const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+// Schema for the tool's output, supporting both a standard object and a tree view.
+const outputSchema = z.union([
+  userMeSuccessResponseSchema,
+  treeViewSuccessResponseSchema,
+  errorResponseSchema,
+]);
 
 /**
- * Builds a hierarchical tree structure from the flat user data response.
- * This is used for the optional tree view output.
- * @param userData The user data object conforming to userResponseSchema.
- * @returns An array of TreeNode objects representing the root of the user's information tree.
+ * Builds a tree structure for the current user, including their groups and permissions.
+ * @param {any} user - A single user data object from the API.
+ * @returns {TreeNode[]} An array containing the single root TreeNode.
  */
-function buildUserMeTree(userData: z.infer<typeof userResponseSchema>): TreeNode[] {
-  const tree: TreeNode[] = [];
-  const userNode: TreeNode = {
-    type: 'user',
-    id: userData.userId,
-    name: userData.userName,
-    children: []
-  };
-  const profileNode: TreeNode = {
-    type: 'profile',
-    id: 1,
-    name: 'Profile',
-    children: []
-  };
-  if (userData.firstName || userData.lastName) {
-    profileNode.children!.push({
-      type: 'name',
-      id: 101,
-      name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim()
-    });
-  }
-  if (userData.email) {
-    profileNode.children!.push({
-      type: 'email',
-      id: 102,
-      name: userData.email
-    });
-  }
-  if (userData.phone) {
-    profileNode.children!.push({
-      type: 'phone',
-      id: 103,
-      name: userData.phone
-    });
-  }
-  const refFields = [
-    { key: 'ref1', value: userData.ref1 },
-    { key: 'ref2', value: userData.ref2 },
-    { key: 'ref3', value: userData.ref3 },
-    { key: 'ref4', value: userData.ref4 },
-    { key: 'ref5', value: userData.ref5 }
-  ].filter(ref => ref.value);
-  if (refFields.length > 0) {
-    const refsNode: TreeNode = {
-      type: 'references',
-      id: 104,
-      name: 'Reference Fields',
-      children: refFields.map((ref, index) => ({
-        type: 'ref',
-        id: 1040 + index,
-        name: `${ref.key}: ${ref.value}`
-      }))
+function buildUserMeTree(user: any): TreeNode[] {
+    const userNode: TreeNode = {
+      id: user.userId,
+      name: user.userName,
+      type: 'User',
+      children: [],
     };
-    profileNode.children!.push(refsNode);
-  }
-  profileNode.children!.push({
-    type: 'account',
-    id: 105,
-    name: 'Account',
-    children: [
-      {
-        type: 'status',
-        id: 1051,
-        name: `Status: ${userData.retired === 1 ? 'Retired' : 'Active'}`
-      },
-      {
-        type: 'lastAccess',
-        id: 1052,
-        name: `Last Access: ${userData.lastAccessed}`
-      },
-      {
-        type: 'typeId',
-        id: 1053,
-        name: `User Type: ${userData.userTypeId}`
-      },
-      {
-        type: 'passwordChange',
-        id: 1054,
-        name: `Password Change Required: ${userData.isPasswordChangeRequired === 1 ? 'Yes' : 'No'}`
-      }
-    ]
-  });
-  if (profileNode.children!.length > 0) {
-    userNode.children!.push(profileNode);
-  }
-  if (userData.groups && userData.groups.length > 0) {
-    const groupsNode: TreeNode = {
-      type: 'groups',
-      id: 2,
-      name: 'Groups',
-      children: userData.groups.map((group: any, index: number) => {
-        const groupNode: TreeNode = {
-          type: 'group',
-          id: 200 + index,
+
+    if (user.groups && user.groups.length > 0) {
+      const groupsNode: TreeNode = {
+        id: -1,
+        name: 'Groups',
+        type: 'Category',
+        children: user.groups.map((group: any) => ({
+          id: group.groupId,
           name: group.group,
-          children: []
-        };
-        const details: TreeNode[] = [];
-        if (group.description) {
-          details.push({
-            type: 'description',
-            id: 2000 + index * 10 + 1,
-            name: group.description
-          });
-        }
-        details.push({
-          type: 'quota',
-          id: 2000 + index * 10 + 2,
-          name: `Library Quota: ${group.libraryQuota}`
-        });
-        if (group.features && group.features.length > 0) {
-          groupNode.children!.push({
-            type: 'features',
-            id: 2000 + index * 10 + 3,
-            name: 'Features',
-            children: group.features.map((feature: string, featureIndex: number) => ({
-              type: 'feature',
-              id: 2000 + index * 100 + 30 + featureIndex,
-              name: feature
-            }))
-          });
-        }
-        if (details.length > 0) {
-          groupNode.children!.push({
-            type: 'details',
-            id: 2000 + index * 10 + 4,
-            name: 'Details',
-            children: details
-          });
-        }
-        return groupNode;
-      })
-    };
-    userNode.children!.push(groupsNode);
-  }
-  const contentItems: {category: string; type: string; items: any[]}[] = [
-    { category: 'Layouts', type: 'layouts', items: userData.layouts || [] },
-    { category: 'Media', type: 'media', items: userData.media || [] },
-    { category: 'Campaigns', type: 'campaigns', items: userData.campaigns || [] },
-    { category: 'Playlists', type: 'playlists', items: userData.playlists || [] },
-    { category: 'Display Groups', type: 'displayGroups', items: userData.displayGroups || [] },
-    { category: 'Events', type: 'events', items: userData.events || [] },
-    { category: 'Day Parts', type: 'dayParts', items: userData.dayParts || [] }
-  ].filter(item => item.items && item.items.length > 0);
-  if (contentItems.length > 0) {
-    const contentNode: TreeNode = {
-      type: 'content',
-      id: 3,
-      name: 'Content',
-      children: contentItems.map((category, categoryIndex) => {
-        if (category.items.length === 0) return null;
-        const categoryNode: TreeNode = {
-          type: category.type,
-          id: 300 + categoryIndex,
-          name: `${category.category} (${category.items.length})`,
-          children: category.items.slice(0, 5).map((item, itemIndex) => {
-            const itemName = item.name || 
-                           item.layout || 
-                           item.media || 
-                           item.campaign || 
-                           item.title ||
-                           `Item ${itemIndex + 1}`;
-            return {
-              type: category.type.slice(0, -1),
-              id: 3000 + categoryIndex * 100 + itemIndex,
-              name: itemName
-            };
-          })
-        };
-        return categoryNode;
-      }).filter((node): node is TreeNode => node !== null)
-    };
-    userNode.children!.push(contentNode);
-  }
-  const notifications = [
-    { key: 'isSystemNotification', label: 'System Notifications' },
-    { key: 'isDisplayNotification', label: 'Display Notifications' },
-    { key: 'isLayoutNotification', label: 'Layout Notifications' },
-    { key: 'isMediaNotification', label: 'Media Notifications' },
-    { key: 'isReportNotification', label: 'Report Notifications' },
-    { key: 'isScheduleNotification', label: 'Schedule Notifications' },
-    { key: 'isCustomNotification', label: 'Custom Notifications' }
-  ].filter(notif => {
-    const key = notif.key as keyof typeof userData;
-    return userData[key] === 1;
-  });
-  if (notifications.length > 0) {
-    userNode.children!.push({
-      type: 'notifications',
-      id: 4,
-      name: 'Notifications',
-      children: notifications.map((notif, index) => ({
-        type: 'notification',
-        id: 400 + index,
-        name: notif.label
-      }))
-    });
-  }
-  tree.push(userNode);
-  return tree;
+          type: 'Group',
+        })),
+      };
+      userNode.children!.push(groupsNode);
+    }
+
+    if (user.permissions && user.permissions.length > 0) {
+      const permissionsNode: TreeNode = {
+        id: -2,
+        name: 'Permissions',
+        type: 'Category',
+        children: user.permissions.map((p: any) => ({
+          id: p.permissionId,
+          name: `${p.entity} (ID: ${p.objectId})`,
+          type: 'Permission',
+        })),
+      };
+      userNode.children!.push(permissionsNode);
+    }
+
+    return [userNode];
 }
 
 /**
- * Formats a TreeNode for display, adding a relevant icon based on its type.
- * @param node The TreeNode to format.
- * @returns A string representing the formatted node name.
+ * Custom formatter for rendering user-related nodes in the tree view.
+ * @param {TreeNode} node - The TreeNode to format.
+ * @returns {string} A string representation of the node.
  */
 function userMeNodeFormatter(node: TreeNode): string {
-  switch (node.type) {
-    case 'user':
-      return `👤 ${node.name}`;
-    case 'groups':
-      return `👥 ${node.name}`;
-    case 'permissions':
-      return `🔒 ${node.name}`;
-    case 'group':
-    case 'permission':
-      return node.name;
-    default:
-      return node.name;
-  }
+    switch (node.type) {
+        case 'User':
+          return `👤 ${node.name}`;
+        case 'Category':
+          return `📁 ${node.name}`;
+        case 'Group':
+          return `👥 ${node.name}`;
+        case 'Permission':
+          return `🔑 ${node.name}`;
+        default:
+          return node.name;
+    }
 }
 
-// Define and export the tool
+/**
+ * @tool getUserMe
+ * @description A tool to retrieve the currently authenticated user's information from the Xibo CMS.
+ * Supports embedding related data and a tree view.
+ */
 export const getUserMe = createTool({
   id: 'get-user-me',
-  description: 'Retrieves information about the current Xibo user, with optional tree view.',
+  description: "Retrieve the authenticated user's information from the Xibo CMS.",
   inputSchema: z.object({
-    treeView: z.boolean().optional().describe('Set to true to return user info in a tree structure for better visualization.')
+    embed: z.string().optional().describe('Embed related data, e.g., "permissions,groups".'),
+    treeView: z.boolean().optional().describe('Set to true to return the user info in a structured, hierarchical tree view.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured.";
+      const message = 'CMS URL is not configured.';
       logger.error(message);
       return { success: false as const, message };
     }
 
+    const url = new URL(`${config.cmsUrl}/api/user/me`);
+    const params = new URLSearchParams();
+
+    if (context.embed) params.append('embed', context.embed);
+    url.search = params.toString();
+
     try {
-      logger.info(`Retrieving current user info${context.treeView ? ' with tree view' : ''}`);
-      
-      const response = await fetch(`${config.cmsUrl}/api/user/me`, {
-        method: 'GET',
-        headers: await getAuthHeaders(),
-      });
+        logger.info({ url: url.toString() }, "Attempting to retrieve current user's information.");
 
-      const rawData = await response.json();
+        const response = await fetch(url.toString(), {
+            method: 'GET',
+            headers: await getAuthHeaders(),
+        });
 
-      if (!response.ok) {
-        const message = `Failed to get current user info. API responded with status ${response.status}`;
-        logger.error(message, { response: rawData });
-        return { success: false as const, message, errorData: rawData };
-      }
+        const responseData = await response.json();
 
-      const validationResult = userResponseSchema.safeParse(rawData);
+        if (!response.ok) {
+            const decodedError = decodeErrorMessage(responseData);
+            const message = `Failed to get current user info. API responded with status ${response.status}.`;
+            logger.error({ status: response.status, response: decodedError }, message);
+            return { success: false as const, message, errorData: decodedError };
+        }
 
-      if (!validationResult.success) {
-        const message = "API response validation failed.";
-        logger.error(message, { error: validationResult.error, data: rawData });
-        return { success: false as const, message, error: validationResult.error, errorData: rawData };
-      }
-      
-      const validatedData = validationResult.data;
-      let responseData: z.infer<typeof userResponseSchema> | z.infer<typeof treeResponseSchema> = validatedData;
-      let message: string;
+        const validationResult = userSchema.safeParse(responseData);
 
-      if (context.treeView) {
-        logger.info(`Generating tree view for current user.`);
-        const userTree = buildUserMeTree(validatedData);
-        responseData = createTreeViewResponse(validatedData, userTree, userMeNodeFormatter);
-        message = "Current user information retrieved and formatted as a tree view successfully.";
-      } else {
-        message = "Current user information retrieved successfully.";
-      }
-      
-      logger.info(message, { userName: validatedData.userName, treeView: !!context.treeView });
-      return { success: true, data: responseData, message };
+        if (!validationResult.success) {
+            const message = 'Current user response validation failed.';
+            logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+            return { success: false as const, message, error: validationResult.error, errorData: responseData };
+        }
+        
+        const user = validationResult.data;
 
-    } catch (error) {
-      const message = "An unexpected error occurred while getting current user information.";
-      logger.error(message, { error });
-      return {
-        success: false as const,
-        message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      };
+        if (context.treeView) {
+            const userTree = buildUserMeTree(user);
+            const treeResponse = createTreeViewResponse([user], userTree, userMeNodeFormatter);
+            return { ...treeResponse, success: true as const, data: user };
+        }
+
+        return { success: true as const, data: user };
+    } catch (error: unknown) {
+        const message = 'An unexpected error occurred while retrieving current user information.';
+        logger.error({ error }, message);
+        return {
+            success: false as const,
+            message,
+            error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        };
     }
   },
 });
