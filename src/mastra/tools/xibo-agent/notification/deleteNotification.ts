@@ -11,11 +11,10 @@
  */
 
 /**
- * Notification Deletion Tool for Xibo CMS
- * 
- * This module provides functionality to delete notifications from the Xibo CMS.
+ * @module DeleteNotification
+ * @description This module provides a tool for deleting notifications from the Xibo CMS.
+ * It handles the API request and response for notification deletion.
  */
-
 import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
@@ -24,70 +23,74 @@ import { logger } from '../../../index';
 import { decodeErrorMessage } from "../utility/error";
 
 /**
- * Schema for the tool's output, covering both success and failure cases.
+ * Defines the output schema for the deleteNotification tool.
+ * It represents either a successful deletion or a failure with an error message.
  */
-const outputSchema = z.object({
-  success: z.boolean(),
-  message: z.string().optional(),
-  error: z.any().optional(),
-  errorData: z.any().optional(),
-});
+const outputSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    message: z.string(),
+    error: z.any().optional(),
+    errorData: z.any().optional(),
+  }),
+]);
 
 /**
- * Tool for deleting notifications from Xibo CMS
+ * Tool for deleting a notification from the Xibo CMS.
+ * This tool sends a DELETE request to remove the specified notification.
  */
 export const deleteNotification = createTool({
   id: 'delete-notification',
-  description: 'Delete a notification from Xibo CMS',
+  description: 'Delete a notification from the Xibo CMS.',
   inputSchema: z.object({
-    notificationId: z.number().describe('ID of the notification to delete')
+    notificationId: z.number().describe('The ID of the notification to be deleted.')
   }),
   outputSchema,
   execute: async ({ context }) => {
-    const logContext = { ...context };
-    logger.info("Attempting to delete a notification.", logContext);
-
     if (!config.cmsUrl) {
-      logger.error("CMS URL is not configured.", logContext);
-      return { success: false, message: "CMS URL is not configured." };
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
     
-    try {
-      const url = new URL(`${config.cmsUrl}/api/notification/${context.notificationId}`);
-      logger.debug(`Requesting to delete notification at: ${url.toString()}`, logContext);
+    const url = new URL(`${config.cmsUrl}/api/notification/${context.notificationId}`);
+    logger.info({ notificationId: context.notificationId }, "Attempting to delete a notification.");
 
-      const headers = await getAuthHeaders();
+    try {
       const response = await fetch(url.toString(), {
         method: 'DELETE',
-        headers
+        headers: await getAuthHeaders(),
       });
 
       if (response.status === 204) {
-        logger.info(`Successfully deleted notification ID ${context.notificationId}.`, logContext);
-        return { success: true, message: `Notification with ID ${context.notificationId} deleted successfully.` };
+        const message = `Successfully deleted notification with ID: ${context.notificationId}.`;
+        logger.info({ notificationId: context.notificationId }, message);
+        return { success: true, message };
       }
       
-      const responseText = await response.text();
-      const errorData = decodeErrorMessage(responseText);
+      const responseData = await response.json().catch(() => null);
+      const decodedError = decodeErrorMessage(responseData);
+      const message = `Failed to delete notification. API responded with status ${response.status}.`;
       
-      logger.error("Failed to delete notification via CMS API.", {
-        ...logContext,
-        status: response.status,
-        errorData,
-      });
+      logger.error({ response: decodedError, status: response.status }, message);
       return {
         success: false,
-        message: `API request failed with status ${response.status}.`,
-        errorData,
+        message,
+        errorData: decodedError,
       };
 
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-      logger.error("An unexpected error occurred in deleteNotification.", {
-        ...logContext,
-        error: errorMessage,
-      });
-      return { success: false, message: "An unexpected error occurred.", error: errorMessage };
+      const message = "An unexpected error occurred while deleting the notification.";
+      logger.error({ error }, message);
+      return { 
+        success: false,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error
+      };
     }
   },
 }); 
