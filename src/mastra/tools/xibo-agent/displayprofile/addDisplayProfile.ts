@@ -11,8 +11,10 @@
  */
 
 /**
- * @module addDisplayProfile
- * @description Provides a tool to add a new display profile to the Xibo CMS.
+ * @module AddDisplayProfile
+ * @description This module provides a tool to add a new display profile to the Xibo CMS.
+ * It handles the API request for creating a display profile and ensures that the
+ * response is correctly formatted and validated.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
@@ -23,7 +25,9 @@ import { decodeErrorMessage } from "../utility/error";
 import { displayProfileSchema } from './schemas';
 
 /**
- * Schema for the tool's output.
+ * Defines the output schema for the addDisplayProfile tool.
+ * This schema can represent either a successful response with the created display profile data
+ * or a failed response with an error message.
  */
 const outputSchema = z.union([
   z.object({
@@ -40,7 +44,9 @@ const outputSchema = z.union([
 ]);
 
 /**
- * A tool for adding a new display profile.
+ * Tool for adding a new display profile.
+ * This tool sends a POST request to the Xibo CMS API to create a new display profile
+ * with the specified name, type, and default status.
  */
 export const addDisplayProfile = createTool({
   id: "add-display-profile",
@@ -59,7 +65,7 @@ export const addDisplayProfile = createTool({
     }
 
     const url = new URL(`${config.cmsUrl}/api/displayprofile`);
-    logger.info(`Attempting to add display profile: ${context.name}`);
+    logger.info({ name: context.name }, "Attempting to add display profile.");
 
     try {
       const formData = new URLSearchParams();
@@ -81,7 +87,7 @@ export const addDisplayProfile = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to add display profile. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
@@ -89,7 +95,7 @@ export const addDisplayProfile = createTool({
 
       if (!validationResult.success) {
         const message = "Display profile response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        logger.error({ error: validationResult.error, data: responseData }, message);
         return {
           success: false as const,
           message,
@@ -99,7 +105,7 @@ export const addDisplayProfile = createTool({
       }
       
       const message = `Successfully added display profile: ${validationResult.data.name}`;
-      logger.info(message, { displayProfileId: validationResult.data.displayProfileId });
+      logger.info({ displayProfileId: validationResult.data.displayProfileId }, message);
       return {
         success: true as const,
         data: validationResult.data,
@@ -107,7 +113,7 @@ export const addDisplayProfile = createTool({
       };
     } catch (error) {
       const message = "An unexpected error occurred while adding the display profile.";
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return {
         success: false as const,
         message,

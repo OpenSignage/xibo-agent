@@ -11,8 +11,10 @@
  */
 
 /**
- * @module editDisplayProfile
- * @description Provides a tool to edit an existing display profile in the Xibo CMS.
+ * @module EditDisplayProfile
+ * @description This module provides a tool to edit an existing display profile in the Xibo CMS.
+ * It sends a PUT request to update a display profile's details and returns the
+ * updated profile data.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
@@ -23,7 +25,9 @@ import { decodeErrorMessage } from "../utility/error";
 import { displayProfileSchema } from './schemas';
 
 /**
- * Schema for the tool's output.
+ * Defines the output schema for the editDisplayProfile tool.
+ * This schema can represent either a successful response with the updated display profile data
+ * or a failed response with an error message.
  */
 const outputSchema = z.union([
   z.object({
@@ -40,7 +44,8 @@ const outputSchema = z.union([
 ]);
 
 /**
- * A tool for editing an existing display profile.
+ * Tool for editing an existing display profile.
+ * This tool updates the properties of a display profile identified by its ID.
  */
 export const editDisplayProfile = createTool({
   id: "edit-display-profile",
@@ -60,7 +65,7 @@ export const editDisplayProfile = createTool({
     }
 
     const url = new URL(`${config.cmsUrl}/api/displayprofile/${context.displayProfileId}`);
-    logger.info(`Attempting to edit display profile ID: ${context.displayProfileId}`);
+    logger.info({ displayProfileId: context.displayProfileId }, "Attempting to edit display profile.");
 
     try {
       const formData = new URLSearchParams();
@@ -82,7 +87,7 @@ export const editDisplayProfile = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to edit display profile. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
@@ -90,7 +95,7 @@ export const editDisplayProfile = createTool({
 
       if (!validationResult.success) {
         const message = "Display profile response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        logger.error({ error: validationResult.error, data: responseData }, message);
         return {
           success: false as const,
           message,
@@ -100,7 +105,7 @@ export const editDisplayProfile = createTool({
       }
       
       const message = `Successfully edited display profile: ${validationResult.data.name}`;
-      logger.info(message, { displayProfileId: validationResult.data.displayProfileId });
+      logger.info({ displayProfileId: validationResult.data.displayProfileId }, message);
       return {
         success: true as const,
         data: validationResult.data,
@@ -108,7 +113,7 @@ export const editDisplayProfile = createTool({
       };
     } catch (error) {
       const message = "An unexpected error occurred while editing the display profile.";
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return {
         success: false as const,
         message,

@@ -11,8 +11,10 @@
  */
 
 /**
- * @module copyDisplayProfile
- * @description Provides a tool to copy an existing display profile in the Xibo CMS.
+ * @module CopyDisplayProfile
+ * @description This module provides a tool to copy an existing display profile in the Xibo CMS.
+ * It sends a POST request to a specific endpoint to duplicate a display profile
+ * and returns the newly created profile data.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
@@ -23,7 +25,9 @@ import { decodeErrorMessage } from "../utility/error";
 import { displayProfileSchema } from './schemas';
 
 /**
- * Schema for the tool's output.
+ * Defines the output schema for the copyDisplayProfile tool.
+ * This schema can represent either a successful response with the copied display profile data
+ * or a failed response with an error message.
  */
 const outputSchema = z.union([
   z.object({
@@ -40,7 +44,8 @@ const outputSchema = z.union([
 ]);
 
 /**
- * A tool for copying an existing display profile.
+ * Tool for copying an existing display profile.
+ * This tool duplicates a display profile identified by its ID and gives it a new name.
  */
 export const copyDisplayProfile = createTool({
   id: "copy-display-profile",
@@ -58,7 +63,7 @@ export const copyDisplayProfile = createTool({
     }
 
     const url = new URL(`${config.cmsUrl}/api/displayprofile/${context.displayProfileId}/copy`);
-    logger.info(`Attempting to copy display profile ID ${context.displayProfileId} to '${context.name}'`);
+    logger.info({ displayProfileId: context.displayProfileId, name: context.name }, "Attempting to copy display profile.");
 
     try {
       const formData = new URLSearchParams();
@@ -78,7 +83,7 @@ export const copyDisplayProfile = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to copy display profile. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
@@ -86,7 +91,7 @@ export const copyDisplayProfile = createTool({
 
       if (!validationResult.success) {
         const message = "Display profile response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        logger.error({ error: validationResult.error, data: responseData }, message);
         return {
           success: false as const,
           message,
@@ -96,7 +101,7 @@ export const copyDisplayProfile = createTool({
       }
       
       const message = `Successfully copied display profile to '${validationResult.data.name}'.`;
-      logger.info(message, { newDisplayProfileId: validationResult.data.displayProfileId });
+      logger.info({ newDisplayProfileId: validationResult.data.displayProfileId }, message);
       return {
         success: true as const,
         data: validationResult.data,
@@ -104,7 +109,7 @@ export const copyDisplayProfile = createTool({
       };
     } catch (error) {
       const message = "An unexpected error occurred while copying the display profile.";
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return {
         success: false as const,
         message,

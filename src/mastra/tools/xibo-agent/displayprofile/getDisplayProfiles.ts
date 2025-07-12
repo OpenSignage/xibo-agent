@@ -11,8 +11,9 @@
  */
 
 /**
- * @module getDisplayProfiles
- * @description Provides a tool to retrieve display profiles from the Xibo CMS.
+ * @module GetDisplayProfiles
+ * @description This module provides a tool to retrieve a list of display profiles
+ * from the Xibo CMS, with optional filtering.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
@@ -23,7 +24,9 @@ import { decodeErrorMessage } from "../utility/error";
 import { displayProfileSchema } from './schemas';
 
 /**
- * Schema for the tool's output.
+ * Defines the output schema for the getDisplayProfiles tool.
+ * This schema can represent either a successful response with an array of display profiles
+ * or a failed response with an error message.
  */
 const outputSchema = z.union([
   z.object({
@@ -40,7 +43,9 @@ const outputSchema = z.union([
 ]);
 
 /**
- * A tool for retrieving display profiles.
+ * Tool for retrieving display profiles.
+ * This tool fetches display profiles from the Xibo CMS, allowing filtering by ID,
+ * name, and type. It also supports embedding related data.
  */
 export const getDisplayProfiles = createTool({
   id: "get-display-profiles",
@@ -67,7 +72,7 @@ export const getDisplayProfiles = createTool({
     if (context.embed) params.append("embed", context.embed);
     url.search = params.toString();
 
-    logger.info(`Requesting display profiles from URL: ${url.toString()}`);
+    logger.info({ url: url.toString() }, 'Requesting display profiles.');
 
     try {
       const response = await fetch(url.toString(), {
@@ -80,7 +85,7 @@ export const getDisplayProfiles = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to retrieve display profiles. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
@@ -88,7 +93,7 @@ export const getDisplayProfiles = createTool({
 
       if (!validationResult.success) {
         const message = "Display profiles response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        logger.error({ error: validationResult.error, data: responseData }, message);
         return {
           success: false as const,
           message,
@@ -98,7 +103,7 @@ export const getDisplayProfiles = createTool({
       }
       
       const message = `Successfully retrieved ${validationResult.data.length} display profiles.`;
-      logger.info(message);
+      logger.info({ count: validationResult.data.length }, message);
       return {
         success: true as const,
         data: validationResult.data,
@@ -106,7 +111,7 @@ export const getDisplayProfiles = createTool({
       };
     } catch (error) {
       const message = "An unexpected error occurred while retrieving display profiles.";
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return {
         success: false as const,
         message,
