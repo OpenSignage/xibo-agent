@@ -12,147 +12,111 @@
 
 /**
  * @module getExportStatsCount
- * @description Provides a tool to retrieve the count of statistics records that can be exported
- * from the Xibo CMS, based on specified filters.
+ * @description This module provides a tool to retrieve the count of statistics records
+ * that can be exported from the Xibo CMS, based on specified filters.
  */
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { z } from 'zod';
+import { createTool } from '@mastra/core/tools';
+import { config } from '../config';
+import { getAuthHeaders } from '../auth';
+import { logger } from '../../../index';
+import { decodeErrorMessage } from '../utility/error';
+
+// Schema for a successful response.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.number(),
+  message: z.string(),
+});
+
+// Schema for an error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
- * Schema for the tool's output.
+ * Schema for the tool's output, which can be a success or error response.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.number(),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
- * A tool for retrieving the count of exportable statistics records.
+ * @tool getExportStatsCount
+ * @description A tool for retrieving the count of exportable statistics records.
  * This is useful for understanding the volume of data before performing a full export.
  */
 export const getExportStatsCount = createTool({
-  id: "get-export-stats-count",
-  description: "Get the count of statistics data records for export.",
+  id: 'get-export-stats-count',
+  description: 'Get the count of statistics data records for export.',
   inputSchema: z.object({
-    fromDt: z
-      .string()
-      .optional()
-      .describe("The start date for the filter (e.g., 'YYYY-MM-DD HH:MM:SS')."),
-    toDt: z
-      .string()
-      .optional()
-      .describe("The end date for the filter (e.g., 'YYYY-MM-DD HH:MM:SS')."),
-    displayId: z
-      .number()
-      .optional()
-      .describe("Filter by a single Display ID."),
+    fromDt: z.string().optional().describe("The start date for the filter (e.g., 'YYYY-MM-DD HH:MM:SS')."),
+    toDt: z.string().optional().describe("The end date for the filter (e.g., 'YYYY-MM-DD HH:MM:SS')."),
+    displayId: z.number().optional().describe('Filter by a single Display ID.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
-    // Ensure the CMS URL is configured before proceeding.
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured.";
+      const message = 'CMS URL is not configured.';
       logger.error(message);
-      return {
-        success: false as const,
-        message: message,
-      };
+      return { success: false as const, message };
     }
 
-    // Construct the API endpoint URL for getting the export stats count.
     const url = new URL(`${config.cmsUrl}/api/stats/getExportStatsCount`);
+    const params = new URLSearchParams();
 
-    // Helper function to append a query parameter to the URL only if it has a value.
-    const appendIfExists = (key: string, value: any) => {
+    Object.entries(context).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
-        const stringValue = String(value);
-        if (stringValue !== "") {
-          url.searchParams.append(key, stringValue);
-        }
+        params.append(key, String(value));
       }
-    };
-
-    // Dynamically build the query string from the tool's input context.
-    appendIfExists("fromDt", context.fromDt);
-    appendIfExists("toDt", context.toDt);
-    appendIfExists("displayId", context.displayId);
-
-    logger.info(`Requesting export stats count from: ${url.toString()}`);
+    });
+    url.search = params.toString();
 
     try {
-      // Perform the GET request to the Xibo CMS API.
+      logger.info({ url: url.toString() }, 'Requesting export stats count.');
+      
       const response = await fetch(url.toString(), {
-        method: "GET",
+        method: 'GET',
         headers: await getAuthHeaders(),
       });
+      
+      const responseData = await response.json();
 
-      // Read the response body as text to handle various response formats.
-      const responseText = await response.text();
-      let responseData: any;
-
-      try {
-        responseData = JSON.parse(responseText);
-      } catch (e) {
-        responseData = responseText;
-      }
-
-      // Handle non-successful HTTP responses.
       if (!response.ok) {
-        const decodedText = decodeErrorMessage(responseText);
+        const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to get export stats count. API responded with status ${response.status}.`;
-        logger.error(message, {
-          status: response.status,
-          response: decodedText,
-        });
+        logger.error({ status: response.status, response: decodedError }, message);
         return {
           success: false as const,
-          message: message,
-          errorData: responseData,
+          message,
+          errorData: decodedError,
         };
       }
 
-      // The API is expected to return a single number for the count.
-      // Validate that the response data is a number.
       const validationResult = z.number().safeParse(responseData);
 
       if (!validationResult.success) {
-        const message = "Export stats count response validation failed.";
-        logger.error(message, {
-          error: validationResult.error.issues,
-          data: responseData,
-        });
+        const message = 'Export stats count response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return {
           success: false as const,
-          message: message,
+          message,
           error: validationResult.error,
           errorData: responseData,
         };
       }
 
-      // On success, log and return the validated count.
       const message = `Successfully retrieved export stats count: ${validationResult.data}`;
-      logger.info(message);
+      logger.info({ count: validationResult.data }, message);
       return {
         success: true as const,
         data: validationResult.data,
-        message: message,
+        message,
       };
-    } catch (error) {
-      const message = "An unexpected error occurred while getting the export stats count.";
-      logger.error(message, { error });
+    } catch (error: unknown) {
+      const message = 'An unexpected error occurred while getting the export stats count.';
+      logger.error({ error }, message);
       return {
         success: false as const,
         message,
@@ -160,6 +124,4 @@ export const getExportStatsCount = createTool({
       };
     }
   },
-});
-
-export default getExportStatsCount; 
+}); 
