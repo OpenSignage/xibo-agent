@@ -55,7 +55,7 @@ import { getDisplayGroups, addDisplayGroup, editDisplayGroup, deleteDisplayGroup
   assignDisplaysToDisplayGroup, unassignDisplaysFromDisplayGroup, collectNowForDisplayGroup,
   clearStatsAndLogsForDisplayGroup, revertDisplayGroupToSchedule, sendCommandToDisplayGroup,
   copyDisplayGroup, selectFolderForDisplayGroup, triggerWebhookForDisplayGroup } from './displayGroup';
-import { getTemplate, searchAllTemplates, addTemplate, addTemplateFromLayout } from './template';
+import { getTemplate, addTemplate, addTemplateFromLayout } from './template';
 import { getLogs, getAgentLog } from './log';
 import { getTransition } from './transition';
 import { getDayParts, addDayPart, editDayPart, deleteDayPart } from './dayPart';
@@ -194,7 +194,7 @@ export function getTools() {
     revertDisplayGroupToSchedule,sendCommandToDisplayGroup,copyDisplayGroup,
     selectFolderForDisplayGroup,triggerWebhookForDisplayGroup,
     // Template
-    getTemplate,searchAllTemplates,addTemplate,addTemplateFromLayout,
+    getTemplate,addTemplate,addTemplateFromLayout,
     // Day part
     getDayParts,addDayPart,editDayPart,deleteDayPart,
     // Compound

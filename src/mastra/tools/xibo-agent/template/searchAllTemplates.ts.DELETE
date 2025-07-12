@@ -1,0 +1,76 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * @module
+ * This module provides a tool to search for templates from all available sources
+ * (e.g., local, connectors) in the Xibo CMS. It implements the GET /template/search endpoint.
+ */
+
+import { z } from "zod";
+import { createTool } from '@mastra/core/tools';
+import { config } from "../config";
+import { getAuthHeaders } from "../auth";
+import { decodeErrorMessage } from "../utility/error";
+import { logger } from '../../../index';
+
+/**
+ * Tool to search for templates from all sources.
+ */
+export const searchAllTemplates = createTool({
+  id: 'search-all-templates',
+  description: 'Search for templates from all sources (e.g., local, connectors).',
+  inputSchema: z.object({}), // This tool does not require input.
+  outputSchema: z.object({
+      success: z.boolean().describe("Indicates whether the operation was successful."),
+      message: z.string().optional().describe("A message providing details about the operation outcome."),
+      data: z.array(z.string()).optional().describe("An array of template names on success."),
+      error: z.any().optional().describe("Error details if the operation failed."),
+  }),
+  execute: async ({ context }) => {
+    logger.info({ context }, "Executing searchAllTemplates tool.");
+    try {
+      if (!config.cmsUrl) {
+        const message = "CMS URL is not configured.";
+        logger.error(message);
+        return { success: false, message, error: { message } };
+      }
+      
+      const headers = await getAuthHeaders();
+      const url = `${config.cmsUrl}/api/template/search`;
+
+      logger.debug({ url }, "Sending GET request to search all templates.");
+      const response = await fetch(url, {
+        method: 'GET',
+        headers
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const errorMessage = decodeErrorMessage(JSON.stringify(data));
+        const message = "Failed to search all templates.";
+        logger.error({ status: response.status, error: errorMessage }, message);
+        return { success: false, message, error: { status: response.status, message: errorMessage, details: data }};
+      }
+      
+      const validatedData = z.array(z.string()).parse(data);
+      logger.info({ count: validatedData.length }, "Successfully retrieved templates from all sources.");
+
+      return { success: true, data: validatedData, message: "Successfully retrieved templates from all sources." };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      logger.error({ error }, "An unexpected error occurred in searchAllTemplates.");
+      return { success: false, message: "An unexpected error occurred.", error: { message: errorMessage, details: error } };
+    }
+  },
+}); 
