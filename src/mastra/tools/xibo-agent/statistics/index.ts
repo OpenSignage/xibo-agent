@@ -11,11 +11,11 @@
  */
 
 /**
- * @module statistics
- * @description This module serves as an entry point for all statistics-related tools,
- * re-exporting them for easy access from other parts of the application.
+ * @module StatisticsTools
+ * @description This module aggregates and exports all statistics-related tools
+ * for the Xibo CMS. It provides a single point of access for functionalities
+ * such as retrieving proof-of-play stats, disconnected time, and export counts.
  */
-
-export * from './getStats';
-export * from './getExportStatsCount';
-export * from './getTimeDisconnected'; 
+export { getExportStatsCount } from './getExportStatsCount';
+export { getStats } from './getStats';
+export { getTimeDisconnected } from './getTimeDisconnected';
