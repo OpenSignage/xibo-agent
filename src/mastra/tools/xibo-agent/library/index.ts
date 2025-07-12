@@ -29,6 +29,5 @@ export { getMediaUsageLayouts } from './getMediaUsageLayouts';
 export { isMediaUsed } from './isMediaUsed';
 export { selectMediaFolder } from './selectMediaFolder';
 export { setEnableStatToMedia } from './setEnableStatToMedia';
-export { tidyLibrary } from './tidyLibrary';
 export { unassignTagsFromMedia } from './unassignTagsFromMedia';
 export { uploadMediaFromURL } from './uploadMediaFromURL';

@@ -47,7 +47,7 @@ import { getTags, addTag, editTag, deleteTag } from './tags';
 import { getLibrary, addMedia, uploadMediaFromURL, downloadThumbnail, editMedia,
   deleteMedia, downloadMedia, assignTagsToMedia, unassignTagsFromMedia,
   setEnableStatToMedia, getMediaUsage, getMediaUsageLayouts, copyMedia, isMediaUsed,
-  selectMediaFolder, tidyLibrary } from './library';
+  selectMediaFolder } from './library';
 import { generateImage, updateImage, getImageHistory } from './generateImage';
 import { videoGeneration, videoUpdate, getVideoHistory } from './generateVideo';
 import { getNotifications, deleteNotification, addNotification, editNotification } from './notification';
@@ -181,7 +181,7 @@ export function getTools() {
     getLibrary,addMedia,uploadMediaFromURL,downloadThumbnail,editMedia,
       deleteMedia,downloadMedia,assignTagsToMedia,unassignTagsFromMedia,
       setEnableStatToMedia,getMediaUsage,getMediaUsageLayouts,
-      copyMedia,isMediaUsed,selectMediaFolder,tidyLibrary,
+      copyMedia,isMediaUsed,selectMediaFolder,
     // Generation
     generateImage,updateImage,getImageHistory,generateQRCode,
     videoGeneration, videoUpdate, getVideoHistory,
