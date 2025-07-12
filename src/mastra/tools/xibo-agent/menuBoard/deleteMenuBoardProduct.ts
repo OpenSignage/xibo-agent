@@ -11,72 +11,87 @@
  */
 
 /**
- * @module
- * This module provides a tool to delete a menu board product from the Xibo CMS.
+ * @module deleteMenuBoardProduct
+ * @description This module provides a tool to delete a menu board product from the Xibo CMS.
+ * It implements the menu board product deletion API endpoint.
  */
-
 import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
 import { config } from '../config';
 import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
+import { decodeErrorMessage } from '../utility/error';
 
+// Schema for the input of the deleteMenuBoardProduct tool
 const inputSchema = z.object({
   menuProductId: z.number().describe('The ID of the menu board product to delete.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+// Schema for a successful response (no data returned on success)
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
 
+// Schema for an error response
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A human-readable error message.'),
+  error: z.any().optional().describe('Optional technical details about the error.'),
+  errorData: z.any().optional().describe('The raw error data from the API.'),
+});
+
+// The output schema for the tool
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * @tool deleteMenuBoardProduct
+ * @description A tool for deleting a specific menu board product from the Xibo CMS.
+ */
 export const deleteMenuBoardProduct = createTool({
   id: 'delete-menu-board-product',
   description: 'Delete a specific menu board product.',
   inputSchema,
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }): Promise<Output> => {
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
+    }
+
+    const url = new URL(`${config.cmsUrl}/api/menuboard/product/${context.menuProductId}`);
+
     try {
-      // Ensure CMS URL is configured
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
+      logger.info({ menuProductId: context.menuProductId }, `Attempting to delete menu board product.`);
 
-      // Get authentication headers
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/menuboard/${input.menuProductId}/product`;
-      logger.debug(`deleteMenuBoardProduct: Requesting URL = ${url}`);
-
-      // Make the API call to delete the menu board product
-      const response = await fetch(url, {
+      const response = await fetch(url.toString(), {
         method: 'DELETE',
-        headers,
+        headers: await getAuthHeaders(),
       });
 
-      // Handle non-successful responses
-      if (!response.ok) {
-        const errorData = await response.text();
-        logger.error(`deleteMenuBoardProduct: HTTP error: ${response.status}`, { error: errorData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+      if (response.status === 204) {
+        const message = `Successfully deleted menu board product with ID ${context.menuProductId}.`;
+        logger.info({ menuProductId: context.menuProductId }, message);
+        return { success: true, message };
       }
-      
-      // A successful DELETE request returns a 204 No Content response
-      logger.info(`deleteMenuBoardProduct: Successfully deleted menu board product with ID ${input.menuProductId}.`);
-      return { success: true, message: 'Menu board product deleted successfully.' };
+
+      const responseText = await response.text();
+      const decodedError = decodeErrorMessage(responseText);
+      const message = `Failed to delete menu board product. API responded with status ${response.status}.`;
+      logger.error({ status: response.status, response: decodedError, menuProductId: context.menuProductId }, message);
+      return { success: false, message, errorData: decodedError };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('deleteMenuBoardProduct: An unexpected error occurred', { error });
-      
-      // Handle other unexpected errors
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
+      logger.error({ error, menuProductId: context.menuProductId }, `An unexpected error occurred in deleteMenuBoardProduct: ${message}`);
+      return {
+        success: false,
+        message: `An unexpected error occurred: ${message}`,
+        error: error,
+      };
     }
   },
 }); 

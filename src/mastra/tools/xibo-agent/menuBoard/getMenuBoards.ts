@@ -11,18 +11,19 @@
  */
 
 /**
- * @module
- * This module provides a tool to retrieve menu boards from the Xibo CMS.
- * It supports filtering by various properties.
+ * @module getMenuBoards
+ * @description This module provides a tool to retrieve menu boards from the Xibo CMS.
+ * It implements the menu board listing API endpoint and supports filtering.
  */
-
 import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
 import { config } from '../config';
 import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 import { menuBoardSchema } from './schemas';
+import { decodeErrorMessage } from '../utility/error';
 
+// Schema for the input of the getMenuBoards tool
 const inputSchema = z.object({
   menuId: z.number().optional().describe('Filter by a specific Menu Board ID.'),
   userId: z.number().optional().describe('Filter by the owner user ID.'),
@@ -31,78 +32,93 @@ const inputSchema = z.object({
   code: z.string().optional().describe('Filter by menu board code.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-    data: z.array(menuBoardSchema),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+// Schema for a successful response
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(menuBoardSchema),
+});
 
+// Schema for an error response
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A human-readable error message.'),
+  error: z.any().optional().describe('Optional technical details about the error.'),
+  errorData: z.any().optional().describe('The raw error data from the API.'),
+});
+
+// The output schema for the tool
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * @tool getMenuBoards
+ * @description A tool for searching and retrieving menu boards from the Xibo CMS.
+ */
 export const getMenuBoards = createTool({
   id: 'get-menu-boards',
   description: 'Search for and retrieve menu boards from the CMS.',
   inputSchema,
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
-    try {
-      // Ensure CMS URL is configured
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
+  execute: async ({ context }): Promise<Output> => {
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
+    }
 
-      // Get authentication headers
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
-      
-      // Prepare request parameters from input context
-      Object.entries(input).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          params.append(key, String(value));
-        }
+    const url = new URL(`${config.cmsUrl}/api/menuboards`);
+    const params = new URLSearchParams();
+
+    Object.entries(context).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        params.append(key, String(value));
+      }
+    });
+    url.search = params.toString();
+
+    try {
+      logger.info({ url: url.toString() }, 'Attempting to retrieve menu boards.');
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: await getAuthHeaders(),
       });
 
-      const url = `${config.cmsUrl}/api/menuboards?${params.toString()}`;
-      logger.debug(`getMenuBoards: Requesting URL = ${url}`);
+      const responseText = await response.text();
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        responseData = responseText;
+      }
 
-      // Make the API call to get menu boards
-      const response = await fetch(url, { headers });
-
-      const responseData = await response.json();
-
-      // Handle non-successful responses
       if (!response.ok) {
-        logger.error(`getMenuBoards: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+        const decodedError = decodeErrorMessage(responseText);
+        const message = `Failed to get menu boards. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: decodedError }, message);
+        return { success: false, message, errorData: decodedError };
       }
-      
-      // Validate the response data against the schema
-      const validatedData = z.array(menuBoardSchema).parse(responseData);
-      logger.info(`getMenuBoards: Retrieved ${validatedData.length} menu boards.`);
 
-      // Handle cases where no data is found
-      if (validatedData.length === 0) {
-        return { success: true, message: 'No menu boards found matching the criteria.', data: [] };
+      const validationResult = z.array(menuBoardSchema).safeParse(responseData);
+
+      if (!validationResult.success) {
+        const message = 'Get menu boards response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return { success: false, message, error: validationResult.error, errorData: responseData };
       }
-      
-      return { success: true, message: 'Menu boards retrieved successfully.', data: validatedData };
+
+      logger.info(`Successfully retrieved ${validationResult.data.length} menu board(s).`);
+      return { success: true, data: validationResult.data };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('getMenuBoards: An unexpected error occurred', { error });
-      
-      // Handle validation errors specifically
-      if (error instanceof z.ZodError) {
-        return { success: false, message: 'Validation error occurred.', error: error.issues };
-      }
-      
-      // Handle other unexpected errors
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
+      logger.error({ error }, `An unexpected error occurred in getMenuBoards: ${message}`);
+      return {
+        success: false,
+        message: `An unexpected error occurred: ${message}`,
+        error: error,
+      };
     }
   },
 }); 

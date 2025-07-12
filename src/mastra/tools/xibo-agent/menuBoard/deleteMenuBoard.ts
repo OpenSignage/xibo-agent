@@ -11,72 +11,87 @@
  */
 
 /**
- * @module
- * This module provides a tool to delete a menu board from the Xibo CMS.
+ * @module deleteMenuBoard
+ * @description This module provides a tool to delete a menu board from the Xibo CMS.
+ * It implements the menu board deletion API endpoint.
  */
-
 import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
 import { config } from '../config';
 import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
+import { decodeErrorMessage } from '../utility/error';
 
+// Schema for the input of the deleteMenuBoard tool
 const inputSchema = z.object({
   menuId: z.number().describe('The ID of the menu board to delete.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+// Schema for a successful response (no data returned on success)
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
 
+// Schema for an error response
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A human-readable error message.'),
+  error: z.any().optional().describe('Optional technical details about the error.'),
+  errorData: z.any().optional().describe('The raw error data from the API.'),
+});
+
+// The output schema for the tool
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * @tool deleteMenuBoard
+ * @description A tool for deleting a specific menu board from the Xibo CMS.
+ */
 export const deleteMenuBoard = createTool({
   id: 'delete-menu-board',
   description: 'Delete a specific menu board.',
   inputSchema,
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }): Promise<Output> => {
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
+    }
+
+    const url = new URL(`${config.cmsUrl}/api/menuboard/${context.menuId}`);
+
     try {
-      // Ensure CMS URL is configured
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
+      logger.info({ menuId: context.menuId }, `Attempting to delete menu board.`);
 
-      // Get authentication headers
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/menuboard/${input.menuId}`;
-      logger.debug(`deleteMenuBoard: Requesting URL = ${url}`);
-
-      // Make the API call to delete the menu board
-      const response = await fetch(url, {
+      const response = await fetch(url.toString(), {
         method: 'DELETE',
-        headers,
+        headers: await getAuthHeaders(),
       });
 
-      // Handle non-successful responses
-      if (!response.ok) {
-        const errorData = await response.text();
-        logger.error(`deleteMenuBoard: HTTP error: ${response.status}`, { error: errorData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+      if (response.status === 204) {
+        const message = `Successfully deleted menu board with ID ${context.menuId}.`;
+        logger.info({ menuId: context.menuId }, message);
+        return { success: true, message };
       }
-      
-      // A successful DELETE request returns a 204 No Content response
-      logger.info(`deleteMenuBoard: Successfully deleted menu board with ID ${input.menuId}.`);
-      return { success: true, message: 'Menu board deleted successfully.' };
+
+      const responseText = await response.text();
+      const decodedError = decodeErrorMessage(responseText);
+      const message = `Failed to delete menu board. API responded with status ${response.status}.`;
+      logger.error({ status: response.status, response: decodedError, menuId: context.menuId }, message);
+      return { success: false, message, errorData: decodedError };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('deleteMenuBoard: An unexpected error occurred', { error });
-
-      // Handle other unexpected errors
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
+      logger.error({ error, menuId: context.menuId }, `An unexpected error occurred in deleteMenuBoard: ${message}`);
+      return {
+        success: false,
+        message: `An unexpected error occurred: ${message}`,
+        error: error,
+      };
     }
   },
 }); 

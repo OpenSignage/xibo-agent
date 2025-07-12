@@ -11,97 +11,124 @@
  */
 
 /**
- * @module
- * This module provides a tool to edit an existing menu board category.
+ * @module editMenuBoardCategory
+ * @description Provides a tool to edit an existing menu board category in the Xibo CMS.
+ * It implements the menu board category update API endpoint and handles the necessary validation.
  */
-
 import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
 import { config } from '../config';
 import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 import { menuBoardCategorySchema } from './schemas';
+import { decodeErrorMessage } from '../utility/error';
 
+// Schema for the input of the editMenuBoardCategory tool
 const inputSchema = z.object({
   menuCategoryId: z.number().describe('The ID of the menu board category to edit.'),
-  name: z.string().describe('The new name for the category.'),
+  name: z.string().optional().describe('The new name for the category.'),
   description: z.string().optional().describe('The new description for the category.'),
   code: z.string().optional().describe('The new code for the category.'),
   mediaId: z.number().optional().describe('The new media ID to associate with the category.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-    data: menuBoardCategorySchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+// Schema for a successful response
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: menuBoardCategorySchema,
+});
 
+// Schema for an error response
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A human-readable error message.'),
+  error: z.any().optional().describe('Optional technical details about the error.'),
+  errorData: z.any().optional().describe('The raw error data from the API.'),
+});
+
+// The output schema for the tool
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * @tool editMenuBoardCategory
+ * @description A tool for editing an existing menu board category in the Xibo CMS.
+ */
 export const editMenuBoardCategory = createTool({
   id: 'edit-menu-board-category',
   description: 'Edit an existing menu board category.',
   inputSchema,
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }): Promise<Output> => {
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
+    }
+
+    const { menuCategoryId, ...bodyParams } = context;
+    const url = new URL(`${config.cmsUrl}/api/menuboard/category/${menuCategoryId}`);
+    const params = new URLSearchParams();
+
+    Object.entries(bodyParams).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        params.append(key, String(value));
+      }
+    });
+
+    if (params.toString() === '') {
+      const message = 'No fields provided to edit.';
+      logger.warn({ context }, message);
+      return { success: false, message };
+    }
+
     try {
-      // Ensure CMS URL is configured
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
-      
-      const { menuCategoryId, ...bodyParams } = input;
-      
-      // Get authentication headers
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
+      logger.info({ menuCategoryId, body: params.toString() }, 'Attempting to edit menu board category.');
 
-      // Prepare request parameters from input context
-      Object.entries(bodyParams).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          params.append(key, String(value));
-        }
-      });
-      
-      const url = `${config.cmsUrl}/api/menuboard/${menuCategoryId}/category`;
-      logger.debug(`editMenuBoardCategory: Requesting URL = ${url}, Body = ${params.toString()}`);
-      
-      // Make the API call to edit the menu board category
-      const response = await fetch(url, {
+      const response = await fetch(url.toString(), {
         method: 'PUT',
-        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
+        headers: {
+          ...(await getAuthHeaders()),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: params,
       });
 
-      const responseData = await response.json();
-
-      // Handle non-successful responses
-      if (!response.ok) {
-        logger.error(`editMenuBoardCategory: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+      const responseText = await response.text();
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        responseData = responseText;
       }
 
-      // Validate the response data against the schema
-      const validatedData = menuBoardCategorySchema.parse(responseData);
-      logger.info(`editMenuBoardCategory: Successfully edited category '${validatedData.name}' (ID: ${validatedData.menuCategoryId}).`);
-      return { success: true, message: 'Menu board category edited successfully.', data: validatedData };
+      if (!response.ok) {
+        const decodedError = decodeErrorMessage(responseText);
+        const message = `Failed to edit menu board category. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: decodedError, menuCategoryId }, message);
+        return { success: false, message, errorData: decodedError };
+      }
+
+      const validationResult = menuBoardCategorySchema.safeParse(responseData);
+
+      if (!validationResult.success) {
+        const message = 'Edit menu board category response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return { success: false, message, error: validationResult.error, errorData: responseData };
+      }
+
+      logger.info({ category: validationResult.data }, `Successfully edited category '${validationResult.data.name}'.`);
+      return { success: true, data: validationResult.data };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('editMenuBoardCategory: An unexpected error occurred', { error });
-
-      // Handle validation errors specifically
-      if (error instanceof z.ZodError) {
-        return { success: false, message: 'Validation error occurred.', error: error.issues };
-      }
-      
-      // Handle other unexpected errors
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
+      logger.error({ error, menuCategoryId }, `An unexpected error occurred in editMenuBoardCategory: ${message}`);
+      return {
+        success: false,
+        message: `An unexpected error occurred: ${message}`,
+        error: error,
+      };
     }
   },
 }); 
