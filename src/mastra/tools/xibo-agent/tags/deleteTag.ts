@@ -13,101 +13,87 @@
 /**
  * @module deleteTag
  * @description Provides a tool to delete a tag from the Xibo CMS.
- * It implements the tag deletion API endpoint and handles the necessary validation.
+ * It implements the tag deletion API endpoint and handles success and error responses.
  */
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { z } from 'zod';
+import { createTool } from '@mastra/core/tools';
+import { config } from '../config';
+import { getAuthHeaders } from '../auth';
+import { logger } from '../../../index';
+import { decodeErrorMessage } from '../utility/error';
 
-// Defines the schema for a successful response
-const successSchema = z.object({
+/**
+ * Defines the schema for a successful response.
+ */
+const successResponseSchema = z.object({
   success: z.literal(true),
-  message: z.string().describe("A confirmation message."),
-});
-
-// Defines the schema for an error response
-const errorSchema = z.object({
-  success: z.literal(false),
-  message: z.string().describe("A simple, readable error message."),
-  error: z.any().optional().describe("Optional detailed error information."),
-  errorData: z.any().optional().describe("Raw response data from CMS."),
+  message: z.string().describe('A confirmation message indicating success.'),
 });
 
 /**
- * A tool for deleting an existing tag from the Xibo CMS by its ID.
+ * Defines the schema for a failed operation, including a success flag and error details.
  */
-export const deleteTag = createTool({
-  id: "delete-tag",
-  description: "Delete a tag from Xibo CMS by its ID.",
-  inputSchema: z.object({
-    tagId: z.number().describe("The ID of the tag to delete."),
-  }),
-  outputSchema: z.union([successSchema, errorSchema]),
-  execute: async ({
-    context,
-  }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
-    // Ensure the CMS URL is configured before proceeding.
-    if (!config.cmsUrl) {
-      const errorMessage = "CMS URL is not configured.";
-      logger.error(errorMessage);
-      return {
-        success: false,
-        message: errorMessage,
-      };
-    }
-
-    // Construct the API endpoint URL for the specific tag.
-    const url = new URL(`${config.cmsUrl}/api/tag/${context.tagId}`);
-
-    logger.info(`Deleting tag ${context.tagId} at: ${url.toString()}`);
-
-    // Perform the DELETE request to the Xibo CMS API.
-    const response = await fetch(url.toString(), {
-      method: "DELETE",
-      headers: await getAuthHeaders(),
-    });
-
-    // Log the response status to trace the execution flow.
-    logger.info(`Received API response with status: ${response.status}`);
-
-    // A successful deletion returns a 204 No Content status.
-    if (response.status === 204) {
-      logger.info(`Successfully deleted tag ${context.tagId}.`);
-      return {
-        success: true,
-        message: `Tag with ID ${context.tagId} deleted successfully.`,
-      };
-    }
-
-    // Handle the specific case of 404 Not Found as a distinct error.
-    if (response.status === 404) {
-      const message = `Tag with ID ${context.tagId} not found.`;
-      logger.error(message, { status: 404 });
-      return {
-        success: false,
-        message: message,
-        error: { status: 404 },
-      };
-    }
-
-    // For any other non-successful status, return a detailed error object.
-    const responseText = await response.text();
-    const decodedText = decodeErrorMessage(responseText);
-    const message = `Failed to delete tag. API responded with an unexpected status ${response.status}.`;
-    logger.error(message, {
-      status: response.status,
-      response: decodedText,
-    });
-    return {
-      success: false,
-      message: message,
-      error: { status: response.status },
-      errorData: decodedText,
-    };
-  },
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A human-readable error message.'),
+  error: z.any().optional().describe('Optional technical details about the error.'),
+  errorData: z.any().optional().describe('The raw error data from the API.'),
 });
 
-export default deleteTag; 
+/**
+ * The output schema for the tool, which can be either a success or an error response.
+ */
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+/**
+ * @tool deleteTag
+ * @description A tool for deleting an existing tag from the Xibo CMS by its ID.
+ */
+export const deleteTag = createTool({
+  id: 'delete-tag',
+  description: 'Delete a tag from Xibo CMS by its ID.',
+  inputSchema: z.object({
+    tagId: z.number().describe('The ID of the tag to delete.'),
+  }),
+  outputSchema,
+  execute: async ({ context }) => {
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
+    }
+
+    const url = new URL(`${config.cmsUrl}/api/tag/${context.tagId}`);
+
+    try {
+      logger.info({ tagId: context.tagId }, 'Attempting to delete tag.');
+
+      const response = await fetch(url.toString(), {
+        method: 'DELETE',
+        headers: await getAuthHeaders(),
+      });
+
+      // A successful deletion returns a 204 No Content status.
+      if (response.status === 204) {
+        const message = `Tag with ID ${context.tagId} deleted successfully.`;
+        logger.info({ tagId: context.tagId }, message);
+        return { success: true, message };
+      }
+
+      const responseText = await response.text();
+      const decodedError = decodeErrorMessage(responseText);
+      const message = `Failed to delete tag. API responded with status ${response.status}.`;
+      logger.error({ status: response.status, response: decodedError, tagId: context.tagId }, message);
+      return { success: false, message, errorData: decodedError };
+      
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
+      logger.error({ error, tagId: context.tagId }, `An unexpected error occurred while deleting tag: ${message}`);
+      return {
+        success: false,
+        message: `An unexpected error occurred: ${message}`,
+        error,
+      };
+    }
+  },
+}); 

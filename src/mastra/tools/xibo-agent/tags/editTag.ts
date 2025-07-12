@@ -15,167 +15,134 @@
  * @description Provides a tool to edit an existing tag in the Xibo CMS.
  * It implements the tag update API endpoint and handles validation for the operation.
  */
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { z } from 'zod';
+import { createTool } from '@mastra/core/tools';
+import { config } from '../config';
+import { getAuthHeaders } from '../auth';
+import { logger } from '../../../index';
+import { decodeErrorMessage } from '../utility/error';
+import { tagSchema } from './schemas';
 
 /**
- * Defines the schema for a single tag record, used for API responses.
- * This ensures that data received from the Xibo API conforms to the expected structure.
+ * Defines the schema for a successful operation, which returns the updated tag object.
  */
-const tagSchema = z.object({
-  tagId: z.number().describe("The unique ID of the tag."),
-  tag: z.string().describe("The name or value of the tag."),
-  isSystem: z
-    .number()
-    .describe("A flag indicating if the tag is a system tag (1 for yes, 0 for no)."),
-  isRequired: z
-    .number()
-    .describe("A flag indicating if the tag is required (1 for yes, 0 for no)."),
-  options: z
-    .string()
-    .nullable()
-    .optional()
-    .describe("Optional predefined values for the tag, if any."),
-});
-
-/**
- * Defines the schema for a successful operation, combining the tag data with a success flag.
- */
-const successSchema = tagSchema.extend({
+const successResponseSchema = z.object({
   success: z.literal(true),
+  data: tagSchema,
 });
 
 /**
- * Defines the schema for a failed operation, including a success flag, a message, and optional error details.
+ * Defines the schema for a failed operation, including a success flag and error details.
  */
-const errorSchema = z.object({
+const errorResponseSchema = z.object({
   success: z.literal(false),
-  message: z.string().describe("A human-readable error message."),
-  error: z
-    .any()
-    .optional()
-    .describe("Optional technical details about the error."),
+  message: z.string().describe('A human-readable error message.'),
+  error: z.any().optional().describe('Optional technical details about the error.'),
+  errorData: z.any().optional().describe('The raw error data from the API.'),
 });
 
 /**
- * A tool for editing an existing tag in the Xibo CMS.
+ * The output schema for the tool, which can be either a success or an error response.
+ */
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * @tool editTag
+ * @description A tool for editing an existing tag in the Xibo CMS.
  * It allows updating the tag's name, required status, and options.
  */
 export const editTag = createTool({
-  id: "edit-tag",
-  description: "Edit an existing tag in Xibo CMS.",
+  id: 'edit-tag',
+  description: 'Edit an existing tag in Xibo CMS.',
   inputSchema: z.object({
-    tagId: z.number().describe("The ID of the tag to edit."),
-    name: z
-      .string()
-      .optional()
-      .describe("The new name for the tag (1-50 characters)."),
+    tagId: z.number().describe('The ID of the tag to edit.'),
+    tag: z.string().optional().describe('The new name for the tag.'),
     isRequired: z
       .number()
+      .min(0)
+      .max(1)
       .optional()
-      .describe("Set the tag as required (0 for optional, 1 for required)."),
+      .describe('Set the tag as required (0 for optional, 1 for required).'),
     options: z
       .string()
       .optional()
-      .describe("A JSON string representing an array of tag options."),
+      .describe('A comma-separated string of predefined values for the tag.'),
   }),
-  outputSchema: z
-    .union([successSchema, errorSchema])
-    .describe("The result of the edit operation."),
-  execute: async ({
-    context,
-  }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
-    // Ensure the CMS URL is configured before proceeding.
+  outputSchema,
+  execute: async ({ context }): Promise<Output> => {
     if (!config.cmsUrl) {
-      const errorMessage = "CMS URL is not configured.";
-      logger.error(errorMessage);
-      return {
-        success: false,
-        message: errorMessage,
-      };
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
     }
 
-    // Construct the API endpoint URL for the specific tag.
     const url = new URL(`${config.cmsUrl}/api/tag/${context.tagId}`);
-
-    // Create the request body using URLSearchParams for form-urlencoded content.
     const params = new URLSearchParams();
-    if (context.name !== undefined) params.append("name", context.name);
-    if (context.isRequired !== undefined)
-      params.append("isRequired", String(context.isRequired));
-    if (context.options !== undefined)
-      params.append("options", context.options);
 
-    logger.info(`Editing tag ${context.tagId} at: ${url.toString()}`);
-
-    // Perform the PUT request to the Xibo CMS API.
-    const response = await fetch(url.toString(), {
-      method: "PUT",
-      headers: {
-        ...(await getAuthHeaders()),
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: params,
-    });
-
-    // Read the response body as text to handle various response formats.
-    const responseText = await response.text();
-    let responseData: any;
+    // Map context to form data, renaming 'tag' to 'name' for the API.
+    if (context.tag) params.append('name', context.tag);
+    if (context.isRequired !== undefined) {
+      params.append('isRequired', String(context.isRequired));
+    }
+    if (context.options !== undefined) {
+      params.append('options', context.options);
+    }
+    
+    // The request should fail if no editable fields are provided.
+    if (params.toString() === '') {
+        const message = 'No fields provided to edit.';
+        logger.warn({ context }, message);
+        return { success: false, message };
+    }
 
     try {
-      responseData = JSON.parse(responseText);
-    } catch (e) {
-      responseData = responseText;
-    }
+      logger.info({ tagId: context.tagId, body: params.toString() }, 'Attempting to edit tag.');
 
-    // Handle non-successful HTTP responses.
-    if (!response.ok) {
-      const decodedText = decodeErrorMessage(responseText);
-      const errorMessage = `Failed to edit tag. API responded with status ${response.status}.`;
-      logger.error(errorMessage, {
-        status: response.status,
-        response: decodedText,
+      const response = await fetch(url.toString(), {
+        method: 'PUT',
+        headers: {
+          ...(await getAuthHeaders()),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: params,
       });
+
+      const responseText = await response.text();
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        responseData = responseText;
+      }
+      
+      if (!response.ok) {
+        const decodedError = decodeErrorMessage(responseText);
+        const message = `Failed to edit tag. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: decodedError, tagId: context.tagId }, message);
+        return { success: false, message, errorData: decodedError };
+      }
+
+      const validationResult = tagSchema.safeParse(responseData);
+
+      if (!validationResult.success) {
+        const message = 'Edit tag response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return { success: false, message, error: validationResult.error, errorData: responseData };
+      }
+
+      logger.info({ tag: validationResult.data }, `Successfully edited tag '${validationResult.data.tag}'.`);
+      return { success: true, data: validationResult.data };
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
+      logger.error({ error, tagId: context.tagId }, `An unexpected error occurred in editTag: ${message}`);
       return {
         success: false,
-        message: `${errorMessage} Message: ${decodedText}`,
-        error: {
-          statusCode: response.status,
-          responseBody: responseData,
-        },
+        message: `An unexpected error occurred: ${message}`,
+        error: error,
       };
     }
-
-    // Validate the structure of the successful response data.
-    const validationResult = tagSchema.safeParse(responseData);
-
-    if (!validationResult.success) {
-      const errorMessage = "Edit tag response validation failed.";
-      logger.error(errorMessage, {
-        error: validationResult.error.issues,
-        data: responseData,
-      });
-      return {
-        success: false,
-        message: errorMessage,
-        error: {
-          validationIssues: validationResult.error.issues,
-          receivedData: responseData,
-        },
-      };
-    }
-
-    // On success, log and return the validated data.
-    logger.info(`Successfully edited tag ${validationResult.data.tagId}.`);
-    return {
-      ...validationResult.data,
-      success: true,
-    };
   },
-});
-
-export default editTag; 
+}); 
