@@ -22,21 +22,7 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from '../../../index';
 import { decodeErrorMessage } from "../utility/error";
-
-/**
- * Schema for a single resolution object returned by the API.
- */
-const resolutionSchema = z.object({
-  resolutionId: z.number().describe("The unique ID of the resolution."),
-  resolution: z.string().describe("The name of the resolution."),
-  width: z.number().describe("The width of the resolution in pixels."),
-  height: z.number().describe("The height of the resolution in pixels."),
-  designerWidth: z.number().describe("The designer width."),
-  designerHeight: z.number().describe("The designer height."),
-  version: z.number().describe("The version number of the resolution."),
-  enabled: z.number().describe("Flag indicating if the resolution is enabled (1 or 0)."),
-  userId: z.number().describe("The ID of the user who last modified the resolution."),
-}).passthrough();
+import { resolutionSchema } from "./schemas";
 
 /**
  * Schema for the tool's output, covering both success and failure cases.

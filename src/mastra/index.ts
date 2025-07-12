@@ -46,7 +46,7 @@ const pinoLogger = pino(
           colorize: true,
           levelFirst: true,
           translateTime: 'SYS:yyyy-mm-dd HH:MM:ss',
-          ignore: 'pid,hostname',
+          ignore: 'hostname',
           singleLine: false,
         },
       },
