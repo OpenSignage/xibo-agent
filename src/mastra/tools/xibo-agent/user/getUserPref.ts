@@ -11,9 +11,8 @@
  */
 
 /**
- * @module getUserPermissions
- * @description This module provides a tool to retrieve the permissions
- * for a specific entity (like a layout or campaign) from the Xibo CMS.
+ * @module getUserPref
+ * @description This module provides a tool to retrieve the preferences for the current user.
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
@@ -21,14 +20,18 @@ import { config } from '../config';
 import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 import { decodeErrorMessage } from '../utility/error';
-import {
-  permissionSchema,
-} from './schemas';
 
-// Schema for a successful response, containing an array of permissions.
+// This response uses 'option' as the key, not 'preference'.
+// We define a local schema to avoid breaking other tools that might use the shared 'preferenceSchema'.
+const preferenceResponseSchema = z.object({
+  option: z.string(),
+  value: z.any(),
+});
+
+// Schema for a successful response, containing an array of preferences.
 const successResponseSchema = z.object({
   success: z.literal(true),
-  data: z.array(permissionSchema),
+  data: z.array(preferenceResponseSchema),
 });
 
 // Schema for a generic error response.
@@ -45,15 +48,14 @@ const errorResponseSchema = z.object({
 const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
- * @tool getUserPermissions
- * @description A tool to get the permissions for a specific entity from the Xibo CMS.
+ * @tool getUserPref
+ * @description A tool to retrieve all or a specific preference for the current user.
  */
-export const getUserPermissions = createTool({
-  id: 'get-user-permissions',
-  description: "Get permissions for a specific entity (e.g., 'layout', 'campaign').",
+export const getUserPref = createTool({
+  id: 'get-user-pref',
+  description: 'Gets preferences for the current user.',
   inputSchema: z.object({
-    entity: z.string().describe("The type of entity (e.g., 'layout', 'campaign')."),
-    objectId: z.number().describe('The ID of the object to get permissions for.'),
+    preference: z.string().optional().describe('The specific preference key to retrieve.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -63,11 +65,13 @@ export const getUserPermissions = createTool({
       return { success: false as const, message };
     }
 
-    const { entity, objectId } = context;
-    const url = new URL(`${config.cmsUrl}/api/user/permissions/${entity}/${objectId}`);
+    const url = new URL(`${config.cmsUrl}/api/user/pref`);
+    if (context.preference) {
+      url.searchParams.append('preference', context.preference);
+    }
 
     try {
-      logger.info({ entity, objectId }, 'Attempting to retrieve permissions.');
+      logger.info({ preference: context.preference }, 'Attempting to retrieve user preferences.');
 
       const response = await fetch(url.toString(), {
         method: 'GET',
@@ -78,24 +82,31 @@ export const getUserPermissions = createTool({
 
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
-        const message = `Failed to get permissions. API responded with status ${response.status}.`;
-        logger.error({ status: response.status, response: decodedError, entity, objectId }, message);
+        const message = `Failed to get user preferences. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
-      const validationResult = z.array(permissionSchema).safeParse(responseData);
+      // The API returns an array for all preferences, but a single object for a specific one.
+      const responseValidationSchema = z.union([preferenceResponseSchema, z.array(preferenceResponseSchema)]);
+      const validationResult = responseValidationSchema.safeParse(responseData);
 
       if (!validationResult.success) {
-        const message = 'Permissions response validation failed.';
+        const message = 'User preferences response validation failed.';
         logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return { success: false as const, message, error: validationResult.error, errorData: responseData };
       }
 
-      logger.info({ count: validationResult.data.length }, `Successfully retrieved ${validationResult.data.length} permission records.`);
-      return { success: true as const, data: validationResult.data };
+      // Normalize the data to always be an array.
+      const preferences = Array.isArray(validationResult.data)
+        ? validationResult.data
+        : [validationResult.data];
+
+      logger.info({ count: preferences.length }, 'Successfully retrieved user preferences.');
+      return { success: true as const, data: preferences };
     } catch (error: unknown) {
-      const message = 'An unexpected error occurred while retrieving permissions.';
-      logger.error({ error, entity, objectId }, message);
+      const message = 'An unexpected error occurred while retrieving user preferences.';
+      logger.error({ error }, message);
       return {
         success: false as const,
         message,

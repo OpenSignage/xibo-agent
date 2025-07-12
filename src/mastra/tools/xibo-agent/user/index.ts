@@ -11,25 +11,20 @@
  */
 
 /**
- * Xibo CMS User Management Tools
- * 
- * This module exports a comprehensive set of tools for managing users in the Xibo CMS.
- * Functionality includes creating, retrieving, updating, and deleting users, as well as
- * managing user permissions and preferences.
- * 
- * These tools provide access to both basic user operations and advanced permission
- * management capabilities for system administrators.
+ * @module UserTools
+ * @description This module aggregates and exports all user-related tools for the Xibo CMS.
+ * It provides a single point of access for functionalities such as creating, retrieving,
+ * updating, and deleting users, as well as managing permissions and preferences.
  */
-
+export { addUser } from './addUser';
+export { deleteUser } from './deleteUser';
+export { editUser } from './editUser';
+export { editUserPref } from './editUserPref';
+export { getMultiEntityPermissions } from './getMultiEntityPermissions';
 export { getUser } from './getUser';
 export { getUserMe } from './getUserMe';
-export { addUser } from './addUser';
-export { editUser } from './editUser';
-export { deleteUser } from './deleteUser';
 export { getUserPermissions } from './getUserPermissions';
+export { setMultiEntityPermissions } from './setMultiEntityPermissions';
 export { setUserPermissions } from './setUserPermissions';
-export { getUserPreferences } from './getUserPreferences';
-export { setUserPreferences } from './setUserPreferences';
-export { editUserPreferences } from './editUserPreferences';
-export { getMultiEntityPermissions } from './getMultiEntityPermissions';
-export { setMultiEntityPermissions } from './setMultiEntityPermissions'; 
+export { getUserPref } from './getUserPref';
+export { addUserPref } from './addUserPref';
