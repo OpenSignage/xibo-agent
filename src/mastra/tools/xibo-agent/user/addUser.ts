@@ -44,6 +44,9 @@ const errorResponseSchema = z.object({
  */
 const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
+type Output = z.infer<typeof outputSchema>;
+
+
 /**
  * @tool addUser
  * @description A tool for creating a new user in the Xibo CMS.
@@ -52,16 +55,18 @@ export const addUser = createTool({
   id: 'add-user',
   description: 'Add a new user to Xibo CMS.',
   inputSchema: z.object({
-    userName: z.string().describe('Username for the new user account.'),
-    password: z.string().describe('Password for the new user account.'),
-    userGroupId: z.number().describe('The Group ID for the user.'),
-    userTypeId: z.number().default(3).describe('User type ID (default: 3 for standard user).'),
-    homePage: z.enum(['statusdashboard.view', 'icondashboard.view', 'mediamanager.view', 'playlistdashboard.view'])
-      .default('icondashboard.view')
-      .describe('Default home page for the user.'),
-    libraryQuota: z.number().default(0).describe('Library quota in MB (0 for unlimited).'),
-    isRetired: z.number().min(0).max(1).default(0).describe('Set to 1 to retire the user.'),
-    email: z.string().email().optional().describe('Email address for the user (optional).'),
+    userName: z.string().describe('The User Name.'),
+    password: z.string().describe('The users password.'),
+    userTypeId: z.number().describe('The user type ID.'),
+    groupId: z.number().describe('The initial user group for this User.'),
+    homePageId: z.number().describe('The homepage to use for this User.'),
+    newUserWizard: z.number().min(0).max(1).describe('Flag indicating whether to show the new user guide.'),
+    hideNavigation: z.number().min(0).max(1).describe('Flag indicating whether to hide the navigation.'),
+    email: z.string().optional().describe('The user email address.'),
+    libraryQuota: z.number().optional().describe('The users library quota in kilobytes.'),
+    isRetired: z.number().min(0).max(1).optional().describe('Set user as retired (0 or 1, optional).'),
+    isLocked: z.number().min(0).max(1).optional().describe('Set user as locked (0 or 1, optional).'),
+    isPasswordChangeRequired: z.number().min(0).max(1).optional().describe('A flag indicating whether password change should be forced for this user.'),
     firstName: z.string().optional().describe("User's first name (optional)."),
     lastName: z.string().optional().describe("User's last name (optional)."),
     phone: z.string().optional().describe("Phone number for the user (optional)."),
@@ -72,11 +77,11 @@ export const addUser = createTool({
     ref5: z.string().optional().describe('Reference 5 for the user (optional).'),
   }),
   outputSchema,
-  execute: async ({ context }) => {
+  execute: async ({ context }): Promise<Output> => {
     if (!config.cmsUrl) {
       const message = 'CMS URL is not configured.';
       logger.error(message);
-      return { success: false as const, message };
+      return { success: false, message };
     }
 
     const url = new URL(`${config.cmsUrl}/api/user`);
@@ -92,9 +97,6 @@ export const addUser = createTool({
             }
         }
     });
-    // API expects userGroupId, not groupId
-    formData.set('groupId', String(context.userGroupId));
-
 
     try {
       logger.info({ userName: context.userName }, 'Attempting to create user.');
@@ -116,23 +118,23 @@ export const addUser = createTool({
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to add user. API responded with status ${response.status}.`;
         logger.error({ status: response.status, response: decodedError }, message);
-        return { success: false as const, message, errorData: decodedError };
+        return { success: false, message, errorData: decodedError };
       }
 
       const validationResult = userSchema.safeParse(responseData);
       if (!validationResult.success) {
         const message = 'Add user response validation failed.';
         logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
-        return { success: false as const, message, error: validationResult.error, errorData: responseData };
+        return { success: false, message, error: validationResult.error, errorData: responseData };
       }
 
       logger.info({ user: validationResult.data }, `User '${validationResult.data.userName}' created successfully.`);
-      return { success: true as const, data: validationResult.data };
+      return { success: true, data: validationResult.data };
     } catch (error: unknown) {
       const message = 'An unexpected error occurred while adding the user.';
       logger.error({ error }, message);
       return {
-        success: false as const,
+        success: false,
         message,
         error: error instanceof Error ? { name: error.name, message: error.message } : error,
       };

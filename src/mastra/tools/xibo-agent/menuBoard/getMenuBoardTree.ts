@@ -11,11 +11,12 @@
  */
 
 /**
- * @module
+ * @module getMenuBoardTree
+ * 
  * This module provides a tool to visualize the hierarchical structure of Menu Boards,
- * Categories, and Products in a tree view.
+ * Categories, and Products in a tree view. It fetches all necessary data by calling
+ * other tools and formats it into a human-readable tree.
  */
-
 import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
 import { logger } from '../../../index';
@@ -37,9 +38,9 @@ const inputSchema = z.object({
     ),
 });
 
-const successResponseSchema = treeResponseSchema.extend({
-  message: z.string(),
+const successResponseSchema = z.object({
   success: z.literal(true),
+  data: treeResponseSchema,
 });
 
 const failureResponseSchema = z.object({
@@ -65,7 +66,7 @@ export const getMenuBoardTree = createTool({
     context: input,
     runtimeContext,
   }): Promise<z.infer<typeof outputSchema>> => {
-    logger.info('getMenuBoardTree: Starting tree generation process.', { menuId: input.menuId });
+    logger.info({ input }, 'getMenuBoardTree: Starting tree generation process.');
     try {
       // Step 1: Fetch all relevant menu boards
       const menuBoardsResponse = await getMenuBoards.execute({
@@ -75,11 +76,7 @@ export const getMenuBoardTree = createTool({
 
       // Abort if the initial fetch fails
       if (!menuBoardsResponse.success) {
-        return {
-          success: false,
-          message: menuBoardsResponse.message,
-          error: menuBoardsResponse.error,
-        };
+        return menuBoardsResponse;
       }
 
       // Handle case where no menu boards are found
@@ -87,8 +84,8 @@ export const getMenuBoardTree = createTool({
         logger.info('getMenuBoardTree: No menu boards found, returning empty tree.');
         const emptyTreeResponse = createTreeViewResponse([], []);
         return {
-          ...emptyTreeResponse,
-          message: 'No menu boards found to create a tree.',
+          success: true,
+          data: emptyTreeResponse,
         };
       }
 
@@ -158,20 +155,20 @@ export const getMenuBoardTree = createTool({
       const treeResponse = createTreeViewResponse(menuBoards, tree, nodeFormatter);
       logger.info('getMenuBoardTree: Successfully generated menu board tree.');
       return {
-        ...treeResponse,
-        message: 'Menu board tree generated successfully.',
+        success: true,
+        data: treeResponse,
       };
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('getMenuBoardTree: An unexpected error occurred', { error });
+      logger.error({ error }, 'getMenuBoardTree: An unexpected error occurred');
 
       // Handle validation errors specifically
       if (error instanceof z.ZodError) {
         return {
           success: false,
-          message: 'Validation error occurred.',
-          error: error.issues,
+          message: 'A validation error occurred while processing the request.',
+          error: error.flatten(),
         };
       }
 

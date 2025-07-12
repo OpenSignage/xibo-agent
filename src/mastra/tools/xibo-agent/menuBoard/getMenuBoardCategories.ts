@@ -11,17 +11,19 @@
  */
 
 /**
- * @module
- * This module provides a tool to retrieve menu board categories from the Xibo CMS.
+ * @module getMenuBoardCategories
+ * @description This module provides a tool to retrieve menu board categories from the Xibo CMS.
+ * It implements the menu board category listing API endpoint and supports filtering.
  */
-
 import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
 import { config } from '../config';
 import { getAuthHeaders } from '../auth';
 import { logger } from '../../../index';
 import { menuBoardCategorySchema } from './schemas';
+import { decodeErrorMessage } from '../utility/error';
 
+// Schema for the input of the getMenuBoardCategories tool
 const inputSchema = z.object({
   menuId: z.number().describe('The ID of the parent menu board.'),
   menuCategoryId: z.number().optional().describe('Filter by a specific Menu Category ID.'),
@@ -29,79 +31,94 @@ const inputSchema = z.object({
   code: z.string().optional().describe('Filter by category code.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-    data: z.array(menuBoardCategorySchema),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+// Schema for a successful response
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(menuBoardCategorySchema),
+});
 
+// Schema for an error response
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A human-readable error message.'),
+  error: z.any().optional().describe('Optional technical details about the error.'),
+  errorData: z.any().optional().describe('The raw error data from the API.'),
+});
+
+// The output schema for the tool
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * @tool getMenuBoardCategories
+ * @description A tool for searching and retrieving categories for a specific menu board.
+ */
 export const getMenuBoardCategories = createTool({
   id: 'get-menu-board-categories',
   description: 'Search for and retrieve menu board categories.',
   inputSchema,
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
-    try {
-      // Ensure CMS URL is configured
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
+  execute: async ({ context }): Promise<Output> => {
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false, message };
+    }
+
+    const { menuId, ...filterParams } = context;
+    const url = new URL(`${config.cmsUrl}/api/menuboard/${menuId}/categories`);
+    const params = new URLSearchParams();
+
+    Object.entries(filterParams).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        params.append(key, String(value));
       }
-      
-      const { menuId, ...filterParams } = input;
-      
-      // Get authentication headers
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
-      
-      // Prepare request parameters from input context
-      Object.entries(filterParams).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          params.append(key, String(value));
-        }
+    });
+    url.search = params.toString();
+
+    try {
+      logger.info({ url: url.toString() }, `Attempting to retrieve categories for menu board ${menuId}.`);
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: await getAuthHeaders(),
       });
 
-      const url = `${config.cmsUrl}/api/menuboard/${menuId}/categories?${params.toString()}`;
-      logger.debug(`getMenuBoardCategories: Requesting URL = ${url}`);
+      const responseText = await response.text();
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        responseData = responseText;
+      }
 
-      // Make the API call to get menu board categories
-      const response = await fetch(url, { headers });
-      const responseData = await response.json();
-
-      // Handle non-successful responses
       if (!response.ok) {
-        logger.error(`getMenuBoardCategories: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+        const decodedError = decodeErrorMessage(responseText);
+        const message = `Failed to get menu board categories. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: decodedError }, message);
+        return { success: false, message, errorData: decodedError };
       }
-      
-      // Validate the response data against the schema
-      const validatedData = z.array(menuBoardCategorySchema).parse(responseData);
-      logger.info(`getMenuBoardCategories: Retrieved ${validatedData.length} categories for menu board ID ${menuId}.`);
 
-      // Handle cases where no data is found
-      if (validatedData.length === 0) {
-        return { success: true, message: 'No menu board categories found matching the criteria.', data: [] };
+      const validationResult = z.array(menuBoardCategorySchema).safeParse(responseData);
+
+      if (!validationResult.success) {
+        const message = 'Get menu board categories response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return { success: false, message, error: validationResult.error, errorData: responseData };
       }
-      
-      return { success: true, message: 'Menu board categories retrieved successfully.', data: validatedData };
+
+      logger.info(`Successfully retrieved ${validationResult.data.length} category/categories.`);
+      return { success: true, data: validationResult.data };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('getMenuBoardCategories: An unexpected error occurred', { error });
-      
-      // Handle validation errors specifically
-      if (error instanceof z.ZodError) {
-        return { success: false, message: 'Validation error occurred.', error: error.issues };
-      }
-      
-      // Handle other unexpected errors
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
+      logger.error({ error }, `An unexpected error occurred in getMenuBoardCategories: ${message}`);
+      return {
+        success: false,
+        message: `An unexpected error occurred: ${message}`,
+        error: error,
+      };
     }
   },
 }); 
