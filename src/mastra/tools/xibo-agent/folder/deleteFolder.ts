@@ -12,102 +12,92 @@
 
 /**
  * @module deleteFolder
- * @description Provides a tool to delete a folder from the Xibo CMS.
+ * @description This module provides a tool to delete a folder from the Xibo CMS.
  * It handles the necessary API calls and error handling for the deletion process.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { z } from 'zod';
+import { createTool } from '@mastra/core/tools';
+import { config } from '../config';
+import { getAuthHeaders } from '../auth';
+import { logger } from '../../../index';
+import { decodeErrorMessage } from '../utility/error';
+import { errorResponseSchema } from './schemas';
 
 /**
- * Defines the schema for the successful response after deleting a folder.
+ * Defines the schema for a successful deletion response.
  */
-const successSchema = z.object({
+const successResponseSchema = z.object({
   success: z.literal(true),
-  message: z.string().describe("A confirmation message."),
+  message: z.string(),
 });
 
 /**
- * Defines the schema for a failed operation.
+ * The output schema is a union of a successful response or an error response.
  */
-const errorSchema = z.object({
-  success: z.literal(false),
-  message: z.string().describe("A human-readable error message."),
-  error: z
-    .any()
-    .optional()
-    .describe("Optional technical details about the error."),
-});
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
- * A tool to delete an existing folder from the Xibo CMS.
+ * @tool deleteFolder
+ * @description A tool to delete an existing folder from the Xibo CMS.
  */
 export const deleteFolder = createTool({
-  id: "delete-folder",
-  description: "Deletes a folder from the Xibo CMS.",
+  id: 'delete-folder',
+  description: 'Deletes a folder from the Xibo CMS.',
   inputSchema: z.object({
-    folderId: z
-      .number()
-      .describe("The ID of the folder to delete. This is required."),
+    folderId: z.number().describe('The ID of the folder to delete. This is required.'),
   }),
-  outputSchema: z.union([successSchema, errorSchema]),
-  execute: async ({
-    context,
-  }): Promise<
-    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
-  > => {
+  outputSchema,
+  execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      const errorMessage = "CMS URL is not configured.";
-      logger.error(errorMessage);
-      return {
-        success: false,
-        message: errorMessage,
-      };
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false as const, message };
     }
 
     const { folderId } = context;
-    // Construct the API URL for deleting the specific folder.
     const url = new URL(`${config.cmsUrl}/api/folders/${folderId}`);
-    logger.info(`Attempting to delete folder with ID: ${folderId}...`);
 
-    // Perform the DELETE request.
-    const response = await fetch(url.toString(), {
-      method: "DELETE",
-      headers: await getAuthHeaders(),
-    });
+    try {
+      logger.info({ folderId }, `Attempting to delete folder.`);
 
-    // A successful deletion often returns a 204 No Content status.
-    // We check for any non-ok status to handle errors.
-    if (!response.ok) {
-      const responseText = await response.text();
-      const decodedText = decodeErrorMessage(responseText);
-      const errorMessage = `Failed to delete folder. API responded with status ${response.status}.`;
-      logger.error(errorMessage, {
-        status: response.status,
-        response: decodedText,
+      const headers = await getAuthHeaders();
+      const response = await fetch(url.toString(), {
+        method: 'DELETE',
+        headers,
       });
+
+      if (response.status === 204) {
+        const message = `Folder with ID ${folderId} deleted successfully.`;
+        logger.info({ folderId }, message);
+        return { success: true as const, message };
+      }
+
+      const responseData = await response.json();
+      
+      if (!response.ok) {
+        const decodedError = decodeErrorMessage(responseData);
+        const message = `Failed to delete folder. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: decodedError }, message);
+        return {
+          success: false as const,
+          message,
+          errorData: decodedError,
+        };
+      }
+      
+      // Should not be reached if 204 is handled, but as a fallback.
+      const message = `Folder with ID ${folderId} deleted successfully.`;
+      logger.info({ folderId }, message);
+      return { success: true as const, message };
+
+    } catch (error: unknown) {
+      const message = 'An unexpected error occurred while deleting the folder.';
+      logger.error({ error, folderId }, message);
       return {
-        success: false,
-        message: `${errorMessage} Message: ${decodedText}`,
-        error: {
-          statusCode: response.status,
-          responseBody: decodedText,
-        },
+        success: false as const,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
       };
     }
-
-    // If the request was successful, log and return a success message.
-    const successMessage = `Folder with ID ${folderId} deleted successfully.`;
-    logger.info(successMessage);
-    return {
-      success: true,
-      message: successMessage,
-    };
   },
-});
-
-export default deleteFolder; 
+}); 

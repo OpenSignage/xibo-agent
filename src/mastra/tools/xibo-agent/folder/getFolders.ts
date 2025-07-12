@@ -12,110 +12,59 @@
 
 /**
  * @module getFolders
- * @description Provides a tool to retrieve folder information from the Xibo CMS.
+ * @description This module provides a tool to retrieve folder information from the Xibo CMS.
  * It supports various filtering options and can return data as a flat list or a formatted tree view.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { z } from 'zod';
+import { createTool } from '@mastra/core/tools';
+import { config } from '../config';
+import { getAuthHeaders } from '../auth';
+import { logger } from '../../../index';
+import { decodeErrorMessage } from '../utility/error';
 import {
   TreeNode,
-  treeResponseSchema,
   createTreeViewResponse,
-} from "../utility/treeView";
+} from '../utility/treeView';
+import {
+  folderSchema,
+  FolderData,
+  errorResponseSchema,
+  successResponseSchema,
+} from './schemas';
 
 /**
- * Schema for folder data returned from the API.
- * This schema uses recursion via `z.lazy()` to handle nested child folders,
- * ensuring that the entire folder hierarchy is correctly validated.
+ * The output schema is a union of possible responses:
+ * - A successful response with folder data.
+ * - A successful response with a tree view.
+ * - An error response.
  */
-const folderSchema: z.ZodType<any> = z.lazy(() =>
+const outputSchema = z.union([
+  successResponseSchema,
   z.object({
-    id: z.number().describe("The unique identifier for the folder."),
-    type: z.string().nullable().describe("The type of the folder, if specified."),
-    text: z.string().describe("The display name of the folder."),
-    parentId: z
-      .union([z.number(), z.string()])
-      .nullable()
-      .describe("The ID of the parent folder."),
-    isRoot: z.number().nullable().describe("Flag indicating if this is a root folder."),
-    children: z
-      .union([z.array(folderSchema), z.string(), z.null()])
-      .describe("A list of child folders, a string representation, or null if there are none."),
-    permissionsFolderId: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("The ID of the folder that defines permissions for this folder."),
-    folderId: z.number().optional().describe("An alternative folder ID field."),
-    folderName: z.string().optional().describe("An alternative folder name field."),
+    success: z.literal(true),
+    data: z.array(folderSchema),
+    tree: z.array(z.any()),
+    treeViewText: z.string(),
   }),
-);
-
-// Infer the TypeScript type from the Zod schema for type safety.
-type FolderData = z.infer<typeof folderSchema>;
-
-/**
- * Schema for the standard API response when not in tree view mode.
- */
-const apiResponseSchema = z.object({
-  success: z
-    .boolean()
-    .describe("Indicates whether the API call was successful."),
-  data: z.array(folderSchema).describe("An array of folder objects."),
-});
-
-/**
- * Defines the schema for a failed operation, including a success flag, a message, and optional error details.
- */
-const errorSchema = z.object({
-  success: z.literal(false),
-  message: z.string().describe("A human-readable error message."),
-  error: z
-    .any()
-    .optional()
-    .describe("Optional technical details about the error."),
-});
+  errorResponseSchema,
+]);
 
 /**
  * Recursively converts the nested folder structure from the API into a TreeNode structure.
  * This is a helper function for building the tree view.
- * @param folder The folder data to convert.
- * @returns The converted TreeNode.
+ * @param {FolderData} folder - The folder data to convert.
+ * @returns {TreeNode} The converted TreeNode.
  */
 function convertFolderToTreeNode(folder: FolderData): TreeNode {
   const node: TreeNode = {
     id: folder.id,
     name: folder.text,
-    type: "folder",
+    type: 'folder',
     children: [],
   };
 
-  // Add detail nodes for clarity in the tree view.
-  const details: TreeNode[] = [
-    { type: "folder-id", id: folder.id * 10 + 1, name: `ID: ${folder.id}` },
-    { type: "type", id: folder.id * 10 + 2, name: `Type: ${folder.type ?? "N/A"}` },
-    {
-      type: "parent-id",
-      id: folder.id * 10 + 3,
-      name: `Parent ID: ${folder.parentId ?? "N/A"}`,
-    },
-    { type: "is-root", id: folder.id * 10 + 4, name: `isRoot: ${folder.isRoot ?? "N/A"}` },
-  ];
-  if (folder.permissionsFolderId !== undefined) {
-    details.push({
-      type: "permissions-folder-id",
-      id: folder.id * 10 + 5,
-      name: `Permissions Folder ID: ${folder.permissionsFolderId}`,
-    });
-  }
-  // Recursively process child folders.
-  if (folder.children && folder.children.length > 0) {
-    node.children!.push(...folder.children.map(convertFolderToTreeNode));
+  if (Array.isArray(folder.children)) {
+    node.children = folder.children.map(convertFolderToTreeNode);
   }
 
   return node;
@@ -123,155 +72,115 @@ function convertFolderToTreeNode(folder: FolderData): TreeNode {
 
 /**
  * Builds a tree structure from a flat list of folder data.
- * @param folders Array of folder data from the API.
- * @returns Array of root-level TreeNode objects.
+ * @param {FolderData[]} folders - Array of folder data from the API.
+ * @returns {TreeNode[]} Array of root-level TreeNode objects.
  */
 function buildFolderTree(folders: FolderData[]): TreeNode[] {
   return folders.map(convertFolderToTreeNode);
 }
 
 /**
- * A custom formatter for rendering folder nodes in the tree view.
- * @param node The TreeNode to format.
- * @returns A string representation of the node.
- */
-function folderNodeFormatter(node: TreeNode): string {
-  if (node.type === "folder") {
-    return `📁 ${node.name}`;
-  }
-  return node.name; // For detail nodes
-}
-
-/**
- * A tool to retrieve folders from the Xibo CMS.
+ * @tool getFolders
+ * @description A tool to retrieve folders from the Xibo CMS.
  * It allows searching for folders with various filters and supports a tree view output.
  */
 export const getFolders = createTool({
-  id: "get-folders",
-  description: "Retrieve folders from Xibo CMS, with optional filtering and tree view.",
+  id: 'get-folders',
+  description: 'Retrieve folders from Xibo CMS, with optional filtering and tree view.',
   inputSchema: z.object({
     folderId: z
       .number()
       .optional()
-      .describe("Filter by a specific folder ID to get its details and children."),
+      .describe('Filter by a specific folder ID to get its details and children.'),
     gridView: z
       .number()
       .optional()
-      .describe("Set to 1 for a grid-like flat list of folders."),
+      .describe('Set to 1 for a grid-like flat list of folders.'),
     folderName: z
       .string()
       .optional()
-      .describe("Filter folders by name. Can be a partial match."),
+      .describe('Filter folders by name. Can be a partial match.'),
     exactFolderName: z
       .number()
       .optional()
-      .describe("Set to 1 to require an exact match for folderName."),
+      .describe('Set to 1 to require an exact match for folderName.'),
     treeView: z
       .boolean()
       .optional()
-      .describe("Set to true to return folders in a structured, hierarchical tree view."),
+      .describe('Set to true to return folders in a structured, hierarchical tree view.'),
   }),
-  outputSchema: z.union([apiResponseSchema, treeResponseSchema, errorSchema]),
-  execute: async ({
-    context,
-  }): Promise<
-    | z.infer<typeof apiResponseSchema>
-    | z.infer<typeof treeResponseSchema>
-    | z.infer<typeof errorSchema>
-  > => {
+  outputSchema,
+  execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      const errorMessage = "CMS URL is not configured.";
-      logger.error(errorMessage);
-      return {
-        success: false,
-        message: errorMessage,
-      };
+      const message = 'CMS URL is not configured.';
+      logger.error(message);
+      return { success: false as const, message };
     }
 
     const url = new URL(`${config.cmsUrl}/api/folders`);
-    if (context.folderId)
-      url.searchParams.append("folderId", String(context.folderId));
-    if (context.gridView)
-      url.searchParams.append("gridView", String(context.gridView));
-    if (context.folderName)
-      url.searchParams.append("folderName", context.folderName);
-    if (context.exactFolderName)
-      url.searchParams.append(
-        "exactFolderName",
-        String(context.exactFolderName)
-      );
+    const params = new URLSearchParams();
 
-    logger.info(`Retrieving folders from: ${url.toString()}`);
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: await getAuthHeaders(),
-    });
-
-    const responseText = await response.text();
-    let responseData: any;
+    if (context.folderId) params.append('folderId', String(context.folderId));
+    if (context.gridView) params.append('gridView', String(context.gridView));
+    if (context.folderName) params.append('folderName', context.folderName);
+    if (context.exactFolderName) {
+      params.append('exactFolderName', String(context.exactFolderName));
+    }
+    url.search = params.toString();
 
     try {
-      responseData = JSON.parse(responseText);
-    } catch (e) {
-      // If parsing fails, it might be an error message string.
-      responseData = responseText;
-    }
+      logger.info({ url: url.toString() }, 'Attempting to retrieve folders.');
 
-    if (!response.ok) {
-      const decodedText = decodeErrorMessage(responseText);
-      const errorMessage = `Failed to retrieve folders. API responded with status ${response.status}.`;
-      logger.error(errorMessage, {
-        status: response.status,
-        response: decodedText,
+      const headers = await getAuthHeaders();
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers,
       });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        const decodedError = decodeErrorMessage(responseData);
+        const message = `Failed to retrieve folders. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: decodedError }, message);
+        return {
+          success: false as const,
+          message,
+          errorData: decodedError,
+        };
+      }
+
+      const validationResult = z.array(folderSchema).safeParse(responseData);
+
+      if (!validationResult.success) {
+        const message = 'Folder response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error,
+          errorData: responseData,
+        };
+      }
+      
+      const folders = validationResult.data;
+
+      if (context.treeView) {
+        const folderTree = buildFolderTree(folders);
+        const nodeFormatter = (node: TreeNode) => `📁 ${node.name}`;
+        const treeResponse = createTreeViewResponse(folders, folderTree, nodeFormatter);
+        return { ...treeResponse, success: true as const };
+      }
+
+      return { success: true as const, data: folders };
+    } catch (error: unknown) {
+      const message = 'An unexpected error occurred while retrieving folders.';
+      logger.error({ error }, message);
       return {
-        success: false,
-        message: `${errorMessage} Message: ${decodedText}`,
-        error: {
-          statusCode: response.status,
-          responseBody: responseData,
-        },
+        success: false as const,
+        message,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
       };
     }
-
-    // The API returns a raw array of folder objects.
-    const validationResult = z.array(folderSchema).safeParse(responseData);
-
-    if (!validationResult.success) {
-      const errorMessage = "Folder response validation failed.";
-      logger.error(errorMessage, {
-        error: validationResult.error.issues,
-        data: responseData,
-      });
-      return {
-        success: false,
-        message: errorMessage,
-        error: {
-          validationIssues: validationResult.error.issues,
-          receivedData: responseData,
-        },
-      };
-    }
-
-    const folders = validationResult.data;
-
-    // Generate and return a tree view if requested.
-    if (context.treeView) {
-      const folderTree = buildFolderTree(folders);
-      logger.info(
-        `Successfully retrieved ${folders.length} folders and generated tree view.`
-      );
-      return createTreeViewResponse(folders, folderTree, folderNodeFormatter);
-    }
-
-    // Otherwise, return the standard success response.
-    logger.info(`Successfully retrieved ${folders.length} folders.`);
-    return {
-      success: true,
-      data: folders,
-    };
   },
-});
-
-export default getFolders; 
+}); 

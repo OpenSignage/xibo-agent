@@ -11,14 +11,14 @@
  */
 
 /**
- * Xibo CMS Folder Management Tools
- * 
- * This module exports folder management tools for the Xibo CMS system.
- * These tools provide functionality for creating, editing, retrieving,
- * and deleting folders within the CMS structure.
+ * @module FolderTools
+ * @description This module aggregates and exports all folder-related tools
+ * for the Xibo CMS. It provides a single point of access for functionalities
+ * such as creating, editing, retrieving, and deleting folders.
  */
+import { addFolder } from './addFolder';
+import { deleteFolder } from './deleteFolder';
+import { editFolder } from './editFolder';
+import { getFolders } from './getFolders';
 
-export { getFolders } from './getFolders';
-export { addFolder } from './addFolder';
-export { editFolder } from './editFolder';
-export { deleteFolder } from './deleteFolder';
+export { addFolder, deleteFolder, editFolder, getFolders };
