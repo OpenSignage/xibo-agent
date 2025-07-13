@@ -17,21 +17,21 @@
 import { z } from "zod";
 
 /**
- * Schema for a Xibo CMS Action.
- * An action represents a command or event that can be sent to a display or display group.
+ * Schema for a Xibo CMS Action, based on the API definition.
+ * An action represents a command or navigable event that can be triggered
+ * on a display or display group.
  */
 export const actionSchema = z.object({
   actionId: z.number().describe("The unique identifier for the action."),
-  action: z.string().nullable().optional().describe("A descriptive name for the action."),
-  type: z.string().nullable().optional().describe("The type of the action (e.g., 'changelayout', 'command')."),
-  displayGroupId: z.number().nullable().optional().describe("The ID of the display group this action belongs to."),
   ownerId: z.number().describe("The ID of the user who owns this action."),
-  isSystem: z.number().nullable().optional().describe("A flag indicating if this is a system action (0 or 1)."),
-  layoutId: z.number().nullable().optional().describe("The layout ID associated with a 'change layout' action."),
-  duration: z.number().nullable().optional().describe("The duration associated with an action."),
-  commandId: z.number().nullable().optional().describe("The command ID associated with a 'command' action."),
-  command: z.string().nullable().optional().describe("The shell command string for a 'shell command' action."),
-  reboot: z.string().nullable().optional().describe("Flag for 'reboot' action type."),
-  powerState: z.string().nullable().optional().describe("The power state for a 'power' action (e.g., 'on', 'off')."),
-  font: z.string().nullable().optional().describe("The font for a 'font' action."),
+  triggerType: z.string().nullable().describe("The action's trigger type (e.g., 'touch', 'webhook')."),
+  triggerCode: z.string().nullable().describe("The action's trigger code."),
+  actionType: z.string().nullable().describe("The action's type (e.g., 'next', 'previous', 'navLayout', 'navWidget')."),
+  source: z.string().nullable().describe("The source of the action (e.g., 'layout', 'region', 'widget')."),
+  sourceId: z.number().nullable().describe("The ID of the action's source object (layoutId, regionId, or widgetId)."),
+  target: z.string().nullable().describe("The target of the action (e.g., 'screen', 'region')."),
+  targetId: z.number().nullable().describe("The ID of the action's target object (e.g., regionId)."),
+  widgetId: z.number().nullable().describe("The widget ID to navigate to for 'navWidget' actions."),
+  layoutCode: z.string().nullable().describe("The layout code identifier for 'navLayout' actions."),
+  layoutId: z.number().nullable().describe("The layout ID associated with this action."),
 }).catchall(z.any()); 
