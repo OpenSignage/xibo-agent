@@ -12,8 +12,8 @@
 
 /**
  * @module addAction
- * @description Provides a tool to add a new action to the Xibo CMS.
- * Actions are events that can be triggered on display groups.
+ * @description Provides a tool to add a new action to a layout in the Xibo CMS.
+ * Actions are events that can be triggered, for example, by touch or a webhook.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
@@ -23,67 +23,59 @@ import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
 import { actionSchema } from "./schemas";
 
-/**
- * Schema for the tool's output, covering success and failure cases.
- */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: actionSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+// Schema for a successful response, containing the newly created action.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: actionSchema,
+});
 
-const actionTypes = z.enum([
-  'displayorder', 'changelayout', 'command', 'screengrab', 
-  'shellcommand', 'reboot', 'power', 'font'
-]).describe("The type of action to create.");
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
+
+/**
+ * Schema for the tool's output, which can be a success or error response.
+ */
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
  * Tool for adding a new action to the Xibo CMS.
+ * It allows creating various types of actions associated with a layout.
  */
 export const addAction = createTool({
   id: "add-action",
-  description: "Add a new action.",
+  description: "Adds a new action to a specified layout in the Xibo CMS.",
   inputSchema: z.object({
-    actionType: actionTypes,
-    displayGroupIds: z.array(z.number()).describe("An array of Display Group IDs this action applies to."),
-    isSystem: z.number().optional().describe("Flag if this is a system action (0 or 1). Default is 0."),
-    layoutId: z.number().optional().describe("Layout ID (required for type 'changelayout')."),
-    duration: z.number().optional().describe("Duration in seconds (required for 'changelayout')."),
-    commandId: z.number().optional().describe("Command ID (required for type 'command')."),
-    command: z.string().optional().describe("Shell command string (required for type 'shellcommand')."),
-    reboot: z.enum(['true', 'false']).optional().describe("Reboot flag (required for type 'reboot')."),
-    powerState: z.enum(['on', 'off']).optional().describe("Power state (required for type 'power')."),
-    font: z.string().optional().describe("System font to install (required for type 'font')."),
+    layoutId: z.number().describe("The ID of the layout to associate this action with. This is a required field."),
+    actionType: z.enum(['next', 'previous', 'navLayout', 'navWidget']).describe("The type of action to create, e.g., 'next', 'previous', 'navLayout', 'navWidget'. Required."),
+    target: z.enum(['screen', 'region']).describe("The target for this action, e.g., 'screen' or 'region'. Required."),
+    targetId: z.string().optional().describe("The ID of the target for this action. This is required if the target is a 'region'."),
+    source: z.enum(['layout', 'region', 'widget']).optional().describe("The source for this action, e.g., 'layout', 'region', or 'widget'."),
+    sourceId: z.number().optional().describe("The ID of the source object (layoutId, regionId, or widgetId)."),
+    triggerType: z.enum(['touch', 'webhook']).optional().describe("The trigger type for the action, e.g., 'touch' or 'webhook'."),
+    triggerCode: z.string().optional().describe("The trigger code for the action."),
+    widgetId: z.number().optional().describe("The Widget ID to navigate to. This is required for 'navWidget' actionType."),
+    layoutCode: z.string().optional().describe("The Layout Code identifier to navigate to. This is required for 'navLayout' actionType."),
   }),
   outputSchema,
   execute: async ({ context }) => {
-    // Manual validation based on type
-    const { actionType, layoutId, duration, commandId, command, reboot, powerState, font } = context;
+    const { actionType, widgetId, layoutCode, target, targetId } = context;
     let errorMessage: string | null = null;
 
-    if (actionType === 'changelayout' && (layoutId === undefined || duration === undefined)) {
-      errorMessage = "layoutId and duration are required for type 'changelayout'.";
-    } else if (actionType === 'command' && commandId === undefined) {
-      errorMessage = "commandId is required for type 'command'.";
-    } else if (actionType === 'shellcommand' && command === undefined) {
-      errorMessage = "command is required for type 'shellcommand'.";
-    } else if (actionType === 'reboot' && reboot === undefined) {
-      errorMessage = "reboot flag is required for type 'reboot'.";
-    } else if (actionType === 'power' && powerState === undefined) {
-      errorMessage = "powerState is required for type 'power'.";
-    } else if (actionType === 'font' && font === undefined) {
-      errorMessage = "font is required for type 'font'.";
+    if (actionType === 'navWidget' && widgetId === undefined) {
+      errorMessage = "The 'widgetId' is required when 'actionType' is 'navWidget'.";
+    } else if (actionType === 'navLayout' && layoutCode === undefined) {
+      errorMessage = "The 'layoutCode' is required when 'actionType' is 'navLayout'.";
+    } else if (target === 'region' && targetId === undefined) {
+      errorMessage = "The 'targetId' is required when 'target' is 'region'.";
     }
 
     if (errorMessage) {
-      logger.error(errorMessage, { context });
+      logger.error({ context }, errorMessage);
       return { success: false as const, message: errorMessage };
     }
 
@@ -94,12 +86,13 @@ export const addAction = createTool({
     }
 
     const url = new URL(`${config.cmsUrl}/api/action`);
-    logger.info("Attempting to add a new action.");
+    logger.info({ url: url.toString(), context }, "Attempting to add a new action.");
 
     try {
       const params = new URLSearchParams();
       Object.entries(context).forEach(([key, value]) => {
         if (value !== undefined) {
+          // The API expects array parameters with `[]` in the key
           if (Array.isArray(value)) {
             value.forEach(val => params.append(`${key}[]`, String(val)));
           } else {
@@ -122,7 +115,7 @@ export const addAction = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to add action. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
@@ -130,11 +123,11 @@ export const addAction = createTool({
 
       if (!validationResult.success) {
         const message = "Add action response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return { 
           success: false as const, 
           message, 
-          error: validationResult.error, 
+          error: validationResult.error.flatten(), 
           errorData: responseData,
         };
       }
@@ -143,7 +136,7 @@ export const addAction = createTool({
 
     } catch (error) {
       const message = "An unexpected error occurred while adding the action.";
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return {
         success: false as const,
         message,

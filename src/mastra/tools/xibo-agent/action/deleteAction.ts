@@ -21,29 +21,33 @@ import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
 import { decodeErrorMessage } from "../utility/error";
 
+// Schema for a successful response (204 No Content).
+const successResponseSchema = z.object({
+  success: z.literal(true),
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
+
 /**
  * Schema for the tool's output, covering success and failure cases.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
 
 /**
  * Tool for deleting a specific action from the Xibo CMS.
  */
 export const deleteAction = createTool({
   id: "delete-action",
-  description: "Delete a specific action.",
+  description: "Deletes a specific action by its ID from the Xibo CMS.",
   inputSchema: z.object({
-    actionId: z.number().describe("The ID of the action to delete."),
+    actionId: z.number().describe("The unique identifier of the action to be deleted."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -54,7 +58,7 @@ export const deleteAction = createTool({
     }
 
     const url = new URL(`${config.cmsUrl}/api/action/${context.actionId}`);
-    logger.info(`Attempting to delete action ID: ${context.actionId}`);
+    logger.info({ url: url.toString() }, `Attempting to delete action ID: ${context.actionId}`);
 
     try {
       const response = await fetch(url.toString(), {
@@ -63,19 +67,26 @@ export const deleteAction = createTool({
       });
 
       if (response.status === 204) {
-        logger.info(`Action ID ${context.actionId} deleted successfully.`);
+        logger.info(`Action with ID ${context.actionId} deleted successfully.`);
         return { success: true as const };
       }
 
-      const responseData = await response.json();
+      // Handle cases where the response is not 204, but not necessarily an error object
+      let responseData;
+      try {
+        responseData = await response.json();
+      } catch (e) {
+        responseData = await response.text();
+      }
+
       const decodedError = decodeErrorMessage(responseData);
       const message = `Failed to delete action. API responded with status ${response.status}.`;
-      logger.error(message, { response: decodedError });
+      logger.error({ status: response.status, response: decodedError }, message);
       return { success: false as const, message, errorData: decodedError };
       
     } catch (error) {
       const message = "An unexpected error occurred while deleting the action.";
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return {
         success: false as const,
         message,
