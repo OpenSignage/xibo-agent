@@ -12,41 +12,42 @@
 
 /**
  * @module exportDataSetData
- * @description Provides a tool to export dataset data as a CSV string from the Xibo CMS.
+ * @description Provides a tool to export all data from a dataset as a CSV string.
  */
 import { z } from 'zod';
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
+
+// Schema for a successful response, containing the CSV data as a string.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.string(),
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
- * Schema for the tool's output, covering success and failure cases.
- * The success data is a string containing the CSV data.
+ * Schema for the tool's output, which can be a success or error response.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.string(),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
  * Tool for exporting dataset data as a CSV string.
  */
 export const exportDataSetData = createTool({
   id: "export-data-set-data",
-  description: "Export the data from a dataset as a CSV string.",
+  description: "Exports all data from a specified dataset as a CSV formatted string.",
   inputSchema: z.object({
-    dataSetId: z.number().describe("The ID of the dataset to export."),
+    dataSetId: z.number().describe("The ID of the dataset to export data from."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -56,10 +57,11 @@ export const exportDataSetData = createTool({
       return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/dataset/${context.dataSetId}/csv`);
-    logger.info(`Attempting to export data from dataset ID: ${context.dataSetId}`);
+    const url = new URL(`${config.cmsUrl}/api/dataset/export/csv/${context.dataSetId}`);
 
     try {
+      logger.info({ url: url.toString() }, `Attempting to export data from dataset ID: ${context.dataSetId}`);
+
       const response = await fetch(url.toString(), {
         method: "GET",
         headers: await getAuthHeaders(),
@@ -68,33 +70,31 @@ export const exportDataSetData = createTool({
       const responseText = await response.text();
 
       if (!response.ok) {
-        // Try to parse as JSON for error details, but fall back to text
         let errorData;
         try {
           errorData = JSON.parse(responseText);
-        } catch {
+        } catch (e) {
           errorData = responseText;
         }
         const decodedError = decodeErrorMessage(errorData);
         const message = `Failed to export dataset data. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
       
-      const message = `Successfully exported data from dataset ID: ${context.dataSetId}.`;
-      logger.info(message);
+      logger.info({ dataSetId: context.dataSetId }, `Successfully exported data from dataset ID: ${context.dataSetId}.`);
       return {
         success: true as const,
         data: responseText,
-        message,
       };
     } catch (error) {
       const message = "An unexpected error occurred while exporting the dataset data.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },

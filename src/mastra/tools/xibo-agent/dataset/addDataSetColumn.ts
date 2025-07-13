@@ -12,7 +12,7 @@
 
 /**
  * @module addDataSetColumn
- * @description Provides a tool to add a new column to a dataset in the Xibo CMS.
+ * @description Provides a tool to add a new column to an existing dataset in the Xibo CMS.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
@@ -20,44 +20,47 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { dataSetColumnSchema } from "./schemas";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
+
+// Schema for a successful response, containing the newly created dataset column.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: dataSetColumnSchema,
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
- * Schema for the tool's output, which can be a success or failure response.
+ * Schema for the tool's output, which can be a success or error response.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: dataSetColumnSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
  * Tool for adding a new column to a dataset.
  */
 export const addDataSetColumn = createTool({
   id: "add-data-set-column",
-  description: "Add a new column to a dataset.",
+  description: "Adds a new column to an existing dataset.",
   inputSchema: z.object({
-    dataSetId: z.number().describe("The ID of the dataset to add the column to."),
-    heading: z.string().describe("The heading for the new column."),
-    dataTypeId: z.number().describe("The ID of the data type for the new column. (1:String, 2:Number, 3:Date, 4:External Image, 5:library Image, 6:HTML)"),
-    columnOrder: z.number().describe("The display order for this column."),
-    dataSetColumnTypeId: z.number().optional().describe("The column type for this column.(1:Value, 2:Formula, 3:Remote)"),
-    listContent: z.string().optional().describe("A comma-separated list of content for drop-downs."),
-    formula: z.string().optional().describe("A formula to calculate the column's value (MySQL SELECT syntax)."),
-    remoteField: z.string().optional().describe("JSON-String to select Data from the Remote DataSet."),
-    showFilter: z.number().optional().describe("Flag to show a filter for this column (0 or 1)."),
-    showSort: z.number().optional().describe("Flag to enable sorting for this column (0 or 1)."),
+    dataSetId: z.number().describe("The ID of the dataset to add the column to. Required."),
+    heading: z.string().describe("The heading (name) for the new column. Required."),
+    dataTypeId: z.number().describe("The ID of the data type for the new column (e.g., 1 for String, 2 for Number). Required."),
+    columnOrder: z.number().describe("The display order for this column. Required."),
+    showFilter: z.number().min(0).max(1).describe("Flag to show a filter for this column in the data entry form (1 for yes, 0 for no). Required."),
+    showSort: z.number().min(0).max(1).describe("Flag to enable sorting by this column in the data entry form (1 for yes, 0 for no). Required."),
+    dataSetColumnTypeId: z.number().describe("The type ID for this column (e.g., 1 for Value, 2 for Formula, 3 for Remote). Required."),
+    listContent: z.string().optional().describe("For dropdown data types, a comma-separated list of values."),
+    formula: z.string().optional().describe("For formula-type columns, the MySQL SELECT syntax formula."),
+    remoteField: z.string().optional().describe("For remote-type columns, the JSON-string to select data from the remote source."),
     tooltip: z.string().optional().describe("Help text to be displayed when entering data for this column."),
-    isRequired: z.number().optional().describe("Flag indicating whether a value must be provided for this column (0 or 1)."),
-    dateFormat: z.string().optional().describe("PHP date format for dates in the remote DataSet source."),
+    isRequired: z.number().min(0).max(1).optional().describe("Flag indicating whether a value must be provided for this column (1 for yes, 0 for no)."),
+    dateFormat: z.string().optional().describe("For date types with a remote source, the PHP date format string."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -69,15 +72,16 @@ export const addDataSetColumn = createTool({
 
     const { dataSetId, ...rest } = context;
     const url = new URL(`${config.cmsUrl}/api/dataset/${dataSetId}/column`);
-    logger.info(`Attempting to add column to dataset ID: ${dataSetId}`);
-
+    
     try {
       const params = new URLSearchParams();
       Object.entries(rest).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
-          params.append(key, value.toString());
+          params.append(key, String(value));
         }
       });
+
+      logger.info({ url: url.toString(), params: params.toString() }, `Attempting to add column to dataset ID: ${dataSetId}`);
 
       const response = await fetch(url.toString(), {
         method: "POST",
@@ -93,36 +97,36 @@ export const addDataSetColumn = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to add dataset column. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
       const validationResult = dataSetColumnSchema.safeParse(responseData);
 
       if (!validationResult.success) {
-        const message = "Dataset column response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        const message = "Add dataset column response validation failed.";
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return {
           success: false as const,
           message,
-          error: validationResult.error,
+          error: validationResult.error.flatten(),
           errorData: responseData,
         };
       }
       
-      const message = `Successfully added column '${validationResult.data.heading}' to dataset.`;
-      logger.info(message, { dataSetColumnId: validationResult.data.dataSetColumnId });
+      logger.info({ dataSetColumnId: validationResult.data.dataSetColumnId }, `Successfully added column '${validationResult.data.heading}' to dataset.`);
       return {
         success: true as const,
         data: validationResult.data,
       };
     } catch (error) {
       const message = "An unexpected error occurred while adding the dataset column.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },

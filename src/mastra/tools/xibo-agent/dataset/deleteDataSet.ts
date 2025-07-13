@@ -12,39 +12,41 @@
 
 /**
  * @module deleteDataSet
- * @description Provides a tool to delete a dataset from the Xibo CMS.
+ * @description Provides a tool to delete a specific dataset from the Xibo CMS.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
+
+// Schema for a successful response (204 No Content).
+const successResponseSchema = z.object({
+  success: z.literal(true),
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
  * Schema for the tool's output, covering success and failure cases.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
- * Tool for deleting a dataset.
+ * Tool for deleting an existing dataset by its ID.
  */
 export const deleteDataSet = createTool({
   id: "delete-data-set",
-  description: "Delete an existing dataset.",
+  description: "Deletes a specific dataset from the Xibo CMS using its ID.",
   inputSchema: z.object({
-    dataSetId: z.number().describe("The ID of the dataset to delete."),
+    dataSetId: z.number().describe("The unique identifier of the dataset to be deleted."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -55,40 +57,40 @@ export const deleteDataSet = createTool({
     }
 
     const url = new URL(`${config.cmsUrl}/api/dataset/${context.dataSetId}`);
-    logger.info(`Attempting to delete dataset ID: ${context.dataSetId}`);
-
+    
     try {
+      logger.info({ url: url.toString() }, `Attempting to delete dataset ID: ${context.dataSetId}`);
+
       const response = await fetch(url.toString(), {
         method: "DELETE",
         headers: await getAuthHeaders(),
       });
 
       if (response.status === 204) {
-        const message = `Successfully deleted dataset ID: ${context.dataSetId}`;
-        logger.info(message);
-        return { success: true as const, message };
+        logger.info(`Successfully deleted dataset ID: ${context.dataSetId}`);
+        return { success: true as const };
       }
 
-      const responseData = await response.json();
-
-      if (!response.ok) {
-        const decodedError = decodeErrorMessage(responseData);
-        const message = `Failed to delete dataset. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
-        return { success: false as const, message, errorData: decodedError };
+      let responseData;
+      try {
+        responseData = await response.json();
+      } catch (e) {
+        responseData = await response.text();
       }
       
-      const message = "The dataset was deleted, but the API returned an unexpected response.";
-      logger.warn(message, { responseData });
-      return { success: true as const, message };
+      const decodedError = decodeErrorMessage(responseData);
+      const message = `Failed to delete dataset. API responded with status ${response.status}.`;
+      logger.error({ status: response.status, response: decodedError }, message);
+      return { success: false as const, message, errorData: decodedError };
 
     } catch (error) {
       const message = "An unexpected error occurred while deleting the dataset.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },

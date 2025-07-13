@@ -12,41 +12,44 @@
 
 /**
  * @module editDataSetConnector
- * @description Provides a tool to edit the data connector for a dataset in the Xibo CMS.
+ * @description Provides a tool to edit the data connector script for a real-time dataset in the Xibo CMS.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
 import { dataSetConnectorSchema } from "./schemas";
+
+// Schema for a successful response, containing the updated dataset connector configuration.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: dataSetConnectorSchema,
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
  * Schema for the tool's output, covering success and failure cases.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: dataSetConnectorSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
- * Tool for editing a dataset's data connector.
+ * Tool for editing a dataset's data connector script.
  */
 export const editDataSetConnector = createTool({
   id: "edit-data-set-connector",
-  description: "Edit the data connector for a dataset.",
+  description: "Edits the data connector script for a real-time dataset.",
   inputSchema: z.object({
-    dataSetId: z.number().describe("The ID of the dataset."),
-    dataConnectorScript: z.string().describe("If isRealTime then provide a script to connect to the data source."),
+    dataSetId: z.number().describe("The ID of the real-time dataset."),
+    dataConnectorScript: z.string().describe("The script to connect to the data source."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -58,11 +61,12 @@ export const editDataSetConnector = createTool({
 
     const { dataSetId, dataConnectorScript } = context;
     const url = new URL(`${config.cmsUrl}/api/dataset/dataconnector/${dataSetId}`);
-    logger.info(`Editing data connector for dataset ID: ${dataSetId}`);
-
+    
     try {
       const params = new URLSearchParams();
       params.append('dataConnectorScript', dataConnectorScript);
+      
+      logger.info({ url: url.toString() }, `Editing data connector for dataset ID: ${dataSetId}`);
 
       const response = await fetch(url.toString(), {
         method: "PUT",
@@ -78,7 +82,7 @@ export const editDataSetConnector = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to edit data connector. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
@@ -86,15 +90,16 @@ export const editDataSetConnector = createTool({
 
       if (!validationResult.success) {
         const message = "Edit data connector response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return {
           success: false as const,
           message,
-          error: validationResult.error,
+          error: validationResult.error.flatten(),
           errorData: responseData,
         };
       }
-
+      
+      logger.info({ dataSetId }, `Successfully edited data connector for dataset ID: ${dataSetId}.`);
       return {
         success: true as const,
         data: validationResult.data,
@@ -102,11 +107,12 @@ export const editDataSetConnector = createTool({
 
     } catch (error) {
       const message = "An unexpected error occurred while editing data connector.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },

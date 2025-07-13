@@ -12,7 +12,8 @@
 
 /**
  * @module copyDataSet
- * @description Provides a tool to copy an existing dataset in the Xibo CMS.
+ * @description Provides a tool to copy an existing dataset in the Xibo CMS,
+ * creating a new dataset with a new name and optional properties.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
@@ -20,34 +21,39 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { dataSetSchema } from "./schemas";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
+
+// Schema for a successful response, containing the newly created dataset.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: dataSetSchema,
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
- * Schema for the tool's output, which can be a success or failure response.
+ * Schema for the tool's output, which can be a success or error response.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: dataSetSchema,
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
- * Tool for copying an existing dataset.
+ * Tool for copying an existing dataset to a new one.
  */
 export const copyDataSet = createTool({
   id: "copy-data-set",
-  description: "Copy an existing dataset.",
+  description: "Copies an existing dataset, creating a new one with a specified name and optional properties.",
   inputSchema: z.object({
-    dataSetId: z.number().describe("The ID of the dataset to copy."),
-    newDataSetName: z.string().describe("The name for the new, copied dataset."),
+    dataSetId: z.number().describe("The ID of the dataset to copy. Required."),
+    dataSet: z.string().describe("The name for the new, copied dataset. Required."),
+    description: z.string().optional().describe("An optional description for the new dataset."),
+    code: z.string().optional().describe("An optional code for the new dataset."),
+    copyRows: z.number().min(0).max(1).optional().describe("Flag to indicate whether to copy all data rows from the source dataset (1 for yes, 0 for no)."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -57,13 +63,18 @@ export const copyDataSet = createTool({
       return { success: false as const, message };
     }
 
-    const { dataSetId, newDataSetName } = context;
-    const url = new URL(`${config.cmsUrl}/api/dataset/${dataSetId}/copy`);
-    logger.info(`Attempting to copy dataset ID ${dataSetId} to '${newDataSetName}'`);
-
+    const { dataSetId, ...rest } = context;
+    const url = new URL(`${config.cmsUrl}/api/dataset/copy/${dataSetId}`);
+    
     try {
+      logger.info({ url: url.toString(), context: rest }, `Attempting to copy dataset ID ${dataSetId} to '${context.dataSet}'`);
+
       const params = new URLSearchParams();
-      params.append("newDataSetName", newDataSetName);
+      Object.entries(rest).forEach(([key, value]) => {
+        if (value !== undefined) {
+            params.append(key, String(value));
+        }
+      });
 
       const response = await fetch(url.toString(), {
         method: "POST",
@@ -79,7 +90,7 @@ export const copyDataSet = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to copy dataset. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
@@ -87,29 +98,28 @@ export const copyDataSet = createTool({
 
       if (!validationResult.success) {
         const message = "Copied dataset response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return {
           success: false as const,
           message,
-          error: validationResult.error,
+          error: validationResult.error.flatten(),
           errorData: responseData,
         };
       }
       
-      const message = `Successfully copied dataset to '${validationResult.data.dataSet}'.`;
-      logger.info(message, { newDataSetId: validationResult.data.dataSetId });
+      logger.info({ newDataSetId: validationResult.data.dataSetId }, `Successfully copied dataset to '${validationResult.data.dataSet}'.`);
       return {
         success: true as const,
         data: validationResult.data,
-        message,
       };
     } catch (error) {
       const message = "An unexpected error occurred while copying the dataset.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },

@@ -12,40 +12,43 @@
 
 /**
  * @module deleteDataSetColumn
- * @description Provides a tool to delete a column from a dataset in the Xibo CMS.
+ * @description Provides a tool to delete a specific column from a dataset in the Xibo CMS.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
+
+// Schema for a successful response (204 No Content).
+const successResponseSchema = z.object({
+  success: z.literal(true),
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
  * Schema for the tool's output, covering success and failure cases.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
 
 /**
- * Tool for deleting a dataset column.
+ * Tool for deleting a specific column from a dataset.
  */
 export const deleteDataSetColumn = createTool({
   id: "delete-data-set-column",
-  description: "Delete a column from a dataset.",
+  description: "Deletes a specific column from a dataset using its ID.",
   inputSchema: z.object({
-    dataSetId: z.number().describe("The ID of the dataset."),
-    columnId: z.number().describe("The ID of the column to delete."),
+    dataSetId: z.number().describe("The ID of the dataset from which to delete the column. Required."),
+    dataSetColumnId: z.number().describe("The ID of the column to delete. Required."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -55,42 +58,42 @@ export const deleteDataSetColumn = createTool({
       return { success: false as const, message };
     }
 
-    const { dataSetId, columnId } = context;
-    const url = new URL(`${config.cmsUrl}/api/dataset/${dataSetId}/column/${columnId}`);
-    logger.info(`Attempting to delete column ${columnId} from dataset ID: ${dataSetId}`);
-
+    const { dataSetId, dataSetColumnId } = context;
+    const url = new URL(`${config.cmsUrl}/api/dataset/${dataSetId}/column/${dataSetColumnId}`);
+    
     try {
+      logger.info({ url: url.toString() }, `Attempting to delete column ${dataSetColumnId} from dataset ID: ${dataSetId}`);
+
       const response = await fetch(url.toString(), {
         method: "DELETE",
         headers: await getAuthHeaders(),
       });
 
       if (response.status === 204) {
-        const message = `Successfully deleted column ${columnId} from dataset ID: ${dataSetId}`;
-        logger.info(message);
-        return { success: true as const, message };
+        logger.info(`Successfully deleted column ${dataSetColumnId} from dataset ID: ${dataSetId}`);
+        return { success: true as const };
       }
 
-      const responseData = await response.json();
-
-      if (!response.ok) {
-        const decodedError = decodeErrorMessage(responseData);
-        const message = `Failed to delete dataset column. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
-        return { success: false as const, message, errorData: decodedError };
+      let responseData;
+      try {
+        responseData = await response.json();
+      } catch (e) {
+        responseData = await response.text();
       }
-      
-      const message = "The dataset column was deleted, but the API returned an unexpected response.";
-      logger.warn(message, { responseData });
-      return { success: true as const, message };
+
+      const decodedError = decodeErrorMessage(responseData);
+      const message = `Failed to delete dataset column. API responded with status ${response.status}.`;
+      logger.error({ status: response.status, response: decodedError }, message);
+      return { success: false as const, message, errorData: decodedError };
 
     } catch (error) {
       const message = "An unexpected error occurred while deleting the dataset column.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },

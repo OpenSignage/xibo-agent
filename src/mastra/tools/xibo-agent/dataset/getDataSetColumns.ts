@@ -12,7 +12,8 @@
 
 /**
  * @module getDataSetColumns
- * @description Provides a tool to retrieve all columns for a specific dataset from the Xibo CMS.
+ * @description Provides a tool to retrieve all columns for a specific dataset from the Xibo CMS,
+ * with an option to filter by a specific column ID.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
@@ -20,34 +21,36 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { dataSetColumnSchema } from "./schemas";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
+
+// Schema for a successful response, containing an array of dataset columns.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(dataSetColumnSchema),
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
- * Schema for the tool's output, covering success and failure cases.
- * The success data is an array of dataset columns.
+ * Schema for the tool's output, which can be a success or error response.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.array(dataSetColumnSchema),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
- * Tool for retrieving all columns for a specific dataset.
+ * Tool for retrieving columns from a specific dataset.
  */
 export const getDataSetColumns = createTool({
   id: "get-data-set-columns",
-  description: "Get all columns for a specific dataset.",
+  description: "Retrieves all columns for a specific dataset, with an option to filter by column ID.",
   inputSchema: z.object({
-    dataSetId: z.number().describe("The ID of the dataset to retrieve columns for."),
+    dataSetId: z.number().describe("The ID of the dataset to retrieve columns for. Required."),
+    dataSetColumnId: z.number().optional().describe("Filter the results by a specific column ID."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -57,10 +60,17 @@ export const getDataSetColumns = createTool({
       return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/dataset/${context.dataSetId}/column`);
-    logger.info(`Requesting columns for dataset ID: ${context.dataSetId}`);
+    const { dataSetId, dataSetColumnId } = context;
+    const url = new URL(`${config.cmsUrl}/api/dataset/${dataSetId}/column`);
+    const params = new URLSearchParams();
+    if (dataSetColumnId) {
+      params.append('dataSetColumnId', String(dataSetColumnId));
+    }
+    url.search = params.toString();
 
     try {
+      logger.info({ url: url.toString() }, `Requesting columns for dataset ID: ${dataSetId}`);
+
       const response = await fetch(url.toString(), {
         method: "GET",
         headers: await getAuthHeaders(),
@@ -71,7 +81,7 @@ export const getDataSetColumns = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to retrieve dataset columns. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
@@ -79,29 +89,28 @@ export const getDataSetColumns = createTool({
 
       if (!validationResult.success) {
         const message = "Dataset columns response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return {
           success: false as const,
           message,
-          error: validationResult.error,
+          error: validationResult.error.flatten(),
           errorData: responseData,
         };
       }
       
-      const message = `Successfully retrieved ${validationResult.data.length} columns for dataset ID: ${context.dataSetId}.`;
-      logger.info(message);
+      logger.info({ count: validationResult.data.length }, `Successfully retrieved ${validationResult.data.length} columns for dataset ID: ${dataSetId}.`);
       return {
         success: true as const,
         data: validationResult.data,
-        message,
       };
     } catch (error) {
       const message = "An unexpected error occurred while retrieving dataset columns.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },
