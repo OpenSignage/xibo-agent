@@ -19,47 +19,48 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
 
 /**
- * Schema for the JSON data structure required for import.
+ * Schema for the JSON data structure required for import, matching the Xibo API specification.
  */
 const importJsonSchema = z.object({
-  uniqueKeys: z.array(z.string()).describe("An array of column headings to use as a unique key for matching rows."),
-  rows: z.array(
-    z.array(z.object({
-      key: z.string().describe("The column heading."),
-      value: z.any().describe("The value for the column."),
-    }))
-  ).describe("An array of rows, where each row is an array of key-value objects."),
+  uniqueKeys: z.array(z.string()).describe("An array of column headings to use as a unique key for matching and updating rows."),
+  rows: z.array(z.record(z.string(), z.any())).describe("An array of row objects, where each object's keys are column headings and values are the cell data."),
+});
+
+/**
+ * Schema for a successful response. The API response structure can vary.
+ */
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.any(),
+});
+
+/**
+ * Schema for a generic error response.
+ */
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
 });
 
 /**
  * Schema for the tool's output, covering success and failure cases.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.any(), // The response can vary, so we use a general type.
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
  * Tool for importing data from a JSON object into a dataset.
  */
 export const importDataSetDataJson = createTool({
   id: "import-data-set-data-json",
-  description: "Import data from a JSON object into a dataset.",
+  description: "Imports data from a structured JSON object into a specified dataset.",
   inputSchema: z.object({
     dataSetId: z.number().describe("The ID of the dataset to import data into."),
-    jsonData: importJsonSchema.describe("The JSON object containing the data to import."),
+    jsonData: importJsonSchema.describe("The JSON object containing the data to import, conforming to the API's expected structure."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -71,29 +72,17 @@ export const importDataSetDataJson = createTool({
 
     const { dataSetId, jsonData } = context;
     const url = new URL(`${config.cmsUrl}/api/dataset/importjson/${dataSetId}`);
-    logger.info(`Attempting to import JSON data into dataset ID: ${dataSetId}`);
-
-    // Transform the input data into the format the API expects
-    const transformedRows = jsonData.rows.map(rowArray => {
-      const rowObject: { [key: string]: any } = {};
-      rowArray.forEach(item => {
-        rowObject[item.key] = item.value;
-      });
-      return rowObject;
-    });
-    const apiBody = {
-      uniqueKeys: jsonData.uniqueKeys,
-      rows: transformedRows,
-    };
-
+    
     try {
+      logger.info({ dataSetId }, `Attempting to import JSON data into dataset ID: ${dataSetId}`);
+
       const response = await fetch(url.toString(), {
         method: "POST",
         headers: {
           ...await getAuthHeaders(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(apiBody),
+        body: JSON.stringify(jsonData),
       });
 
       const responseData = await response.json();
@@ -101,24 +90,23 @@ export const importDataSetDataJson = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to import JSON data. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
       
-      const message = `Successfully imported JSON data into dataset ID: ${dataSetId}.`;
-      logger.info(message, { response: responseData });
+      logger.info({ dataSetId, response: responseData }, `Successfully imported JSON data into dataset ID: ${dataSetId}.`);
       return {
         success: true as const,
         data: responseData,
-        message,
       };
     } catch (error) {
       const message = "An unexpected error occurred while importing JSON data.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },

@@ -19,35 +19,37 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
+
+// Schema for a successful response. The API response structure can vary.
+const successResponseSchema = z.object({
+    success: z.literal(true),
+    data: z.any(),
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
  * Schema for the tool's output, covering success and failure cases.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.any(), // The response can vary, so we use a general type.
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
  * Tool for importing data from a CSV string into a dataset.
  */
 export const importDataSetData = createTool({
   id: "import-data-set-data",
-  description: "Import data from a CSV string into a dataset.",
+  description: "Imports data from a CSV string into a specified dataset.",
   inputSchema: z.object({
     dataSetId: z.number().describe("The ID of the dataset to import data into."),
-    csvData: z.string().describe("The CSV data as a string."),
-    overwrite: z.boolean().optional().describe("Whether to overwrite existing data in the dataset."),
+    csvData: z.string().describe("The CSV formatted data as a single string."),
+    overwrite: z.boolean().optional().describe("Set to true to overwrite all existing data in the dataset."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -57,15 +59,17 @@ export const importDataSetData = createTool({
       return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/dataset/${context.dataSetId}/import`);
-    logger.info(`Attempting to import data into dataset ID: ${context.dataSetId}`);
-
+    const { dataSetId, csvData, overwrite } = context;
+    const url = new URL(`${config.cmsUrl}/api/dataset/import/${dataSetId}`);
+    
     try {
+      logger.info({ dataSetId, overwrite }, `Attempting to import data into dataset ID: ${dataSetId}`);
+
       const formData = new FormData();
-      const csvBlob = new Blob([context.csvData], { type: 'text/csv' });
+      const csvBlob = new Blob([csvData], { type: 'text/csv' });
       formData.append("files", csvBlob, "import.csv");
 
-      if (context.overwrite) {
+      if (overwrite) {
         formData.append("overwrite", "1");
       }
 
@@ -80,24 +84,23 @@ export const importDataSetData = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to import dataset data. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
       
-      const message = `Successfully imported data into dataset ID: ${context.dataSetId}.`;
-      logger.info(message, { response: responseData });
+      logger.info({ dataSetId, response: responseData }, `Successfully imported data into dataset ID: ${dataSetId}.`);
       return {
         success: true as const,
         data: responseData,
-        message,
       };
     } catch (error) {
       const message = "An unexpected error occurred while importing dataset data.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },

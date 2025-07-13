@@ -12,7 +12,7 @@
 
 /**
  * @module selectDataSetFolder
- * @description Provides a tool to assign a dataset to a different folder in the Xibo CMS.
+ * @description Provides a tool to move a dataset to a different folder in the Xibo CMS.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
@@ -20,34 +20,36 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { dataSetSchema } from "./schemas";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
+
+// Schema for a successful response, containing the updated dataset.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: dataSetSchema,
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
- * Schema for the tool's output, covering success and failure cases.
+ * Schema for the tool's output, which can be a success or error response.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: dataSetSchema,
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
  * Tool for assigning a dataset to a different folder.
  */
 export const selectDataSetFolder = createTool({
   id: "select-data-set-folder",
-  description: "Assign a dataset to a different folder.",
+  description: "Moves a dataset to a different folder.",
   inputSchema: z.object({
     dataSetId: z.number().describe("The ID of the dataset to move."),
-    folderId: z.number().describe("The ID of the target folder."),
+    folderId: z.number().describe("The ID of the destination folder."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -58,12 +60,13 @@ export const selectDataSetFolder = createTool({
     }
 
     const { dataSetId, folderId } = context;
-    const url = new URL(`${config.cmsUrl}/api/dataset/${dataSetId}/folder`);
-    logger.info(`Attempting to move dataset ${dataSetId} to folder ${folderId}`);
+    const url = new URL(`${config.cmsUrl}/api/dataset/${dataSetId}/selectfolder`);
 
     try {
+      logger.info({ url: url.toString(), context }, `Attempting to move dataset ${dataSetId} to folder ${folderId}`);
+
       const params = new URLSearchParams();
-      params.append("folderId", folderId.toString());
+      params.append("folderId", String(folderId));
 
       const response = await fetch(url.toString(), {
         method: "PUT",
@@ -79,7 +82,7 @@ export const selectDataSetFolder = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to select folder for dataset. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
@@ -87,29 +90,28 @@ export const selectDataSetFolder = createTool({
 
       if (!validationResult.success) {
         const message = "Select dataset folder response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return {
           success: false as const,
           message,
-          error: validationResult.error,
+          error: validationResult.error.flatten(),
           errorData: responseData,
         };
       }
       
-      const message = `Successfully moved dataset ${dataSetId} to folder ${folderId}.`;
-      logger.info(message);
+      logger.info({ dataSetId, folderId }, `Successfully moved dataset ${dataSetId} to folder ${folderId}.`);
       return {
         success: true as const,
         data: validationResult.data,
-        message,
       };
     } catch (error) {
       const message = "An unexpected error occurred while selecting the dataset folder.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },

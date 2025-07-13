@@ -12,7 +12,7 @@
 
 /**
  * @module editDataSetRss
- * @description Provides a tool to edit an existing RSS feed for a dataset in the Xibo CMS.
+ * @description Provides a tool to edit an existing RSS feed configuration for a dataset in the Xibo CMS.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
@@ -20,38 +20,42 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { dataSetRssSchema } from "./schemas";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
+
+// Schema for a successful response, containing the edited RSS feed configuration.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: dataSetRssSchema,
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
  * Schema for the tool's output, covering success and failure cases.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: dataSetRssSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
- * Tool for editing an existing RSS feed for a dataset.
+ * Tool for editing an existing RSS feed configuration for a dataset.
  */
 export const editDataSetRss = createTool({
   id: "edit-data-set-rss",
-  description: "Edit an existing RSS feed for a dataset.",
+  description: "Edits an existing RSS feed configuration for a specified dataset.",
   inputSchema: z.object({
-    dataSetId: z.number().describe("The ID of the dataset."),
-    rssId: z.number().describe("The ID of the RSS feed to edit."),
-    title: z.string().describe("The title for the RSS."),
-    summaryColumnId: z.number().describe("The columnId to be used as each item summary."),
-    contentColumnId: z.number().describe("The columnId to be used as each item content."),
-    publishedDateColumnId: z.number().describe("The columnId to be used as each item published date."),
-    regeneratePsk: z.number().describe("Flag to regenerate the PSK (Pre-Shared Key). Use 1 for yes."),
+    dataSetId: z.number().describe("The ID of the dataset the RSS feed belongs to. Required."),
+    rssId: z.number().describe("The ID of the RSS feed to edit. Required."),
+    title: z.string().describe("The new title for the RSS feed. Required."),
+    author: z.string().describe("The new author for the RSS feed. Required."),
+    summaryColumnId: z.number().describe("The ID of the column to be used for the item summary. Required."),
+    contentColumnId: z.number().describe("The ID of the column to be used for the item content. Required."),
+    publishedDateColumnId: z.number().describe("The ID of the column to be used for the item published date. Required."),
+    regeneratePsk: z.number().min(0).max(1).optional().describe("Flag to regenerate the Pre-Shared Key (1 for yes, 0 for no)."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -61,17 +65,18 @@ export const editDataSetRss = createTool({
       return { success: false as const, message };
     }
 
-    const { dataSetId, rssId, title, summaryColumnId, contentColumnId, publishedDateColumnId, regeneratePsk } = context;
+    const { dataSetId, rssId, ...rest } = context;
     const url = new URL(`${config.cmsUrl}/api/dataset/${dataSetId}/rss/${rssId}`);
-    logger.info(`Attempting to edit RSS feed ${rssId} for dataset ID: ${dataSetId}`);
 
     try {
       const params = new URLSearchParams();
-      params.append('title', title);
-      params.append('summaryColumnId', String(summaryColumnId));
-      params.append('contentColumnId', String(contentColumnId));
-      params.append('publishedDateColumnId', String(publishedDateColumnId));
-      params.append('regeneratePsk', String(regeneratePsk));
+      Object.entries(rest).forEach(([key, value]) => {
+          if (value !== undefined) {
+              params.append(key, String(value));
+          }
+      });
+      
+      logger.info({ url: url.toString(), params: params.toString() }, `Attempting to edit RSS feed ${rssId} for dataset ID: ${dataSetId}`);
 
       const response = await fetch(url.toString(), {
         method: "PUT",
@@ -87,7 +92,7 @@ export const editDataSetRss = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to edit RSS feed. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
@@ -95,26 +100,28 @@ export const editDataSetRss = createTool({
 
       if (!validationResult.success) {
         const message = "Edit RSS feed response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return {
           success: false as const,
           message,
-          error: validationResult.error,
+          error: validationResult.error.flatten(),
           errorData: responseData,
         };
       }
       
+      logger.info({ rssId: validationResult.data.rssId }, `Successfully edited RSS feed for dataset ID: ${dataSetId}.`);
       return {
         success: true as const,
         data: validationResult.data,
       };
     } catch (error) {
       const message = "An unexpected error occurred while editing the RSS feed.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },

@@ -20,45 +20,48 @@ import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { dataSetColumnSchema } from "./schemas";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
+
+// Schema for a successful response, containing the edited dataset column.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: dataSetColumnSchema,
+});
+
+// Schema for a generic error response.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
 
 /**
- * Schema for the tool's output, covering success and failure cases.
+ * Schema for the tool's output, which can be a success or error response.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: dataSetColumnSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 /**
- * Tool for editing an existing dataset column.
+ * Tool for editing an existing column in a dataset.
  */
 export const editDataSetColumn = createTool({
   id: "edit-data-set-column",
-  description: "Edit an existing column in a dataset.",
+  description: "Edits an existing column in a specified dataset.",
   inputSchema: z.object({
-    dataSetId: z.number().describe("The ID of the dataset the column belongs to."),
-    columnId: z.number().describe("The ID of the column to edit."),
-    heading: z.string().optional().describe("A new heading for the column."),
-    dataTypeId: z.number().optional().describe("A new data type ID for the column. (1:String, 2:Number, 3:Date, 4:External Image, 5:library Image, 6:HTML)"),
-    dataSetColumnTypeId: z.number().optional().describe("A new column type ID for this column. (1:Value, 2:Formula, 3:Remote)"),
-    listContent: z.string().optional().describe("New comma-separated list of content for drop-downs."),
-    columnOrder: z.number().optional().describe("A new display order for the column."),
-    formula: z.string().optional().describe("A new formula to calculate the column's value (MySQL SELECT syntax)."),
-    remoteField: z.string().optional().describe("A new JSON-String to select Data from the Remote DataSet."),
-    showFilter: z.number().optional().describe("Flag to show a filter for this column (0 or 1)."),
-    showSort: z.number().optional().describe("Flag to enable sorting for this column (0 or 1)."),
-    tooltip: z.string().optional().describe("New help text to be displayed when entering data for this column."),
-    isRequired: z.number().optional().describe("Flag indicating whether a value must be provided for this column (0 or 1)."),
-    dateFormat: z.string().optional().describe("New PHP date format for dates in the remote DataSet source."),
+    dataSetId: z.number().describe("The ID of the dataset the column belongs to. Required."),
+    dataSetColumnId: z.number().describe("The ID of the column to edit. Required."),
+    heading: z.string().describe("A new heading for the column. Required by API."),
+    columnOrder: z.number().describe("A new display order for the column. Required by API."),
+    dataTypeId: z.number().describe("A new data type ID for the column (e.g., 1 for String). Required by API."),
+    dataSetColumnTypeId: z.number().describe("A new column type ID for this column (e.g., 1 for Value). Required by API."),
+    showFilter: z.number().min(0).max(1).describe("Flag to show a filter for this column (1 for yes, 0 for no). Required by API."),
+    showSort: z.number().min(0).max(1).describe("Flag to enable sorting for this column (1 for yes, 0 for no). Required by API."),
+    listContent: z.string().optional().describe("For dropdown types, a new comma-separated list of values."),
+    formula: z.string().optional().describe("For formula types, a new MySQL SELECT syntax formula."),
+    remoteField: z.string().optional().describe("For remote types, a new JSON-String to select data from the remote source."),
+    tooltip: z.string().optional().describe("New help text to be displayed when entering data."),
+    isRequired: z.number().min(0).max(1).optional().describe("Flag if a value must be provided (1 for yes, 0 for no)."),
+    dateFormat: z.string().optional().describe("For remote date types, a new PHP date format string."),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -68,15 +71,16 @@ export const editDataSetColumn = createTool({
       return { success: false as const, message };
     }
 
-    const { dataSetId, columnId, ...rest } = context;
-    const url = new URL(`${config.cmsUrl}/api/dataset/${dataSetId}/column/${columnId}`);
-    logger.info(`Attempting to edit column ${columnId} in dataset ID: ${dataSetId}`);
-
+    const { dataSetId, dataSetColumnId, ...rest } = context;
+    const url = new URL(`${config.cmsUrl}/api/dataset/${dataSetId}/column/${dataSetColumnId}`);
+    
     try {
+      logger.info({ url: url.toString(), context: rest }, `Attempting to edit column ${dataSetColumnId} in dataset ID: ${dataSetId}`);
+
       const params = new URLSearchParams();
       Object.entries(rest).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
-          params.append(key, value.toString());
+          params.append(key, String(value));
         }
       });
 
@@ -94,7 +98,7 @@ export const editDataSetColumn = createTool({
       if (!response.ok) {
         const decodedError = decodeErrorMessage(responseData);
         const message = `Failed to edit dataset column. API responded with status ${response.status}.`;
-        logger.error(message, { response: decodedError });
+        logger.error({ status: response.status, response: decodedError }, message);
         return { success: false as const, message, errorData: decodedError };
       }
 
@@ -102,28 +106,28 @@ export const editDataSetColumn = createTool({
 
       if (!validationResult.success) {
         const message = "Edited dataset column response validation failed.";
-        logger.error(message, { error: validationResult.error, data: responseData });
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return {
           success: false as const,
           message,
-          error: validationResult.error,
+          error: validationResult.error.flatten(),
           errorData: responseData,
         };
       }
       
-      const message = `Successfully edited column: ${validationResult.data.heading}`;
-      logger.info(message, { dataSetColumnId: validationResult.data.dataSetColumnId });
+      logger.info({ dataSetColumnId: validationResult.data.dataSetColumnId }, `Successfully edited column: ${validationResult.data.heading}`);
       return {
         success: true as const,
         data: validationResult.data,
       };
     } catch (error) {
       const message = "An unexpected error occurred while editing the dataset column.";
-      logger.error(message, { error });
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
       return {
         success: false as const,
         message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        error: processedError,
       };
     }
   },
