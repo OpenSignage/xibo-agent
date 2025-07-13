@@ -13,19 +13,17 @@
 /**
  * @module getDisplayVenues
  * @description Provides a tool to retrieve all display venues from the Xibo CMS.
- * It implements the /api/displayvenue endpoint and handles the necessary validation
- * and error handling.
+ * It implements the /api/displayvenue endpoint.
  */
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
 
 /**
- * Defines the schema for a single display venue.
- * This ensures that data received from the Xibo API conforms to the expected structure.
+ * Defines the schema for a single display venue object, based on the Xibo API.
  */
 const displayVenueSchema = z.object({
   venueId: z.number().describe("The unique ID of the venue."),
@@ -33,9 +31,9 @@ const displayVenueSchema = z.object({
 });
 
 /**
- * Defines the schema for a successful response.
+ * Defines the schema for a successful response, containing an array of display venues.
  */
-const successSchema = z.object({
+const successResponseSchema = z.object({
   success: z.literal(true),
   data: z
     .array(displayVenueSchema)
@@ -43,15 +41,19 @@ const successSchema = z.object({
 });
 
 /**
- * Defines the schema for a failed operation.
+ * Defines the schema for a generic error response.
  */
-const errorSchema = z.object({
+const errorResponseSchema = z.object({
   success: z.literal(false),
   message: z.string().describe("A human-readable error message."),
   error: z
     .any()
     .optional()
     .describe("Optional technical details about the error."),
+  errorData: z
+    .any()
+    .optional()
+    .describe("Optional raw error data returned from the API."),
 });
 
 /**
@@ -59,85 +61,71 @@ const errorSchema = z.object({
  */
 export const getDisplayVenues = createTool({
   id: "get-display-venues",
-  description: "Retrieve all display venues.",
-  inputSchema: z.object({
-    _placeholder: z
-      .string()
-      .optional()
-      .describe("This tool does not require input parameters"),
-  }),
-  outputSchema: z.union([successSchema, errorSchema]),
+  description: "Retrieves a list of all display venues available in the Xibo CMS.",
+  inputSchema: z.object({}).describe("This tool does not require any input parameters."),
+  outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async (): Promise<
-    z.infer<typeof successSchema> | z.infer<typeof errorSchema>
+    z.infer<typeof successResponseSchema> | z.infer<typeof errorResponseSchema>
   > => {
     if (!config.cmsUrl) {
-      const errorMessage = "CMS URL is not configured.";
-      logger.error(`getDisplayVenues: ${errorMessage}`);
+      const message = "CMS URL is not configured.";
+      logger.error(message);
       return {
         success: false,
-        message: errorMessage,
+        message,
       };
     }
 
-    const url = `${config.cmsUrl}/api/displayvenue`;
-    logger.info(`Requesting all display venues from: ${url}`);
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: await getAuthHeaders(),
-    });
-
-    const responseText = await response.text();
-    let responseData: any;
+    const url = new URL(`${config.cmsUrl}/api/displayvenue`);
+    
     try {
-      responseData = JSON.parse(responseText);
-    } catch (e) {
-      responseData = responseText;
-    }
+      logger.info({ url: url.toString() }, "Requesting all display venues from Xibo CMS.");
 
-    if (!response.ok) {
-      const decodedText = decodeErrorMessage(responseText);
-      const errorMessage = `Failed to get display venues. API responded with status ${response.status}.`;
-      logger.error(errorMessage, {
-        status: response.status,
-        response: decodedText,
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: await getAuthHeaders(),
       });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        const decodedError = decodeErrorMessage(responseData);
+        const message = `Failed to get display venues. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: decodedError }, message);
+        return {
+          success: false,
+          message,
+          errorData: decodedError,
+        };
+      }
+
+      const validationResult = z.array(displayVenueSchema).safeParse(responseData);
+
+      if (!validationResult.success) {
+        const message = "Display venues response validation failed.";
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return {
+          success: false,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
+      }
+
+      logger.info({ count: validationResult.data.length }, `Successfully retrieved ${validationResult.data.length} display venue records.`);
       return {
-        success: false,
-        message: `${errorMessage} Message: ${decodedText}`,
-        error: {
-          statusCode: response.status,
-          responseBody: responseData,
-        },
+        success: true,
+        data: validationResult.data,
       };
+    } catch (error) {
+        const message = "An unexpected error occurred while getting display venues.";
+        const processedError = processError(error);
+        logger.error({ error: processedError }, message);
+        return {
+            success: false,
+            message,
+            error: processedError,
+        };
     }
-
-    const validationResult = z.array(displayVenueSchema).safeParse(responseData);
-
-    if (!validationResult.success) {
-      const errorMessage = "Display venues response validation failed.";
-      logger.error(errorMessage, {
-        error: validationResult.error.issues,
-        data: responseData,
-      });
-      return {
-        success: false,
-        message: errorMessage,
-        error: {
-          validationIssues: validationResult.error.issues,
-          receivedData: responseData,
-        },
-      };
-    }
-
-    logger.info(
-      `Successfully retrieved ${validationResult.data.length} display venue records.`
-    );
-    return {
-      success: true,
-      data: validationResult.data,
-    };
   },
-});
-
-export default getDisplayVenues; 
+}); 

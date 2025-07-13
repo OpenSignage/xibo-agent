@@ -40,4 +40,24 @@ export function decodeErrorMessage(text: string): string {
     // If not valid JSON, return as is
     return text;
   }
+}
+
+/**
+ * Processes an unknown error object and returns a serializable error representation.
+ *
+ * @param error The unknown error object to process.
+ * @returns A serializable object containing the error details.
+ */
+export function processError(error: unknown): { name: string; message: string; stack?: string } {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+  return {
+    name: "UnknownError",
+    message: typeof error === "string" ? error : JSON.stringify(error),
+  };
 } 
