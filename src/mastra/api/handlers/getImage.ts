@@ -17,6 +17,7 @@ import { Context } from 'hono';
 import * as path from 'path';
 import * as fs from 'fs';
 import { logger } from './logger';
+import { config } from '../../tools/xibo-agent/config';
 
 export const getImageHandler = async (c: Context) => {
   try {
@@ -26,11 +27,8 @@ export const getImageHandler = async (c: Context) => {
       return c.json({ error: 'No filename provided' }, 400);
     }
 
-    // Debug: Check current working directory
-    logger.info('getImage: Current working directory', { cwd: process.cwd() });
-
-    // Build image file path
-    const imagePath = path.join(process.cwd(), '..', '..', 'persistent_data', 'generated', filename);
+    // Build image file path from config
+    const imagePath = path.join(config.generatedDir, filename);
 
     // Check if file exists
     if (!fs.existsSync(imagePath)) {

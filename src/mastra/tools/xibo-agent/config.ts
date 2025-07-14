@@ -23,12 +23,14 @@ export const config = {
   clientId: process.env.XIBO_CLIENT_ID || "",
   clientSecret: process.env.XIBO_CLIENT_SECRET || "",
   geminiApiKey: process.env.GEMINI_API_KEY || "",
+  apiUrl: "http://localhost:4111/ext-api",
 
   // Define directories relative to the project root for stability.
   projectRoot: projectRoot,
   uploadDir: process.env.XIBO_UPLOAD_DIR || path.join(projectRoot, 'persistent_data', 'uploads'),
   downloadsDir: path.join(projectRoot, 'persistent_data', 'downloads'),
   generatedDir: path.join(projectRoot, 'persistent_data', 'generated'),
+  previewFontImageDir: path.join(projectRoot, 'persistent_data', 'previewFontImage'),
   logsDir: path.join(projectRoot, 'logs'),
   publicDir: path.join(projectRoot, 'public'),
 } as const;
