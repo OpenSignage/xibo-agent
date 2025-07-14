@@ -12,13 +12,19 @@
 
 /**
  * @module getGoogleFonts
- * @description Provides a tool to fetch Google Fonts metadata from the Google Fonts Developer API.
+ * @description Provides a tool to fetch Google Fonts metadata from the Google Fonts Developer API
+ * and optionally generate a preview image for each font.
  * API specification: https://developers.google.com/fonts/docs/developer_api
  */
 
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { logger } from '../../../index';
+import { config } from '../config';
+import * as opentype from 'opentype.js';
+import { createCanvas } from 'canvas';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Valid sort options for Google Fonts API
 const SORT_OPTIONS = ['alpha', 'date', 'popularity', 'style', 'trending'] as const;
@@ -41,6 +47,7 @@ const googleFontItemSchema = z.object({
   files: z.record(z.string().url()),
   category: z.string(),
   kind: z.string(),
+  previewUrl: z.string().optional().describe("The URL to the generated preview image."),
 });
 
 /**
@@ -62,31 +69,38 @@ const errorSchema = z.object({
   error: z.any().optional().describe("Optional technical details about the error."),
 });
 
-/**
- * Tool to retrieve font information from Google Fonts API
- * 
- * This tool fetches metadata about available fonts from the Google Fonts Developer API.
- * It allows filtering by various criteria and sorting the results.
- * API key is automatically loaded from environment variables.
- */
-export const getGoogleFonts = createTool({
-  id: 'get-google-fonts',
-  description: 'Fetches font metadata from the Google Fonts Developer API',
-  inputSchema: z.object({
+const inputSchema = z.object({
     family: z.string().optional().describe('Filter by font family name'),
     subset: z.string().optional().default('japanese').describe('Filter by font subset name (e.g., latin, cyrillic, greek, japanese)'),
     category: z.enum(CATEGORY_OPTIONS).optional().describe('Filter by font category (serif, sans-serif, monospace, display, handwriting)'),
     capability: z.enum(CAPABILITY_OPTIONS).array().optional().default(['VF']).describe('Filter by font capability (VF for variable fonts, WOFF2 for WOFF2 format)'),
     sort: z.enum(SORT_OPTIONS).optional().describe('Sort order for results (alpha, date, popularity, style, trending)'),
     limit: z.number().int().positive().optional().describe('Maximum number of fonts to return (default: 20)'),
-  }),
+    preview: z.boolean().default(false).describe("Generate a preview image for the font."),
+    previewText: z.string().optional().describe("Text to render in the preview image. Required if preview is true."),
+    fontSize: z.number().default(24).describe("Font size for the preview image in points."),
+});
+
+
+/**
+ * Tool to retrieve font information from Google Fonts API
+ * 
+ * This tool fetches metadata about available fonts from the Google Fonts Developer API.
+ * It allows filtering by various criteria and sorting the results.
+ * It can also generate preview images for the fonts.
+ * API key is automatically loaded from environment variables.
+ */
+export const getGoogleFonts = createTool({
+  id: 'get-google-fonts',
+  description: 'Fetches font metadata from the Google Fonts Developer API and optionally generates previews.',
+  inputSchema,
   outputSchema: z.union([successSchema, errorSchema]),
   execute: async ({ context: input }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
     const apiKey = process.env.GOOGLE_FONTS_API_KEY;
     if (!apiKey) {
       const message = 'Google Fonts API Key is not set in environment variables (GOOGLE_FONTS_API_KEY).';
       logger.error(`getGoogleFonts: ${message}`);
-      return { success: false, message };
+      return { success: false as const, message };
     }
 
     const limit = input.limit || 20;
@@ -110,19 +124,78 @@ export const getGoogleFonts = createTool({
       if (!response.ok) {
         const message = `Google Fonts API Error: ${data.error?.message || response.statusText}`;
         logger.error(message, { error: data.error });
-        return { success: false, message, error: data.error };
+        return { success: false as const, message, error: data.error };
       }
 
-      const validationResult = z.object({ items: z.array(googleFontItemSchema), kind: z.string().optional() }).safeParse(data);
+      const validationResult = z.object({ items: z.array(googleFontItemSchema.omit({previewUrl: true})), kind: z.string().optional() }).safeParse(data);
 
       if(!validationResult.success){
         const message = "Google Fonts API response validation failed.";
         logger.error(message, { error: validationResult.error.issues, data });
-        return { success: false, message, error: { validationIssues: validationResult.error.issues, receivedData: data } };
+        return { success: false as const, message, error: { validationIssues: validationResult.error.issues, receivedData: data } };
       }
 
-      const fonts = validationResult.data.items.slice(0, limit);
+      let fonts = validationResult.data.items.slice(0, limit) as z.infer<typeof googleFontItemSchema>[];
       
+      if (input.preview) {
+        if (!input.previewText) {
+            const message = "previewText is required when preview is enabled.";
+            logger.error(`getGoogleFonts: ${message}`);
+            return { success: false as const, message };
+        }
+
+        const previewDir = config.previewFontImageDir;
+        if (!fs.existsSync(previewDir)) {
+          fs.mkdirSync(previewDir, { recursive: true });
+        }
+
+        const PADDING = 10;
+
+        for (const font of fonts) {
+            const fontUrl = font.files['regular'] || Object.values(font.files)[0];
+            if (!fontUrl) continue;
+
+            try {
+                const fontResponse = await fetch(fontUrl);
+                const fontBuffer = await fontResponse.arrayBuffer();
+                const loadedFont = opentype.parse(fontBuffer);
+
+                const text = input.previewText!;
+                const fontSize = input.fontSize;
+                
+                const textPath = loadedFont.getPath(text, 0, 0, fontSize);
+                const boundingBox = textPath.getBoundingBox();
+
+                const canvasWidth = Math.ceil(boundingBox.x2 - boundingBox.x1) + PADDING * 2;
+                const canvasHeight = Math.ceil(boundingBox.y2 - boundingBox.y1) + PADDING * 2;
+
+                const canvas = createCanvas(canvasWidth, canvasHeight);
+                const ctx = canvas.getContext('2d');
+
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+                ctx.fillStyle = '#000000';
+                const drawX = PADDING - boundingBox.x1;
+                const drawY = PADDING - boundingBox.y1;
+                
+                ctx.translate(drawX, drawY);
+                textPath.draw(ctx as any);
+                
+                const previewFileName = `${font.family.replace(/\s/g, '_')}.png`;
+                const previewFilePath = path.join(previewDir, previewFileName);
+                
+                const pngBuffer = canvas.toBuffer('image/png');
+                fs.writeFileSync(previewFilePath, pngBuffer);
+
+                font.previewUrl = `${config.apiUrl}/getFontImage/${previewFileName}`;
+
+            } catch (previewError: any) {
+                logger.warn(`Could not generate preview for font ${font.family}: ${previewError.message}`);
+            }
+        }
+      }
+
       logger.info(`Successfully retrieved ${fonts.length} fonts from Google Fonts API.`);
       
       return {
@@ -134,7 +207,7 @@ export const getGoogleFonts = createTool({
     } catch (error: any) {
       const message = `Failed to fetch or parse Google Fonts data: ${error.message}`;
       logger.error(message, { error });
-      return { success: false, message, error };
+      return { success: false as const, message, error };
     }
   }
 }); 

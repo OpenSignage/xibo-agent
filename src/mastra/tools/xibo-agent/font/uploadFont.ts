@@ -11,15 +11,9 @@
  */
 
 /**
- * Font Upload Tool
- * 
- * This module provides functionality to upload font files to the Xibo CMS.
- * It implements the POST /fonts API endpoint and handles file uploads with proper validation.
- * 
- * The tool supports three different upload methods:
- * 1. Direct file upload (web browser environments only)
- * 2. Base64 encoded file content
- * 3. File path on the agent server
+ * @module uploadFont
+ * @description Provides a tool to upload a font file to the Xibo CMS.
+ * It implements the POST /fonts API endpoint.
  */
 
 import { z } from "zod";
@@ -27,146 +21,116 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 
-/**
- * Schema for the uploaded font data, which is a specific type of library media.
- */
-const fontUploadResponseSchema = z.object({
-    files: z.array(z.object({
-        mediaId: z.number().describe("The new Media ID for the uploaded font."),
-        name: z.string().describe("The name of the uploaded file."),
-        fileName: z.string().describe("The file name of the uploaded font."),
-        mediaType: z.literal("font").describe("The media type."),
-        size: z.number().describe("The size of the file in bytes."),
-        md5: z.string().describe("The MD5 checksum of the file."),
-    })),
+// Schema for the response of a successful font upload.
+const successResponseSchema = z.object({
+    success: z.literal(true),
+    data: z.object({
+        files: z.array(z.object({
+            mediaId: z.number().describe("The new Media ID for the uploaded font."),
+            name: z.string().describe("The name of the uploaded file."),
+            fileName: z.string().describe("The file name of the uploaded font."),
+            mediaType: z.literal("font").describe("The media type."),
+            size: z.number().describe("The size of the file in bytes."),
+            md5: z.string().describe("The MD5 checksum of the file."),
+        })),
+    }),
 });
 
-/**
- * Defines the schema for a successful response.
- */
-const successSchema = z.object({
-  success: z.literal(true),
-  data: fontUploadResponseSchema,
-});
-
-/**
- * Defines the schema for a failed operation.
- */
-const errorSchema = z.object({
+// Schema for a failed operation.
+const errorResponseSchema = z.object({
   success: z.literal(false),
   message: z.string().describe("A human-readable error message."),
-  error: z
-    .any()
-    .optional()
-    .describe("Optional technical details about the error."),
+  error: z.any().optional().describe("Optional technical details about the error."),
+  errorData: z.any().optional(),
 });
 
 /**
- * Tool for uploading font files to Xibo CMS
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+/**
+ * Tool for uploading a font file to the Xibo CMS from the local filesystem.
  */
 export const uploadFont = createTool({
   id: "upload-font",
-  description: "Upload a font file to Xibo CMS.",
+  description: "Upload a font file to Xibo CMS from the local filesystem.",
   inputSchema: z.object({
-    fileContent: z.string().describe("Base64 encoded file content."),
-    fileName: z.string().describe("Original filename (e.g., 'my-font.ttf')."),
+    fileName: z.string().describe("The filename of the font to upload (e.g., 'my-font.ttf')."),
+    filePath: z.string().optional().describe(`The path to the directory containing the font file. Defaults to the system's upload directory: ${config.uploadDir}`),
     name: z.string().optional().describe("A custom name for the font in the library."),
-    oldMediaId: z.number().optional().describe("The ID of an existing font to replace."),
   }),
-  outputSchema: z.union([successSchema, errorSchema]),
-  execute: async ({ context: input }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      const errorMessage = "CMS URL is not configured.";
-      logger.error(`uploadFont: ${errorMessage}`);
-      return { success: false, message: errorMessage };
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
 
-    const { fileContent, fileName, name, oldMediaId } = input;
-    let tempFilePath: string | null = null;
+    const { fileName, filePath, ...rest } = context;
     
     try {
-        const fileBuffer = Buffer.from(fileContent, 'base64');
-        const tmpDir = os.tmpdir();
-        tempFilePath = path.join(tmpDir, `xibo-upload-${Date.now()}-${path.basename(fileName)}`);
-        fs.writeFileSync(tempFilePath, fileBuffer);
-        logger.debug(`Temporary file created at: ${tempFilePath}`);
-        
-        const fileBlob = new Blob([fileBuffer]);
-        const uploadFile = new File([fileBlob], fileName);
+        const directory = filePath ? path.resolve(filePath) : config.uploadDir;
+        const fullPath = path.join(directory, fileName);
+
+        if (!fs.existsSync(fullPath)) {
+            const message = `File not found at path: ${fullPath}`;
+            logger.error(message);
+            return { success: false as const, message };
+        }
 
         const formData = new FormData();
-        formData.append("files", uploadFile);
-        if (name) formData.append("name", name);
-        if (oldMediaId) formData.append("oldMediaId", oldMediaId.toString());
+        formData.append("files", new Blob([fs.readFileSync(fullPath)]), fileName);
+        
+        Object.entries(rest).forEach(([key, value]) => {
+            if (value !== undefined) {
+                formData.append(key, String(value));
+            }
+        });
 
-        const url = `${config.cmsUrl}/api/fonts`;
-        logger.info(`Uploading font '${fileName}' to ${url}.`);
+        const url = new URL(`${config.cmsUrl}/api/fonts`);
+        logger.info({ url: url.toString(), path: fullPath }, `Uploading font '${fileName}'`);
 
-        const response = await fetch(url, {
+        const response = await fetch(url.toString(), {
             method: "POST",
             headers: await getAuthHeaders(),
             body: formData,
         });
-
-        const responseText = await response.text();
-        let responseData: any;
-        try {
-            responseData = JSON.parse(responseText);
-        } catch (e) {
-            responseData = responseText;
-        }
+        
+        const responseData = await response.json().catch(() => response.text());
 
         if (!response.ok) {
-            const decodedText = decodeErrorMessage(responseText);
-            const errorMessage = `Failed to upload font. API responded with status ${response.status}.`;
-            logger.error(errorMessage, { status: response.status, response: decodedText });
-            return {
-                success: false,
-                message: `${errorMessage} Message: ${decodedText}`,
-                error: { statusCode: response.status, responseBody: responseData },
-            };
+            const decodedError = decodeErrorMessage(responseData);
+            const message = `Failed to upload font. API responded with status ${response.status}.`;
+            logger.error({ status: response.status, response: decodedError }, message);
+            return { success: false as const, message, errorData: decodedError };
         }
 
-        const validationResult = fontUploadResponseSchema.safeParse(responseData);
+        const validationResult = successResponseSchema.safeParse({ success: true, data: responseData });
         if (!validationResult.success) {
-            const errorMessage = "Font upload response validation failed.";
-            logger.error(errorMessage, { error: validationResult.error.issues, data: responseData });
+            const message = "Font upload response validation failed.";
+            logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
             return {
-                success: false,
-                message: errorMessage,
-                error: { validationIssues: validationResult.error.issues, receivedData: responseData },
+                success: false as const,
+                message,
+                error: validationResult.error.flatten(),
+                errorData: responseData,
             };
         }
 
         logger.info(`Font '${fileName}' uploaded successfully.`);
-        return {
-            success: true,
-            data: validationResult.data,
-        };
+        return validationResult.data;
 
-    } catch (error: any) {
-        logger.error(`An unexpected error occurred during font upload: ${error.message}`, { error });
-        return {
-            success: false,
-            message: `An unexpected error occurred: ${error.message}`,
-            error,
-        };
-    } finally {
-        if (tempFilePath && fs.existsSync(tempFilePath)) {
-            try {
-                fs.unlinkSync(tempFilePath);
-                logger.debug(`Temporary file deleted: ${tempFilePath}`);
-            } catch (cleanupError: any) {
-                logger.warn(`Failed to delete temporary file '${tempFilePath}': ${cleanupError.message}`);
-            }
-        }
+    } catch (error) {
+        const message = "An unexpected error occurred during font upload.";
+        const processedError = processError(error);
+        logger.error({ error: processedError }, message);
+        return { success: false as const, message, error: processedError };
     }
   },
 });
-
-export default uploadFont;

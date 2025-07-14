@@ -11,22 +11,19 @@
  */
 
 /**
- * Font Retrieval Tool
- * 
- * This module provides functionality to search and retrieve font information from the Xibo CMS.
- * It implements the /fonts API endpoint and handles response validation.
+ * @module getFonts
+ * @description Provides a tool to search and retrieve font information from the Xibo CMS,
+ * implementing the /fonts API endpoint and handling response validation.
  */
 
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { decodeErrorMessage } from "../utility/error";
+import { decodeErrorMessage, processError } from "../utility/error";
 import { logger } from "../../../index";
 
-/**
- * Schema definition for a single font record.
- */
+// Schema definition for a single font record, based on the Xibo API.
 const fontSchema = z.object({
   id: z.number().describe("The Font ID"),
   createdAt: z.string().describe("The Font created date"),
@@ -39,28 +36,29 @@ const fontSchema = z.object({
   md5: z.string().describe("A MD5 checksum of the stored font file"),
 });
 
-/**
- * Defines the schema for a successful response.
- */
-const successSchema = z.object({
+// Schema for a successful response.
+const successResponseSchema = z.object({
   success: z.literal(true),
+  message: z.string(),
   data: z.array(fontSchema).describe("An array of font records."),
 });
 
-/**
- * Defines the schema for a failed operation.
- */
-const errorSchema = z.object({
+// Schema for a failed operation.
+const errorResponseSchema = z.object({
   success: z.literal(false),
   message: z.string().describe("A human-readable error message."),
-  error: z
-    .any()
-    .optional()
-    .describe("Optional technical details about the error."),
+  error: z.any().optional().describe("Optional technical details about the error."),
+  errorData: z.any().optional(),
 });
 
 /**
- * Tool for retrieving fonts from Xibo CMS
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+/**
+ * Tool to retrieve a list of fonts from the Xibo CMS.
+ * Supports filtering by font ID or name.
  */
 export const getFonts = createTool({
   id: "get-fonts",
@@ -69,96 +67,65 @@ export const getFonts = createTool({
     id: z.number().optional().describe("Filter by a specific Font ID."),
     name: z.string().optional().describe("Filter by Font Name (searches for part of a name)."),
   }),
-  outputSchema: z.union([successSchema, errorSchema]),
-  execute: async ({ context: input }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      const errorMessage = "CMS URL is not configured.";
-      logger.error(`getFonts: ${errorMessage}`);
-      return {
-        success: false,
-        message: errorMessage,
-      };
+      const message = "CMS URL is not configured.";
+      logger.error(message);
+      return { success: false as const, message };
     }
 
-    // Construct the request URL and add search parameters if provided.
     const url = new URL(`${config.cmsUrl}/api/fonts`);
-    if (input.id) url.searchParams.append("id", input.id.toString());
-    if (input.name) url.searchParams.append("name", input.name);
+    if (context.id) url.searchParams.append("id", context.id.toString());
+    if (context.name) url.searchParams.append("name", context.name);
 
-    logger.info(`Requesting fonts from: ${url.toString()}`);
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: await getAuthHeaders(),
-    });
-
-    // Safely parse the JSON response, falling back to raw text if parsing fails.
-    const responseText = await response.text();
-    let responseData: any;
     try {
-      responseData = JSON.parse(responseText);
-    } catch (e) {
-      responseData = responseText;
-    }
+      logger.info({ url: url.toString() }, "Requesting fonts from Xibo CMS");
 
-    // Handle non-successful HTTP responses.
-    if (!response.ok) {
-        const decodedText = decodeErrorMessage(responseText);
-        const errorMessage = `Failed to get fonts. API responded with status ${response.status}.`;
-        logger.error(errorMessage, {
-            status: response.status,
-            response: decodedText,
-        });
-        return {
-            success: false,
-            message: `${errorMessage} Message: ${decodedText}`,
-            error: {
-            statusCode: response.status,
-            responseBody: responseData,
-            },
-        };
-    }
-    
-    // Validate the structure of the response data against the schema.
-    const validationResult = z.array(fontSchema).safeParse(responseData);
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: await getAuthHeaders(),
+      });
+      
+      const responseData = await response.json().catch(() => response.text());
 
-    if (!validationResult.success) {
-        const errorMessage = "Fonts response validation failed.";
-        logger.error(errorMessage, {
-            error: validationResult.error.issues,
-            data: responseData,
-        });
+      if (!response.ok) {
+        const decodedError = decodeErrorMessage(responseData);
+        const message = `Failed to get fonts. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: decodedError }, message);
+        return { success: false as const, message, errorData: decodedError };
+      }
+      
+      const validationResult = z.array(fontSchema).safeParse(responseData);
+
+      if (!validationResult.success) {
+        const message = "Fonts response validation failed.";
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return {
-            success: false,
-            message: errorMessage,
-            error: {
-                validationIssues: validationResult.error.issues,
-                receivedData: responseData,
-            },
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
         };
-    }
-    
-    // If a specific font ID was requested and no results were found, return a 'not found' error.
-    if (input.id && validationResult.data.length === 0) {
-      const message = "Font not found.";
-      logger.warn(`getFonts: ${message} for ID: ${input.id}`);
+      }
+      
+      if (context.id && validationResult.data.length === 0) {
+        const message = "Font not found.";
+        logger.warn({ fontId: context.id }, message);
+        return { success: false as const, message };
+      }
+
+      logger.info({ count: validationResult.data.length }, `Successfully retrieved ${validationResult.data.length} fonts.`);
       return {
-        success: false,
-        message,
+        success: true,
+        message: `Successfully retrieved ${validationResult.data.length} fonts.`,
+        data: validationResult.data,
       };
+    } catch (error) {
+      const message = "An unexpected error occurred while fetching fonts.";
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
-
-    if (validationResult.data.length === 0) {
-        logger.info("No fonts found matching the criteria.");
-    } else {
-        logger.info(`Successfully retrieved ${validationResult.data.length} fonts.`);
-    }
-
-    return {
-      success: true,
-      data: validationResult.data,
-    };
   },
-});
-
-export default getFonts; 
+}); 
