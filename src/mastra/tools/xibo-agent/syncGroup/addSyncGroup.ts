@@ -12,106 +12,111 @@
 
 /**
  * @module addSyncGroup
- * @description This module provides functionality to add a new sync group.
- * It implements the POST /api/syncgroup/add endpoint and handles the necessary
- * validation and data transformation.
+ * @description Provides a tool to create a new Sync Group in the Xibo CMS.
+ * It implements the POST /sync/group API endpoint and handles the necessary
+ * validation and data transformation for creating a sync group.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-
-// Schema for the sync group data returned by the API
-const syncGroupSchema = z.object({
-  syncGroupId: z.number(),
-  name: z.string(),
-  createdDt: z.string().nullable(),
-  modifiedDt: z.string().nullable(),
-  modifiedBy: z.number().nullable(),
-  modifiedByName: z.string().nullable(),
-  ownerId: z.number(),
-  owner: z.string().nullable(),
-  syncPublisherPort: z.number().nullable(),
-  syncSwitchDelay: z.number().nullable(),
-  syncVideoPauseDelay: z.number().nullable(),
-});
-
-// Schema for the overall response, which can be a success or error
-const responseSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: syncGroupSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { syncGroupSchema, errorResponseSchema } from './schemas';
 
 /**
- * Tool to add a new sync group.
- * This tool adds a new synchronization group in the Xibo CMS system.
+ * Schema for the successful response after creating a sync group.
+ * It contains the newly created sync group's data.
+ */
+const addSyncGroupResponseSchema = z.object({
+  success: z.literal(true),
+  data: syncGroupSchema,
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([addSyncGroupResponseSchema, errorResponseSchema]);
+
+/**
+ * Tool for creating a new Sync Group in the Xibo CMS.
+ * This tool allows specifying the group name, sync settings, master display, and slave displays.
  */
 export const addSyncGroup = createTool({
-  id: "add-sync-group",
-  description: "Add a new sync group",
+  id: 'add-sync-group',
+  description: 'Creates a new Sync Group in the Xibo CMS.',
   inputSchema: z.object({
-    name: z.string().describe("The name of the sync group to be created."),
-    syncPublisherPort: z.number().optional().default(9590).describe("The publisher port for synchronization."),
-    folderId: z.number().optional().describe("The ID of the folder to create the sync group in."),
+    syncGroupName: z.string().describe('The name for the new sync group.'),
+    isSyncEnabled: z.number().optional().describe('Flag to enable sync (0 or 1). Defaults to 1.'),
+    isSyncTimeEnabled: z.number().optional().describe('Flag to enable sync time (0 or 1). Defaults to 1.'),
+    isSyncOffsetEnabled: z.number().optional().describe('Flag to enable sync offset (0 or 1). Defaults to 0.'),
+    syncOffset: z.number().optional().describe('The sync offset in seconds. Defaults to 0.'),
+    syncMaster: z.number().describe('The Display ID of the master display for this sync group.'),
+    syncSlaves: z.array(z.number()).describe('An array of Display IDs for the slave displays.'),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<z.infer<typeof responseSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
+    const { syncGroupName, syncMaster, syncSlaves, ...optionalParams } = context;
+
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured";
-      logger.error(`addSyncGroup: ${message}`);
-      return { success: false, message };
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
     }
 
-    const url = `${config.cmsUrl}/api/syncgroup/add`;
-    const formData = new URLSearchParams();
-    
-    formData.append("name", context.name);
-    if (context.syncPublisherPort) formData.append("syncPublisherPort", context.syncPublisherPort.toString());
-    if (context.folderId) formData.append("folderId", context.folderId.toString());
-
-    let responseData: any;
     try {
-      logger.debug(`addSyncGroup: Requesting URL: ${url}`);
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-            ...await getAuthHeaders(),
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: formData,
+      const headers = await getAuthHeaders();
+      const url = new URL(`${config.cmsUrl}/api/sync/group`);
+      
+      const params = new URLSearchParams({
+        syncGroupName,
+        syncMaster: String(syncMaster),
+        syncSlaves: syncSlaves.join(','),
+        isSyncEnabled: String(optionalParams.isSyncEnabled ?? 1),
+        isSyncTimeEnabled: String(optionalParams.isSyncTimeEnabled ?? 1),
+        isSyncOffsetEnabled: String(optionalParams.isSyncOffsetEnabled ?? 0),
+        syncOffset: String(optionalParams.syncOffset ?? 0),
       });
 
-      responseData = await response.json();
+      logger.debug({ url: url.toString(), params: params.toString() }, 'Attempting to add a new sync group');
+
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: params,
+      });
+
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const message = `HTTP error! status: ${response.status}`;
-        logger.error(`addSyncGroup: ${message}`, { errorData: responseData });
-        return { success: false, message, errorData: responseData };
+        const message = `Failed to add sync group. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: responseData }, message);
+        return { success: false as const, message, errorData: responseData };
       }
 
-      const validatedData = syncGroupSchema.parse(responseData);
-      logger.info("Sync group added successfully");
-      return { success: true, data: validatedData };
+      const validationResult = syncGroupSchema.safeParse(responseData);
+      if (!validationResult.success) {
+        const message = 'Sync group response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
+      }
+
+      logger.info({ syncGroupId: validationResult.data.syncGroupId }, 'Sync group added successfully.');
+      return { success: true as const, data: validationResult.data };
 
     } catch (error) {
-        if (error instanceof z.ZodError) {
-            const message = "Validation error occurred while parsing the API response.";
-            logger.error(`addSyncGroup: ${message}`, { error: error.issues, errorData: responseData });
-            return { success: false, message, error: error.issues, errorData: responseData };
-        }
-        const message = error instanceof Error ? error.message : "An unknown error occurred";
-        logger.error(`addSyncGroup: ${message}`, { error });
-        return { success: false, message, error };
+      const message = 'An unexpected error occurred during sync group creation.';
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 });

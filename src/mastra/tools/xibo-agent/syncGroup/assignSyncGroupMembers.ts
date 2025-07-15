@@ -12,86 +12,88 @@
 
 /**
  * @module assignSyncGroupMembers
- * @description This module provides functionality to assign or unassign members
- * to a sync group. It implements the POST /api/syncgroup/{syncGroupId}/members
- * endpoint.
+ * @description Provides a tool to assign member displays to a Sync Group in the Xibo CMS.
+ * It implements the POST /sync/group/{id}/members API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-
-// Schema for the response, which can be a success or error
-const responseSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { errorResponseSchema } from './schemas';
 
 /**
- * Tool to assign or unassign members to a sync group.
- * This tool manages the membership of displays within a sync group in the Xibo CMS.
+ * Schema for a successful assignment response.
+ */
+const assignSuccessResponseSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([assignSuccessResponseSchema, errorResponseSchema]);
+
+/**
+ * Tool for assigning member displays to a Sync Group.
  */
 export const assignSyncGroupMembers = createTool({
-  id: "assign-sync-group-members",
-  description: "Assign or unassign members to a sync group",
+  id: 'assign-sync-group-members',
+  description: 'Assigns member displays (master and slaves) to a Sync Group.',
   inputSchema: z.object({
-    syncGroupId: z.number().describe("The ID of the sync group to modify."),
-    displayId: z.array(z.number()).describe("An array of Display IDs to assign to the group."),
-    unassignDisplayId: z.array(z.number()).optional().describe("An array of Display IDs to unassign from the group."),
+    syncGroupId: z.number().describe('The ID of the sync group to assign members to.'),
+    masterId: z.number().describe('The Display ID of the master display.'),
+    slaveIds: z.array(z.number()).describe('An array of Display IDs for the slave displays.'),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<z.infer<typeof responseSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
+    const { syncGroupId, masterId, slaveIds } = context;
+
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured";
-      logger.error(`assignSyncGroupMembers: ${message}`);
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
       return { success: false, message };
     }
 
-    const url = `${config.cmsUrl}/api/syncgroup/${context.syncGroupId}/members`;
-    const formData = new URLSearchParams();
-    
-    // The API expects JSON-encoded arrays for these parameters
-    formData.append("displayId", JSON.stringify(context.displayId));
-    if (context.unassignDisplayId) {
-      formData.append("unassignDisplayId", JSON.stringify(context.unassignDisplayId));
-    }
-
     try {
-      logger.debug(`assignSyncGroupMembers: Requesting URL: ${url}`);
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-            ...await getAuthHeaders(),
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: formData,
+      const headers = await getAuthHeaders();
+      const url = new URL(`${config.cmsUrl}/api/sync/group/${syncGroupId}/members`);
+      
+      const params = new URLSearchParams({
+        masterId: String(masterId),
+        slaveIds: slaveIds.join(','),
       });
 
-      if (!response.ok) {
-        const responseData = await response.json().catch(() => response.text());
-        const message = `HTTP error! status: ${response.status}`;
-        logger.error(`assignSyncGroupMembers: ${message}`, { errorData: responseData });
-        return { success: false, message, errorData: responseData };
+      logger.debug({ url: url.toString(), params: params.toString() }, `Attempting to assign members to sync group ID: ${syncGroupId}`);
+
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: params,
+      });
+      
+      // A successful POST request returns a 204 No Content response.
+      if (response.ok && response.status === 204) {
+        const message = `Successfully assigned members to sync group ID ${syncGroupId}.`;
+        logger.info({ syncGroupId, masterId, slaveIds }, message);
+        return { success: true, message };
       }
 
-      const successMessage = "Sync group members assigned/unassigned successfully";
-      logger.info(successMessage);
-      return { success: true, message: successMessage };
+      const responseData = await response.json().catch(() => response.text());
+      const message = `Failed to assign members to sync group. API responded with status ${response.status}.`;
+      logger.error({ status: response.status, response: responseData, syncGroupId }, message);
+      return { success: false, message, errorData: responseData };
 
     } catch (error) {
-      const message = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error(`assignSyncGroupMembers: ${message}`, { error });
-      return { success: false, message, error };
+      const message = 'An unexpected error occurred while assigning sync group members.';
+      const processedError = processError(error);
+      logger.error({ error: processedError, syncGroupId }, message);
+      return { success: false, message, error: processedError };
     }
   },
 }); 

@@ -11,14 +11,14 @@
  */
 
 /**
- * @module syncGroup/index
- * @description This index file exports all the tools related to sync group management,
- * making them available for use throughout the application.
+ * @module SyncGroupTools
+ * @description This module exports all tools related to Sync Group management
+ * in the Xibo CMS. Each tool is explicitly exported to ensure clarity and
+ * prevent accidental exposure of non-tool entities.
  */
-
-export { getSyncGroups } from "./getSyncGroups";
-export { addSyncGroup } from "./addSyncGroup";
-export { editSyncGroup } from "./editSyncGroup";
-export { deleteSyncGroup } from "./deleteSyncGroup";
-export { getSyncGroupDisplays } from "./getSyncGroupDisplays";
-export { assignSyncGroupMembers } from "./assignSyncGroupMembers"; 
+export { addSyncGroup } from './addSyncGroup';
+export { editSyncGroup } from './editSyncGroup';
+export { deleteSyncGroup } from './deleteSyncGroup';
+export { getSyncGroups } from './getSyncGroups';
+export { getSyncGroupDisplays } from './getSyncGroupDisplays';
+export { assignSyncGroupMembers } from './assignSyncGroupMembers'; 

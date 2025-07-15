@@ -12,107 +12,90 @@
 
 /**
  * @module getSyncGroups
- * @description This module provides functionality to retrieve sync groups
- * from the Xibo CMS. It implements the GET /api/syncgroups endpoint.
+ * @description Provides a tool to retrieve a list of Sync Groups from the Xibo CMS.
+ * It implements the GET /sync/group API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-
-// Schema for a single sync group
-const syncGroupSchema = z.object({
-  syncGroupId: z.number(),
-  name: z.string(),
-  createdDt: z.string().nullable(),
-  modifiedDt: z.string().nullable(),
-  modifiedBy: z.number().nullable(),
-  modifiedByName: z.string().nullable(),
-  ownerId: z.number(),
-  owner: z.string().nullable(),
-  syncPublisherPort: z.number().nullable(),
-  syncSwitchDelay: z.number().nullable(),
-  syncVideoPauseDelay: z.number().nullable(),
-  leadDisplayId: z.number().nullable(),
-  leadDisplay: z.string().nullable(),
-  folderId: z.number().nullable(),
-  permissionsFolderId: z.number().nullable(),
-});
-
-// Schema for the overall response, which can be a success or error
-const responseSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.array(syncGroupSchema),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { syncGroupSchema, errorResponseSchema } from './schemas';
 
 /**
- * Tool to retrieve a list of sync groups.
- * This tool fetches synchronization groups from the Xibo CMS, with optional filters.
+ * Schema for the successful response of retrieving sync groups, which is an array of sync group objects.
+ */
+const getSyncGroupsResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(syncGroupSchema),
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([getSyncGroupsResponseSchema, errorResponseSchema]);
+
+/**
+ * Tool for retrieving a list of all Sync Groups from the Xibo CMS.
  */
 export const getSyncGroups = createTool({
-  id: "get-sync-groups",
-  description: "Retrieve a list of sync groups",
+  id: 'get-sync-groups',
+  description: 'Retrieves a list of all Sync Groups from the Xibo CMS.',
   inputSchema: z.object({
-    syncGroupId: z.number().optional().describe("Filter by a specific sync group ID."),
-    name: z.string().optional().describe("Filter by sync group name (supports partial matching)."),
-    ownerId: z.number().optional().describe("Filter by the owner's user ID."),
-    folderId: z.number().optional().describe("Filter by the folder ID."),
+    syncGroupName: z.string().optional().describe('Filter by sync group name.'),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<z.infer<typeof responseSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured";
-      logger.error(`getSyncGroups: ${message}`);
-      return { success: false, message };
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/syncgroups`);
-    
-    // Append query parameters if they are provided
-    if (context.syncGroupId) url.searchParams.append("syncGroupId", context.syncGroupId.toString());
-    if (context.name) url.searchParams.append("name", context.name);
-    if (context.ownerId) url.searchParams.append("ownerId", context.ownerId.toString());
-    if (context.folderId) url.searchParams.append("folderId", context.folderId.toString());
-
-    let responseData: any;
     try {
-      logger.info(`getSyncGroups: Requesting URL: ${url.toString()}`);
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: await getAuthHeaders(),
-      });
-
-      responseData = await response.json();
-
-      if (!response.ok) {
-        const message = `HTTP error! status: ${response.status}`;
-        logger.error(`getSyncGroups: ${message}`, { errorData: responseData });
-        return { success: false, message, errorData: responseData };
+      const headers = await getAuthHeaders();
+      const url = new URL(`${config.cmsUrl}/api/sync/group`);
+      
+      if (context.syncGroupName) {
+        url.searchParams.append('syncGroupName', context.syncGroupName);
       }
 
-      const validatedData = z.array(syncGroupSchema).parse(responseData);
-      logger.info("Sync groups retrieved successfully");
-      return { success: true, data: validatedData };
+      logger.debug({ url: url.toString() }, 'Attempting to get sync groups');
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers,
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        const message = `Failed to get sync groups. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: responseData }, message);
+        return { success: false as const, message, errorData: responseData };
+      }
+
+      const validationResult = z.array(syncGroupSchema).safeParse(responseData);
+      if (!validationResult.success) {
+        const message = 'Get sync groups response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
+      }
+
+      logger.info(`Successfully retrieved ${validationResult.data.length} sync groups.`);
+      return { success: true as const, data: validationResult.data };
 
     } catch (error) {
-        if (error instanceof z.ZodError) {
-            const message = "Validation error occurred while parsing the API response.";
-            logger.error(`getSyncGroups: ${message}`, { error: error.issues, errorData: responseData });
-            return { success: false, message, error: error.issues, errorData: responseData };
-        }
-        const message = error instanceof Error ? error.message : "An unknown error occurred";
-        logger.error(`getSyncGroups: ${message}`, { error });
-        return { success: false, message, error };
+      const message = 'An unexpected error occurred while getting sync groups.';
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

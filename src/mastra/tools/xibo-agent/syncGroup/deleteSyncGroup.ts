@@ -12,74 +12,77 @@
 
 /**
  * @module deleteSyncGroup
- * @description This module provides functionality to delete a sync group.
- * It implements the DELETE /api/syncgroup/{id} endpoint.
+ * @description Provides a tool to delete a Sync Group from the Xibo CMS.
+ * It implements the DELETE /sync/group/{id} API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-
-// Schema for the response, which can be a success or error
-const responseSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { errorResponseSchema } from './schemas';
 
 /**
- * Tool to delete a sync group.
- * This tool deletes an existing synchronization group from the Xibo CMS.
+ * Schema for a successful deletion response.
+ */
+const deleteSuccessResponseSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([deleteSuccessResponseSchema, errorResponseSchema]);
+
+/**
+ * Tool for deleting a Sync Group from the Xibo CMS.
  */
 export const deleteSyncGroup = createTool({
-  id: "delete-sync-group",
-  description: "Delete a sync group",
+  id: 'delete-sync-group',
+  description: 'Deletes a Sync Group from the Xibo CMS by its ID.',
   inputSchema: z.object({
-    syncGroupId: z.number().describe("The ID of the sync group to delete."),
+    syncGroupId: z.number().describe('The ID of the sync group to delete.'),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<z.infer<typeof responseSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
+    const { syncGroupId } = context;
+
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured";
-      logger.error(`deleteSyncGroup: ${message}`);
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
       return { success: false, message };
     }
 
-    const url = `${config.cmsUrl}/api/syncgroup/${context.syncGroupId}/delete`;
-    
     try {
-      logger.debug(`deleteSyncGroup: Requesting URL: ${url}`);
-      const response = await fetch(url, {
-        method: "DELETE",
-        headers: await getAuthHeaders(),
+      const headers = await getAuthHeaders();
+      const url = new URL(`${config.cmsUrl}/api/sync/group/${syncGroupId}`);
+
+      logger.debug({ url: url.toString() }, `Attempting to delete sync group ID: ${syncGroupId}`);
+
+      const response = await fetch(url.toString(), {
+        method: 'DELETE',
+        headers,
       });
 
-      if (!response.ok) {
-        // Try to parse error response, but fallback to text if it fails
-        const responseData = await response.json().catch(() => response.text());
-        const message = `HTTP error! status: ${response.status}`;
-        logger.error(`deleteSyncGroup: ${message}`, { errorData: responseData });
-        return { success: false, message, errorData: responseData };
+      // A successful DELETE request returns a 204 No Content response.
+      if (response.ok && response.status === 204) {
+        const message = `Sync group with ID ${syncGroupId} deleted successfully.`;
+        logger.info({ syncGroupId }, message);
+        return { success: true, message };
       }
 
-      // A 204 No Content response is a success case for DELETE
-      const successMessage = `Sync group ${context.syncGroupId} deleted successfully`;
-      logger.info(successMessage);
-      return { success: true, message: successMessage };
+      const responseData = await response.json().catch(() => response.text());
+      const message = `Failed to delete sync group. API responded with status ${response.status}.`;
+      logger.error({ status: response.status, response: responseData, syncGroupId }, message);
+      return { success: false, message, errorData: responseData };
 
     } catch (error) {
-      const message = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error(`deleteSyncGroup: ${message}`, { error });
-      return { success: false, message, error };
+      const message = 'An unexpected error occurred during sync group deletion.';
+      const processedError = processError(error);
+      logger.error({ error: processedError, syncGroupId }, message);
+      return { success: false, message, error: processedError };
     }
   },
 }); 
