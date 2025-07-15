@@ -12,103 +12,102 @@
 
 /**
  * @module copyUserGroup
- * @description This module provides functionality to copy a user group in the Xibo CMS.
+ * @description Provides a tool to copy an existing user group in the Xibo CMS.
+ * It implements the POST /group/{userGroupId}/copy API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
-import { userGroupSchema } from "./schemas";
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { userGroupSchema, errorResponseSchema } from './schemas';
 
 /**
- * Schema for the tool's output.
+ * Schema for the successful response after copying a user group.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.array(userGroupSchema),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const copyUserGroupResponseSchema = z.object({
+  success: z.literal(true),
+  data: userGroupSchema,
+});
 
 /**
- * Tool to copy a user group in the Xibo CMS.
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([copyUserGroupResponseSchema, errorResponseSchema]);
+
+/**
+ * Tool to copy an existing user group in the Xibo CMS.
  */
 export const copyUserGroup = createTool({
-  id: "copy-user-group",
-  description: "Copy a user group",
+  id: 'copy-user-group',
+  description: 'Copies an existing User Group.',
   inputSchema: z.object({
-    userGroupId: z.number().describe("The ID of the user group to copy"),
-    group: z.string().describe("The name for the new user group"),
-    copyMembers: z.number().optional().describe("Flag to copy members (1 for yes, 0 for no)"),
-    copyFeatures: z.number().optional().describe("Flag to copy feature permissions (1 for yes, 0 for no)"),
+    userGroupId: z.number().describe('The ID of the user group to copy.'),
+    group: z.string().describe('The name for the new, copied user group.'),
+    copyMembers: z.number().optional().describe('Flag to copy members (1 for yes, 0 for no).'),
+    copyFeatures: z.number().optional().describe('Flag to copy feature permissions (1 for yes, 0 for no).'),
   }),
   outputSchema,
   execute: async ({ context }) => {
+    const { userGroupId, ...body } = context;
+
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured.";
-      logger.error(message);
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
       return { success: false as const, message };
     }
 
-    logger.info(`Attempting to copy user group ID ${context.userGroupId} to a new group named '${context.group}'`);
-
     try {
-      const url = new URL(`${config.cmsUrl}/api/group/${context.userGroupId}/copy`);
+      const headers = await getAuthHeaders();
+      const url = new URL(`${config.cmsUrl}/api/group/${userGroupId}/copy`);
       
-      const formData = new URLSearchParams();
-      formData.append("group", context.group);
-      if (context.copyMembers) formData.append("copyMembers", context.copyMembers.toString());
-      if (context.copyFeatures) formData.append("copyFeatures", context.copyFeatures.toString());
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(body)) {
+        if (value !== undefined) {
+          params.append(key, String(value));
+        }
+      }
+
+      logger.debug({ url: url.toString(), params: params.toString() }, `Attempting to copy user group ID ${userGroupId} to '${context.group}'`);
 
       const response = await fetch(url.toString(), {
-        method: "POST",
+        method: 'POST',
         headers: {
-          ...await getAuthHeaders(),
+          ...headers,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: formData,
+        body: params,
       });
 
-      const rawData = await response.json();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const decodedError = decodeErrorMessage(rawData);
-        const message = `Failed to copy user group. API responded with status ${response.status}`;
-        logger.error(message, { response: decodedError });
-        return { success: false as const, message, errorData: decodedError };
+        const message = `Failed to copy user group. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: responseData, userGroupId }, message);
+        return { success: false as const, message, errorData: responseData };
       }
 
-      const userGroups = Array.isArray(rawData) ? rawData : [rawData];
-      const validationResult = z.array(userGroupSchema).safeParse(userGroups);
-
+      const validationResult = userGroupSchema.safeParse(responseData);
       if (!validationResult.success) {
-        const message = "API response validation failed";
-        logger.error(message, { error: validationResult.error, data: rawData });
-        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+        const message = 'Copy user group response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
       }
-
-      const message = `User group copied successfully. New group ID: ${validationResult.data[0].groupId}`;
-      logger.info(message);
-      return { success: true, data: validationResult.data, message };
+      
+      logger.info({ newGroup: validationResult.data }, `User group copied successfully.`);
+      return { success: true as const, data: validationResult.data };
 
     } catch (error) {
-      const message = "An unexpected error occurred while copying the user group.";
-      logger.error(message, { error });
-      return {
-        success: false as const,
-        message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      };
+      const message = 'An unexpected error occurred while copying the user group.';
+      const processedError = processError(error);
+      logger.error({ error: processedError, userGroupId }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

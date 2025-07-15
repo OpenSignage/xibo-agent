@@ -12,114 +12,121 @@
 
 /**
  * @module editUserGroup
- * @description This module provides functionality to edit an existing user group in the Xibo CMS.
+ * @description Provides a tool to edit an existing user group in the Xibo CMS.
+ * It implements the PUT /group/{userGroupId} API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
-import { userGroupSchema } from "./schemas";
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { userGroupSchema, errorResponseSchema } from './schemas';
 
 /**
- * Schema for the tool's output.
+ * Schema for the successful response after editing a user group.
+ * The API returns an array, but we expect a single edited group.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.array(userGroupSchema),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const editUserGroupResponseSchema = z.object({
+  success: z.literal(true),
+  data: userGroupSchema,
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([editUserGroupResponseSchema, errorResponseSchema]);
 
 /**
  * Tool to edit an existing user group in the Xibo CMS.
  */
 export const editUserGroup = createTool({
-  id: "edit-user-group",
-  description: "Edit a user group",
+  id: 'edit-user-group',
+  description: 'Edits an existing User Group in the Xibo CMS.',
   inputSchema: z.object({
-    userGroupId: z.number().describe("The ID of the user group to edit"),
-    group: z.string().describe("The new name for the user group"),
-    description: z.string().optional().describe("The new description for the user group (optional)"),
-    libraryQuota: z.string().optional().describe("The new library quota in MB (optional)"),
-    isSystemNotification: z.number().optional().describe("Whether to receive system notifications (0: no, 1: yes)"),
-    isDisplayNotification: z.number().optional().describe("Whether to receive display notifications (0: no, 1: yes)"),
-    isScheduleNotification: z.number().optional().describe("Whether to receive schedule notifications (0: no, 1: yes)"),
-    isCustomNotification: z.number().optional().describe("Whether to receive custom notifications (0: no, 1: yes)"),
-    isShownForAddUser: z.number().optional().describe("Whether to show in user creation (0: no, 1: yes)"),
-    defaultHomePageId: z.number().optional().describe("The new default home page ID for the user group (optional)"),
+    userGroupId: z.number().describe('The ID of the user group to edit.'),
+    group: z.string().describe('The new name for the user group.'),
+    description: z.string().optional().describe('The new description for the user group.'),
+    libraryQuota: z.string().optional().describe('The new library quota in KiB. 0 for unlimited.'),
+    isSystemNotification: z.number().optional().describe('Flag (0, 1) to receive system notifications.'),
+    isDisplayNotification: z.number().optional().describe('Flag (0, 1) to receive display notifications.'),
+    isDataSetNotification: z.number().optional().describe('Flag (0, 1) to receive DataSet notification emails.'),
+    isLayoutNotification: z.number().optional().describe('Flag (0, 1) to receive Layout notification emails.'),
+    isLibraryNotification: z.number().optional().describe('Flag (0, 1) to receive Library notification emails.'),
+    isReportNotification: z.number().optional().describe('Flag (0, 1) to receive Report notification emails.'),
+    isScheduleNotification: z.number().optional().describe('Flag (0, 1) to receive Schedule notification emails.'),
+    isCustomNotification: z.number().optional().describe('Flag (0, 1) to receive Custom notification emails.'),
+    isShownForAddUser: z.number().optional().describe('Flag (0, 1) to show this Group in the Add User form.'),
+    defaultHomePageId: z.number().optional().describe('The new default home page ID for the user group.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
+    const { userGroupId, ...body } = context;
+
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured.";
-      logger.error(message);
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
       return { success: false as const, message };
     }
 
-    logger.info(`Attempting to edit user group ID: ${context.userGroupId}`);
-
     try {
-      const url = new URL(`${config.cmsUrl}/api/group/${context.userGroupId}`);
+      const headers = await getAuthHeaders();
+      const url = new URL(`${config.cmsUrl}/api/group/${userGroupId}`);
+
+      const params = new URLSearchParams();
+      // Note: API spec has a typo 'decription', but we use 'description' for input
+      if (body.description) {
+        params.append('decription', body.description);
+      }
       
-      const formData = new URLSearchParams();
-      formData.append("group", context.group);
-      if (context.description) formData.append("description", context.description);
-      if (context.libraryQuota) formData.append("libraryQuota", context.libraryQuota);
-      if (context.isSystemNotification) formData.append("isSystemNotification", context.isSystemNotification.toString());
-      if (context.isDisplayNotification) formData.append("isDisplayNotification", context.isDisplayNotification.toString());
-      if (context.isScheduleNotification) formData.append("isScheduleNotification", context.isScheduleNotification.toString());
-      if (context.isCustomNotification) formData.append("isCustomNotification", context.isCustomNotification.toString());
-      if (context.isShownForAddUser) formData.append("isShownForAddUser", context.isShownForAddUser.toString());
-      if (context.defaultHomePageId) formData.append("defaultHomePageId", context.defaultHomePageId.toString());
+      for (const [key, value] of Object.entries(body)) {
+        if (value !== undefined && key !== 'description') {
+          params.append(key, String(value));
+        }
+      }
+
+      logger.debug({ url: url.toString(), params: params.toString() }, `Attempting to edit user group ID: ${userGroupId}`);
 
       const response = await fetch(url.toString(), {
-        method: "PUT",
+        method: 'PUT',
         headers: {
-          ...await getAuthHeaders(),
+          ...headers,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: formData,
+        body: params,
       });
 
-      const rawData = await response.json();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const decodedError = decodeErrorMessage(rawData);
-        const message = `Failed to edit user group. API responded with status ${response.status}`;
-        logger.error(message, { response: decodedError });
-        return { success: false as const, message, errorData: decodedError };
+        const message = `Failed to edit user group. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: responseData }, message);
+        return { success: false as const, message, errorData: responseData };
       }
 
-      const userGroups = Array.isArray(rawData) ? rawData : [rawData];
-      const validationResult = z.array(userGroupSchema).safeParse(userGroups);
+      // API returns an array containing the edited group
+      const editedGroupData = Array.isArray(responseData) ? responseData[0] : responseData;
+
+      const validationResult = userGroupSchema.safeParse(editedGroupData);
       if (!validationResult.success) {
-        const message = "API response validation failed";
-        logger.error(message, { error: validationResult.error, data: rawData });
-        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+        const message = 'Edit user group response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: editedGroupData }, message);
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: editedGroupData,
+        };
       }
 
-      const message = `User group '${validationResult.data[0].group}' edited successfully.`;
-      logger.info(message, { groupId: validationResult.data[0].groupId });
-      return { success: true, data: validationResult.data, message };
+      logger.info({ userGroup: validationResult.data }, 'User group edited successfully.');
+      return { success: true as const, data: validationResult.data };
 
     } catch (error) {
-      const message = "An unexpected error occurred while editing the user group.";
-      logger.error(message, { error });
-      return {
-        success: false as const,
-        message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      };
+      const message = 'An unexpected error occurred while editing the user group.';
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

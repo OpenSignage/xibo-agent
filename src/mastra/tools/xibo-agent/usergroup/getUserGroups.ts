@@ -12,103 +12,93 @@
 
 /**
  * @module getUserGroups
- * @description This module provides functionality to search for and retrieve
- * user groups from the Xibo CMS.
+ * @description Provides a tool to search for user groups in the Xibo CMS.
+ * It implements the GET /group API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
-import { userGroupSchema } from "./schemas";
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { userGroupSchema, errorResponseSchema } from './schemas';
 
 /**
- * Schema for the tool's output.
+ * Schema for the successful response, containing an array of user groups.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.array(userGroupSchema),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const getUserGroupsResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(userGroupSchema),
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([getUserGroupsResponseSchema, errorResponseSchema]);
 
 /**
  * Tool to retrieve a list of user groups from the Xibo CMS.
  */
 export const getUserGroups = createTool({
-  id: "get-user-groups",
-  description: "Search for user groups in Xibo CMS",
+  id: 'get-user-groups',
+  description: 'Retrieves a list of User Groups from the Xibo CMS.',
   inputSchema: z.object({
-    userGroupId: z.number().optional().describe("Filter by a specific User Group ID"),
-    userGroup: z.string().optional().describe("Filter by a user group name (partial match supported)"),
+    userGroupId: z.number().optional().describe('Filter by a specific User Group ID.'),
+    userGroup: z.string().optional().describe('Filter by a user group name (partial match supported).'),
   }),
   outputSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured.";
-      logger.error(message);
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
       return { success: false as const, message };
     }
 
-    const searchCriteria = (context.userGroupId ? `ID: ${context.userGroupId}` : '') + 
-                           (context.userGroup ? ` Name: ${context.userGroup}` : '');
-    logger.info(`Attempting to get user groups with criteria: ${searchCriteria || 'none'}`);
-
     try {
+      const headers = await getAuthHeaders();
       const url = new URL(`${config.cmsUrl}/api/group`);
-      if (context.userGroupId) url.searchParams.append("userGroupId", context.userGroupId.toString());
-      if (context.userGroup) url.searchParams.append("userGroup", context.userGroup);
+
+      if (context.userGroupId) {
+        url.searchParams.append('userGroupId', context.userGroupId.toString());
+      }
+      if (context.userGroup) {
+        url.searchParams.append('userGroup', context.userGroup);
+      }
+
+      logger.debug({ url: url.toString() }, 'Attempting to get user groups');
 
       const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: await getAuthHeaders(),
+        method: 'GET',
+        headers,
       });
 
-      const rawData = await response.json();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const decodedError = decodeErrorMessage(rawData);
-        const message = `Failed to get user groups. API responded with status ${response.status}`;
-        logger.error(message, { response: decodedError });
-        return { success: false as const, message, errorData: decodedError };
+        const message = `Failed to get user groups. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: responseData }, message);
+        return { success: false as const, message, errorData: responseData };
       }
 
-      // The API might return a single object or an array of objects
-      const userGroups = Array.isArray(rawData) ? rawData : [rawData];
-
-      const validationResult = z.array(userGroupSchema).safeParse(userGroups);
+      const validationResult = z.array(userGroupSchema).safeParse(responseData);
       if (!validationResult.success) {
-        const message = "API response validation failed";
-        logger.error(message, { error: validationResult.error, data: rawData });
-        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+        const message = 'Get user groups response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
       }
 
-      if (validationResult.data.length === 0) {
-        const message = "No user groups found matching the criteria.";
-        logger.info(message, { criteria: context });
-        return { success: true, data: [], message };
-      }
-
-      const message = `Successfully retrieved ${validationResult.data.length} user group(s).`;
-      logger.info(message);
-      return { success: true, data: validationResult.data, message };
+      logger.info(`Successfully retrieved ${validationResult.data.length} user group(s).`);
+      return { success: true as const, data: validationResult.data };
     } catch (error) {
-      const message = "An unexpected error occurred while getting user groups.";
-      logger.error(message, { error });
-      return {
-        success: false as const,
-        message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      };
+      const message = 'An unexpected error occurred while getting user groups.';
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 
