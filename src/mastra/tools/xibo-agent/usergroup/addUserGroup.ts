@@ -12,113 +12,116 @@
 
 /**
  * @module addUserGroup
- * @description This module provides functionality to create new user groups
- * in the Xibo CMS.
+ * @description Provides a tool to add a new user group to the Xibo CMS.
+ * It implements the POST /group API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
-import { userGroupSchema } from "./schemas";
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { userGroupSchema, errorResponseSchema } from './schemas';
 
 /**
- * Schema for the tool's output.
+ * Schema for the successful response after adding a user group.
+ * The API returns an array, but we expect a single new group.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.array(userGroupSchema),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const addUserGroupResponseSchema = z.object({
+  success: z.literal(true),
+  data: userGroupSchema,
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([addUserGroupResponseSchema, errorResponseSchema]);
 
 /**
  * Tool to create a new user group in the Xibo CMS.
  */
 export const addUserGroup = createTool({
-  id: "add-user-group",
-  description: "Add a new user group to Xibo CMS",
+  id: 'add-user-group',
+  description: 'Adds a new User Group to the Xibo CMS.',
   inputSchema: z.object({
-    group: z.string().describe("Name of the user group to be created"),
-    description: z.string().optional().describe("Description of the user group (optional)"),
-    libraryQuota: z.string().optional().describe("Library quota in MB (optional)"),
-    isSystemNotification: z.number().optional().describe("Whether to receive system notifications (0: no, 1: yes)"),
-    isDisplayNotification: z.number().optional().describe("Whether to receive display notifications (0: no, 1: yes)"),
-    isScheduleNotification: z.number().optional().describe("Whether to receive schedule notifications (0: no, 1: yes)"),
-    isCustomNotification: z.number().optional().describe("Whether to receive custom notifications (0: no, 1: yes)"),
-    isShownForAddUser: z.number().optional().describe("Whether to show in user creation (0: no, 1: yes)"),
-    defaultHomePageId: z.number().optional().describe("Default home page ID for the user group (optional)"),
+    group: z.string().describe('Name for the User Group.'),
+    description: z.string().optional().describe('A description for the User Group.'),
+    libraryQuota: z.string().optional().describe('The quota in KiB. 0 for no quota.'),
+    isSystemNotification: z.number().optional().describe('Flag (0, 1) to receive system notifications.'),
+    isDisplayNotification: z.number().optional().describe('Flag (0, 1) to receive display notifications.'),
+    isDataSetNotification: z.number().optional().describe('Flag (0, 1) to receive DataSet notification emails.'),
+    isLayoutNotification: z.number().optional().describe('Flag (0, 1) to receive Layout notification emails.'),
+    isLibraryNotification: z.number().optional().describe('Flag (0, 1) to receive Library notification emails.'),
+    isReportNotification: z.number().optional().describe('Flag (0, 1) to receive Report notification emails.'),
+    isScheduleNotification: z.number().optional().describe('Flag (0, 1) to receive Schedule notification emails.'),
+    isCustomNotification: z.number().optional().describe('Flag (0, 1) to receive Custom notification emails.'),
+    isShownForAddUser: z.number().optional().describe('Flag (0, 1) to show this Group in the Add User form.'),
+    defaultHomePageId: z.number().optional().describe('Default home page ID for new users in this group.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured.";
-      logger.error(message);
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
       return { success: false as const, message };
     }
 
-    logger.info(`Attempting to add user group: ${context.group}`);
-
     try {
+      const headers = await getAuthHeaders();
       const url = new URL(`${config.cmsUrl}/api/group`);
       
-      const formData = new URLSearchParams();
-      formData.append("group", context.group);
-      if (context.description) formData.append("description", context.description);
-      if (context.libraryQuota) formData.append("libraryQuota", context.libraryQuota);
-      if (context.isSystemNotification) formData.append("isSystemNotification", context.isSystemNotification.toString());
-      if (context.isDisplayNotification) formData.append("isDisplayNotification", context.isDisplayNotification.toString());
-      if (context.isScheduleNotification) formData.append("isScheduleNotification", context.isScheduleNotification.toString());
-      if (context.isCustomNotification) formData.append("isCustomNotification", context.isCustomNotification.toString());
-      if (context.isShownForAddUser) formData.append("isShownForAddUser", context.isShownForAddUser.toString());
-      if (context.defaultHomePageId) formData.append("defaultHomePageId", context.defaultHomePageId.toString());
+      const params = new URLSearchParams();
+      // Note: API spec has a typo 'decription', but we use 'description'
+      if (context.description) params.append('decription', context.description);
+      
+      for (const [key, value] of Object.entries(context)) {
+        if (value !== undefined && key !== 'description') {
+          params.append(key, String(value));
+        }
+      }
+
+      logger.debug({ url: url.toString(), params: params.toString() }, `Attempting to add user group: ${context.group}`);
 
       const response = await fetch(url.toString(), {
-        method: "POST",
+        method: 'POST',
         headers: {
-          ...await getAuthHeaders(),
-          'Content-Type': 'application/x-www-form-urlencoded'
+          ...headers,
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: formData.toString(),
+        body: params,
       });
 
-      const rawData = await response.json();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const decodedError = decodeErrorMessage(rawData);
-        const message = `Failed to create user group. API responded with status ${response.status}`;
-        logger.error(message, { response: decodedError });
-        return { success: false as const, message, errorData: decodedError };
+        const message = `Failed to add user group. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: responseData }, message);
+        return { success: false as const, message, errorData: responseData };
       }
+      
+      // API returns an array containing the new group
+      const newGroupData = Array.isArray(responseData) ? responseData[0] : responseData;
 
-      const userGroups = Array.isArray(rawData) ? rawData : [rawData];
-      const validationResult = z.array(userGroupSchema).safeParse(userGroups);
+      const validationResult = userGroupSchema.safeParse(newGroupData);
       if (!validationResult.success) {
-        const message = "API response validation failed";
-        logger.error(message, { error: validationResult.error, data: rawData });
-        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+        const message = 'Add user group response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: newGroupData }, message);
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: newGroupData,
+        };
       }
 
-      const message = `User group '${validationResult.data[0].group}' created successfully.`;
-      logger.info(message, { groupId: validationResult.data[0].groupId });
-      return { success: true, data: validationResult.data, message };
+      logger.info({ userGroup: validationResult.data }, 'User group added successfully.');
+      return { success: true as const, data: validationResult.data };
+
     } catch (error) {
-      const message = "An unexpected error occurred while creating the user group.";
-      logger.error(message, { error });
-      return {
-        success: false as const,
-        message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      };
+      const message = 'An unexpected error occurred during user group creation.';
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

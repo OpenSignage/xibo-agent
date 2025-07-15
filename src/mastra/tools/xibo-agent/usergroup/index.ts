@@ -11,9 +11,9 @@
  */
 
 /**
- * User Group API Tools for Xibo CMS
- * 
- * This module exports tools for managing user groups in Xibo CMS.
+ * @module userGroupTools
+ * @description This module serves as the entry point for all tools related to
+ * user group management in the Xibo CMS. It exports all available user group tools.
  */
 
 // Export all user group related tools

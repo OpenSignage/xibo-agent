@@ -12,87 +12,76 @@
 
 /**
  * @module deleteUserGroup
- * @description This module provides functionality to delete a user group from the Xibo CMS.
+ * @description Provides a tool to delete a user group from the Xibo CMS.
+ * It implements the DELETE /group/{userGroupId} API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-import { decodeErrorMessage } from "../utility/error";
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { errorResponseSchema } from './schemas';
 
 /**
- * Schema for the tool's output.
+ * Schema for the successful response after deleting a user group.
  */
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+const deleteUserGroupResponseSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([deleteUserGroupResponseSchema, errorResponseSchema]);
 
 /**
  * Tool to delete a user group from the Xibo CMS.
  */
 export const deleteUserGroup = createTool({
-  id: "delete-user-group",
-  description: "Delete a user group",
+  id: 'delete-user-group',
+  description: 'Deletes a User Group from the Xibo CMS.',
   inputSchema: z.object({
-    userGroupId: z.number().describe("The ID of the user group to delete"),
+    userGroupId: z.number().describe('The ID of the user group to delete.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
+    const { userGroupId } = context;
+
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured.";
-      logger.error(message);
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
       return { success: false as const, message };
     }
 
-    logger.info(`Attempting to delete user group ID: ${context.userGroupId}`);
-
     try {
-      const url = new URL(`${config.cmsUrl}/api/group/${context.userGroupId}`);
-      
+      const headers = await getAuthHeaders();
+      const url = new URL(`${config.cmsUrl}/api/group/${userGroupId}`);
+
+      logger.debug({ url: url.toString() }, `Attempting to delete user group ID: ${userGroupId}`);
+
       const response = await fetch(url.toString(), {
-        method: "DELETE",
-        headers: await getAuthHeaders(),
+        method: 'DELETE',
+        headers,
       });
 
-      if (response.status === 204) {
-        const message = `User group ID ${context.userGroupId} deleted successfully.`;
-        logger.info(message);
-        return { success: true, message };
+      if (response.ok) {
+        const message = `User group ID ${userGroupId} deleted successfully.`;
+        logger.info({ userGroupId }, message);
+        return { success: true as const, message };
       }
 
-      const rawData = await response.json();
-      
-      if (!response.ok) {
-        const decodedError = decodeErrorMessage(rawData);
-        const message = `Failed to delete user group. API responded with status ${response.status}`;
-        logger.error(message, { response: decodedError });
-        return { success: false as const, message, errorData: decodedError };
-      }
-
-      // Should not happen for a DELETE request if successful
-      const message = "User group deleted, but with an unexpected response.";
-      logger.warn(message, { userGroupId: context.userGroupId, data: rawData });
-      return { success: true, message };
+      const responseData = await response.json().catch(() => null);
+      const message = `Failed to delete user group. API responded with status ${response.status}.`;
+      logger.error({ status: response.status, response: responseData, userGroupId }, message);
+      return { success: false as const, message, errorData: responseData };
 
     } catch (error) {
-      const message = "An unexpected error occurred while deleting the user group.";
-      logger.error(message, { error });
-      return {
-        success: false as const,
-        message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      };
+      const message = 'An unexpected error occurred while deleting the user group.';
+      const processedError = processError(error);
+      logger.error({ error: processedError, userGroupId }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

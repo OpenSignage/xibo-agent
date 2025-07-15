@@ -12,31 +12,40 @@
 
 /**
  * @module userGroupSchemas
- * @description This module contains shared Zod schemas for Xibo user group tools.
+ * @description This module contains shared Zod schemas for Xibo user group tools,
+ * defining the structure of user group data and error responses.
  */
-
-import { z } from "zod";
+import { z } from 'zod';
 
 /**
- * Schema for the user group data returned by the API.
+ * Schema for the main user group data object, based on the Xibo API definition.
  */
 export const userGroupSchema = z.object({
-  groupId: z.number(),
-  group: z.string(),
-  isUserSpecific: z.number().optional(),
-  isEveryone: z.number().optional(),
-  description: z.string().nullable().optional(),
-  libraryQuota: z.number().nullable().optional(),
-  isSystemNotification: z.number().optional(),
-  isDisplayNotification: z.number().optional(),
-  isDataSetNotification: z.number().optional(),
-  isLayoutNotification: z.number().optional(),
-  isLibraryNotification: z.number().optional(),
-  isReportNotification: z.number().optional(),
-  isScheduleNotification: z.number().optional(),
-  isCustomNotification: z.number().optional(),
-  isShownForAddUser: z.number().optional(),
-  defaultHomepageId: z.string().nullable().optional(),
-  features: z.array(z.string()).optional(),
-  buttons: z.array(z.string()).optional(),
+  groupId: z.number().describe('The ID of the user group.'),
+  group: z.string().describe('The name of the user group.'),
+  isUserSpecific: z.number().describe('A flag indicating whether this is a user-specific group (1) or not (0).'),
+  isEveryone: z.number().describe('A flag indicating if this is the special "everyone" group (1) or not (0).'),
+  description: z.string().nullable().describe('The description of the user group.'),
+  libraryQuota: z.number().nullable().describe('The library quota for the group in bytes. 0 means unlimited.'),
+  isSystemNotification: z.number().describe('Flag indicating if the group receives system notifications (1) or not (0).'),
+  isDisplayNotification: z.number().describe('Flag indicating if the group receives display notifications (1) or not (0).'),
+  isDataSetNotification: z.number().describe('Flag indicating if the group receives DataSet notifications (1) or not (0).'),
+  isLayoutNotification: z.number().describe('Flag indicating if the group receives layout notifications (1) or not (0).'),
+  isLibraryNotification: z.number().describe('Flag indicating if the group receives library notifications (1) or not (0).'),
+  isReportNotification: z.number().describe('Flag indicating if the group receives report notifications (1) or not (0).'),
+  isScheduleNotification: z.number().describe('Flag indicating if the group receives schedule notifications (1) or not (0).'),
+  isCustomNotification: z.number().describe('Flag indicating if the group receives custom notifications (1) or not (0).'),
+  isShownForAddUser: z.number().describe('Flag indicating if this group is shown in the "Add User" form (1) or not (0).'),
+  defaultHomepageId: z.string().nullable().describe('The default home page ID for new users in this group.'),
+  features: z.array(z.string()).nullable().describe('A list of features this user group has access to.'),
+});
+
+/**
+ * Schema for a standardized error response.
+ */
+export const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 }); 
