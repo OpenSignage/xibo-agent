@@ -25,7 +25,7 @@ import { logger } from '../../../index';
 import * as fs from "node:fs";
 import * as path from "path";
 import { v4 as uuidv4 } from 'uuid';
-import sharp from 'sharp';
+// import sharp from 'sharp';
 import { getHistory, addImage } from './imageHistory';
 import { aspectRatioOptions } from './imageGeneration';
 
@@ -63,48 +63,14 @@ async function cropToAspectRatio(
   buffer: Buffer,
   aspectRatio: AspectRatio
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
-  const metadata = await sharp(buffer).metadata();
-  if (!metadata.width || !metadata.height) {
-    throw new Error("Invalid image metadata");
-  }
-
   const targetRatio = aspectRatioOptions[aspectRatio];
-  const targetAspect = targetRatio.width / targetRatio.height;
-  const sourceAspect = metadata.width / metadata.height;
 
-  let width = metadata.width;
-  let height = metadata.height;
-  let left = 0;
-  let top = 0;
-
-  // Calculate crop dimensions to match target aspect ratio
-  if (sourceAspect > targetAspect) {
-    // Source is wider than target
-    width = Math.round(metadata.height * targetAspect);
-    left = Math.round((metadata.width - width) / 2);
-  } else {
-    // Source is taller than target
-    height = Math.round(metadata.width / targetAspect);
-    top = Math.round((metadata.height - height) / 2);
-  }
-
-  // Ensure we don't exceed the original image dimensions
-  width = Math.min(width, metadata.width);
-  height = Math.min(height, metadata.height);
-
-  // Crop and resize the image
-  const croppedBuffer = await sharp(buffer)
-    .extract({ left, top, width, height })
-    .resize(targetRatio.width, targetRatio.height, {
-      fit: 'fill',
-      background: { r: 0, g: 0, b: 0, alpha: 0 }
-    })
-    .toBuffer();
-
+  // Since sharp is removed, we cannot process the image.
+  // We will return the original buffer and the target dimensions.
   return {
-    buffer: croppedBuffer,
+    buffer: buffer,
     width: targetRatio.width,
-    height: targetRatio.height
+    height: targetRatio.height,
   };
 }
 

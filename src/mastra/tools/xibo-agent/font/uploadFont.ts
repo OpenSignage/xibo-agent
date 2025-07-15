@@ -24,16 +24,18 @@ import { logger } from "../../../index";
 import { decodeErrorMessage, processError } from "../utility/error";
 import * as fs from 'fs';
 import * as path from 'path';
+import axios, { AxiosError } from 'axios';
+import FormData from 'form-data';
 
 // Schema for the response of a successful font upload.
 const successResponseSchema = z.object({
     success: z.literal(true),
     data: z.object({
         files: z.array(z.object({
-            mediaId: z.number().describe("The new Media ID for the uploaded font."),
+            id: z.number().describe("The new Media ID for the uploaded font."),
             name: z.string().describe("The name of the uploaded file."),
             fileName: z.string().describe("The file name of the uploaded font."),
-            mediaType: z.literal("font").describe("The media type."),
+            type: z.string().describe("The media type of the uploaded file, e.g., 'font/ttf'."),
             size: z.number().describe("The size of the file in bytes."),
             md5: z.string().describe("The MD5 checksum of the file."),
         })),
@@ -84,32 +86,26 @@ export const uploadFont = createTool({
             return { success: false as const, message };
         }
 
-        const formData = new FormData();
-        formData.append("files", new Blob([fs.readFileSync(fullPath)]), fileName);
+        const form = new FormData();
+        const fileBuffer = fs.readFileSync(fullPath);
+        form.append('files', fileBuffer, { filename: fileName });
         
-        Object.entries(rest).forEach(([key, value]) => {
-            if (value !== undefined) {
-                formData.append(key, String(value));
-            }
-        });
-
-        const url = new URL(`${config.cmsUrl}/api/fonts`);
-        logger.info({ url: url.toString(), path: fullPath }, `Uploading font '${fileName}'`);
-
-        const response = await fetch(url.toString(), {
-            method: "POST",
-            headers: await getAuthHeaders(),
-            body: formData,
-        });
-        
-        const responseData = await response.json().catch(() => response.text());
-
-        if (!response.ok) {
-            const decodedError = decodeErrorMessage(responseData);
-            const message = `Failed to upload font. API responded with status ${response.status}.`;
-            logger.error({ status: response.status, response: decodedError }, message);
-            return { success: false as const, message, errorData: decodedError };
+        if (rest.name) {
+            form.append('name', rest.name);
         }
+
+        const url = `${config.cmsUrl}/api/fonts`;
+        logger.info({ url: url, path: fullPath }, `Uploading font '${fileName}'`);
+
+        const authHeaders = await getAuthHeaders();
+        const response = await axios.post(url, form, {
+            headers: {
+                ...authHeaders,
+                ...form.getHeaders(),
+            },
+        });
+        
+        const responseData = response.data;
 
         const validationResult = successResponseSchema.safeParse({ success: true, data: responseData });
         if (!validationResult.success) {
@@ -127,6 +123,22 @@ export const uploadFont = createTool({
         return validationResult.data;
 
     } catch (error) {
+        if (error instanceof AxiosError) {
+            const errorDetails = {
+                status: error.response?.status,
+                data: error.response?.data,
+                headers: error.response?.headers,
+            };
+            const message = `HTTP error! status: ${error.response?.status}`;
+            logger.error({ error: error.message, details: errorDetails }, message);
+            return { 
+                success: false as const, 
+                message: message, 
+                error: error.message,
+                errorData: error.response?.data 
+            };
+        }
+
         const message = "An unexpected error occurred during font upload.";
         const processedError = processError(error);
         logger.error({ error: processedError }, message);

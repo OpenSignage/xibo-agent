@@ -58,7 +58,7 @@ export const deleteFont = createTool({
       return { success: false, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/fonts/${context.id}`);
+    const url = new URL(`${config.cmsUrl}/api/fonts/${context.id}/delete`);
     
     try {
       logger.info({ url: url.toString() }, `Attempting to delete font ID: ${context.id}`);
@@ -68,7 +68,7 @@ export const deleteFont = createTool({
         headers: await getAuthHeaders(),
       });
 
-      if (response.status === 204) {
+      if (response.ok) {
         const message = `Font with ID ${context.id} deleted successfully.`;
         logger.info({ fontId: context.id }, message);
         return { success: true, message };
