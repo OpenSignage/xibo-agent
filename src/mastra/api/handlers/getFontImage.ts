@@ -2,7 +2,7 @@ import { Context } from 'hono';
 import * as path from 'path';
 import * as fs from 'fs';
 import { config } from '../../tools/xibo-agent/config';
-import { logger } from '../../index';
+import { logger } from './logger';
 
 /**
  * Handles requests to serve font preview images.
