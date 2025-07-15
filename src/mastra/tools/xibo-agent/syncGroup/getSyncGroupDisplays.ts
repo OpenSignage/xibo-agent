@@ -12,145 +12,101 @@
 
 /**
  * @module getSyncGroupDisplays
- * @description This module provides functionality to retrieve the displays
- * assigned to a sync group. It implements the GET /api/syncgroup/{id}/displays endpoint.
+ * @description Provides a tool to retrieve displays assigned to a specific Sync Group in the Xibo CMS.
+ * It implements the GET /syncgroup/{id}/displays API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-
-// Schema for a single Display, based on xibo-api.json #/definitions/Display
-const displaySchema = z.object({
-    displayId: z.number(),
-    display: z.string(),
-    description: z.string().nullable().optional(),
-    defaultLayoutId: z.number(),
-    defaultLayout: z.string().nullable().optional(),
-    loggedIn: z.number(),
-    lastAccessed: z.string(),
-    incSchedule: z.number().nullable().optional(),
-    emailAlert: z.number().nullable().optional(),
-    alertTimeout: z.number().nullable().optional(),
-    clientAddress: z.string().nullable().optional(),
-    displayGroupId: z.number(),
-    displayGroup: z.string().nullable().optional(),
-    license: z.string(),
-    licensed: z.number().nullable().optional(),
-    version: z.string().nullable().optional(),
-    playerSoftware: z.string().nullable().optional(),
-    mediaInventoryStatus: z.string().nullable().optional(),
-    macAddress: z.string().nullable().optional(),
-    lastChanged: z.string().nullable().optional(),
-    numberOfMacAddressChanges: z.number().nullable().optional(),
-    currentLayoutId: z.number().nullable().optional(),
-    currentLayout: z.string().nullable().optional(),
-    displayProfileId: z.number().nullable().optional(),
-    isAuditing: z.number().nullable().optional(),
-    isAuthorized: z.number().nullable().optional(),
-    wakeOnLanEnabled: z.number().nullable().optional(),
-    wakeOnLanTime: z.string().nullable().optional(),
-    wakeOnLanCommand: z.string().nullable().optional(),
-    broadCastAddress: z.string().nullable().optional(),
-    secureOn: z.string().nullable().optional(),
-    cidr: z.string().nullable().optional(),
-    lastSyncStatus: z.string().nullable().optional(),
-    lastSyncMessage: z.string().nullable().optional(),
-    deviceName: z.string().nullable().optional(),
-    timeZone: z.string().nullable().optional(),
-    storageAvailableSpace: z.number().nullable().optional(),
-    storageTotalSpace: z.number().nullable().optional(),
-    osVersion: z.string().nullable().optional(),
-    osBuild: z.string().nullable().optional(),
-    totalRam: z.number().nullable().optional(),
-    availableRam: z.number().nullable().optional(),
-    latitude: z.number().nullable().optional(),
-    longitude: z.number().nullable().optional(),
-    onAirTime: z.number().nullable().optional(),
-    onAirTimeYesterday: z.number().nullable().optional(),
-    lastOnAirTime: z.string().nullable().optional(),
-    lastPowerOffTime: z.string().nullable().optional(),
-    lastPowerOnTime: z.string().nullable().optional(),
-    orientation: z.string().nullable().optional(),
-    authToken: z.string().nullable().optional(),
-    lastUpdateWindow: z.string().nullable().optional(),
-    lastCommandSuccess: z.string().nullable().optional(),
-    displayVenueId: z.number().nullable().optional(),
-    displayVenue: z.string().nullable().optional(),
-});
-
-// Schema for the response object which contains the array of displays
-const displaysResponseSchema = z.object({
-  displays: z.array(displaySchema),
-});
-
-// Schema for the overall tool response, which can be a success or error
-const responseSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.array(displaySchema),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { syncGroupDisplaySchema, errorResponseSchema } from './schemas';
 
 /**
- * Tool to get the displays assigned to a sync group.
- * This tool retrieves a list of all displays that are members of a specific sync group.
+ * Schema for the successful response, containing an array of displays in the sync group.
+ */
+const getDisplaysResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(syncGroupDisplaySchema),
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([getDisplaysResponseSchema, errorResponseSchema]);
+
+/**
+ * Tool for retrieving a list of displays assigned to a specific Sync Group.
  */
 export const getSyncGroupDisplays = createTool({
-  id: "get-sync-group-displays",
-  description: "Get the displays assigned to a sync group",
+  id: 'get-sync-group-displays',
+  description: 'Retrieves a list of displays assigned to a specific Sync Group.',
   inputSchema: z.object({
-    syncGroupId: z.number().describe("The ID of the sync group."),
-    eventId: z.number().optional().describe("Filter by a specific event ID."),
+    syncGroupId: z.number().describe('The ID of the sync group to retrieve displays for.'),
+    displayId: z.number().optional().describe('Filter by an individual Display ID.'),
+    displayGroupId: z.number().optional().describe('Filter by an individual Display Group ID.'),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<z.infer<typeof responseSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
+    const { syncGroupId, ...filters } = context;
+
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured";
-      logger.error(`getSyncGroupDisplays: ${message}`);
-      return { success: false, message };
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
     }
 
-    const url = new URL(`${config.cmsUrl}/api/syncgroup/${context.syncGroupId}/displays`);
-    if (context.eventId) url.searchParams.append("eventId", context.eventId.toString());
-
-    let responseData: any;
     try {
-      logger.debug(`getSyncGroupDisplays: Requesting URL: ${url.toString()}`);
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: await getAuthHeaders(),
-      });
+      const headers = await getAuthHeaders();
+      const url = new URL(`${config.cmsUrl}/api/syncgroup/${syncGroupId}/displays`);
 
-      responseData = await response.json();
-
-      if (!response.ok) {
-        const message = `HTTP error! status: ${response.status}`;
-        logger.error(`getSyncGroupDisplays: ${message}`, { errorData: responseData });
-        return { success: false, message, errorData: responseData };
+      if (filters.displayId) {
+        url.searchParams.append('displayId', String(filters.displayId));
+      }
+      if (filters.displayGroupId) {
+        url.searchParams.append('displayGroupId', String(filters.displayGroupId));
       }
 
-      const validatedData = displaysResponseSchema.parse(responseData);
-      logger.info("Sync group displays retrieved successfully");
-      return { success: true, data: validatedData.displays };
+      logger.debug({ url: url.toString() }, `Attempting to get displays for sync group ID: ${syncGroupId}`);
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers,
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        const message = `Failed to get sync group displays. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: responseData, syncGroupId }, message);
+        return { success: false as const, message, errorData: responseData };
+      }
+
+      const responseValidationSchema = z.object({
+        displays: z.array(syncGroupDisplaySchema),
+      });
+
+      const validationResult = responseValidationSchema.safeParse(responseData);
+      if (!validationResult.success) {
+        const message = 'Get sync group displays response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData, syncGroupId }, message);
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
+      }
+
+      logger.info(`Successfully retrieved ${validationResult.data.displays.length} displays for sync group ID ${syncGroupId}.`);
+      return { success: true as const, data: validationResult.data.displays };
 
     } catch (error) {
-        if (error instanceof z.ZodError) {
-            const message = "Validation error occurred while parsing the API response.";
-            logger.error(`getSyncGroupDisplays: ${message}`, { error: error.issues, errorData: responseData });
-            return { success: false, message, error: error.issues, errorData: responseData };
-        }
-        const message = error instanceof Error ? error.message : "An unknown error occurred";
-        logger.error(`getSyncGroupDisplays: ${message}`, { error });
-        return { success: false, message, error };
+      const message = 'An unexpected error occurred while getting sync group displays.';
+      const processedError = processError(error);
+      logger.error({ error: processedError, syncGroupId }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 });
