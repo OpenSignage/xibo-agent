@@ -13,7 +13,7 @@
 /**
  * @module getSyncGroups
  * @description Provides a tool to retrieve a list of Sync Groups from the Xibo CMS.
- * It implements the GET /sync/group API endpoint.
+ * It implements the GET /syncgroups API endpoint.
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core';
@@ -43,7 +43,8 @@ export const getSyncGroups = createTool({
   id: 'get-sync-groups',
   description: 'Retrieves a list of all Sync Groups from the Xibo CMS.',
   inputSchema: z.object({
-    syncGroupName: z.string().optional().describe('Filter by sync group name.'),
+    name: z.string().optional().describe('Filter by sync group name.'),
+    syncGroupId: z.number().optional().describe('Filter by sync group ID.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -55,10 +56,13 @@ export const getSyncGroups = createTool({
 
     try {
       const headers = await getAuthHeaders();
-      const url = new URL(`${config.cmsUrl}/api/sync/group`);
+      const url = new URL(`${config.cmsUrl}/api/syncgroups`);
       
-      if (context.syncGroupName) {
-        url.searchParams.append('syncGroupName', context.syncGroupName);
+      if (context.name) {
+        url.searchParams.append('name', context.name);
+      }
+      if (context.syncGroupId) {
+        url.searchParams.append('syncGroupId', String(context.syncGroupId));
       }
 
       logger.debug({ url: url.toString() }, 'Attempting to get sync groups');

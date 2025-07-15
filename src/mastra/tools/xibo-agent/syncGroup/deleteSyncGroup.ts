@@ -13,7 +13,7 @@
 /**
  * @module deleteSyncGroup
  * @description Provides a tool to delete a Sync Group from the Xibo CMS.
- * It implements the DELETE /sync/group/{id} API endpoint.
+ * It implements the DELETE /syncgroup/{id}/delete API endpoint.
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core';
@@ -52,12 +52,12 @@ export const deleteSyncGroup = createTool({
     if (!config.cmsUrl) {
       const message = 'CMS URL is not configured.';
       logger.error({}, message);
-      return { success: false, message };
+      return { success: false as const, message };
     }
 
     try {
       const headers = await getAuthHeaders();
-      const url = new URL(`${config.cmsUrl}/api/sync/group/${syncGroupId}`);
+      const url = new URL(`${config.cmsUrl}/api/syncgroup/${syncGroupId}/delete`);
 
       logger.debug({ url: url.toString() }, `Attempting to delete sync group ID: ${syncGroupId}`);
 
@@ -70,19 +70,19 @@ export const deleteSyncGroup = createTool({
       if (response.ok && response.status === 204) {
         const message = `Sync group with ID ${syncGroupId} deleted successfully.`;
         logger.info({ syncGroupId }, message);
-        return { success: true, message };
+        return { success: true as const, message };
       }
 
       const responseData = await response.json().catch(() => response.text());
       const message = `Failed to delete sync group. API responded with status ${response.status}.`;
       logger.error({ status: response.status, response: responseData, syncGroupId }, message);
-      return { success: false, message, errorData: responseData };
+      return { success: false as const, message, errorData: responseData };
 
     } catch (error) {
       const message = 'An unexpected error occurred during sync group deletion.';
       const processedError = processError(error);
       logger.error({ error: processedError, syncGroupId }, message);
-      return { success: false, message, error: processedError };
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

@@ -13,7 +13,7 @@
 /**
  * @module editSyncGroup
  * @description Provides a tool to edit an existing Sync Group in the Xibo CMS.
- * It implements the PUT /sync/group/{id} API endpoint.
+ * It implements the POST /syncgroup/{id}/edit API endpoint.
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core';
@@ -44,13 +44,12 @@ export const editSyncGroup = createTool({
   description: 'Edits an existing Sync Group in the Xibo CMS.',
   inputSchema: z.object({
     syncGroupId: z.number().describe('The ID of the sync group to edit.'),
-    syncGroupName: z.string().describe('The new name for the sync group.'),
-    isSyncEnabled: z.number().optional().describe('Flag to enable sync (0 or 1).'),
-    isSyncTimeEnabled: z.number().optional().describe('Flag to enable sync time (0 or 1).'),
-    isSyncOffsetEnabled: z.number().optional().describe('Flag to enable sync offset (0 or 1).'),
-    syncOffset: z.number().optional().describe('The sync offset in seconds.'),
-    syncMaster: z.number().describe('The Display ID of the master display.'),
-    syncSlaves: z.array(z.number()).describe('An array of Display IDs for the slave displays.'),
+    name: z.string().optional().describe('The new name for the sync group.'),
+    syncPublisherPort: z.number().optional().describe('The publisher port number.'),
+    syncSwitchDelay: z.number().optional().describe('The delay (in ms) when displaying the changes in content.'),
+    syncVideoPauseDelay: z.number().optional().describe('The delay (in ms) before unpausing the video on start.'),
+    leadDisplayId: z.number().describe('The ID of the Display that belongs to this Sync Group and should act as a Lead Display.'),
+    folderId: z.number().optional().describe('The ID of the folder to assign this sync group to.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -64,19 +63,19 @@ export const editSyncGroup = createTool({
 
     try {
       const headers = await getAuthHeaders();
-      const url = new URL(`${config.cmsUrl}/api/sync/group/${syncGroupId}`);
+      const url = new URL(`${config.cmsUrl}/api/syncgroup/${syncGroupId}/edit`);
       
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(body)) {
         if (value !== undefined) {
-          params.append(key, Array.isArray(value) ? value.join(',') : String(value));
+          params.append(key, String(value));
         }
       }
 
       logger.debug({ url: url.toString(), params: params.toString() }, `Attempting to edit sync group ID: ${syncGroupId}`);
 
       const response = await fetch(url.toString(), {
-        method: 'PUT',
+        method: 'POST',
         headers: {
           ...headers,
           'Content-Type': 'application/x-www-form-urlencoded',

@@ -13,8 +13,7 @@
 /**
  * @module addSyncGroup
  * @description Provides a tool to create a new Sync Group in the Xibo CMS.
- * It implements the POST /sync/group API endpoint and handles the necessary
- * validation and data transformation for creating a sync group.
+ * It implements the POST /syncgroup/add API endpoint.
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core';
@@ -26,7 +25,6 @@ import { syncGroupSchema, errorResponseSchema } from './schemas';
 
 /**
  * Schema for the successful response after creating a sync group.
- * It contains the newly created sync group's data.
  */
 const addSyncGroupResponseSchema = z.object({
   success: z.literal(true),
@@ -40,23 +38,18 @@ const outputSchema = z.union([addSyncGroupResponseSchema, errorResponseSchema]);
 
 /**
  * Tool for creating a new Sync Group in the Xibo CMS.
- * This tool allows specifying the group name, sync settings, master display, and slave displays.
  */
 export const addSyncGroup = createTool({
   id: 'add-sync-group',
   description: 'Creates a new Sync Group in the Xibo CMS.',
   inputSchema: z.object({
-    syncGroupName: z.string().describe('The name for the new sync group.'),
-    isSyncEnabled: z.number().optional().describe('Flag to enable sync (0 or 1). Defaults to 1.'),
-    isSyncTimeEnabled: z.number().optional().describe('Flag to enable sync time (0 or 1). Defaults to 1.'),
-    isSyncOffsetEnabled: z.number().optional().describe('Flag to enable sync offset (0 or 1). Defaults to 0.'),
-    syncOffset: z.number().optional().describe('The sync offset in seconds. Defaults to 0.'),
-    syncMaster: z.number().describe('The Display ID of the master display for this sync group.'),
-    syncSlaves: z.array(z.number()).describe('An array of Display IDs for the slave displays.'),
+    name: z.string().describe('The name for the new sync group.'),
+    syncPublisherPort: z.number().optional().describe('The publisher port number on which sync group members will communicate - default 9590.'),
+    folderId: z.number().optional().describe('The ID of the folder to assign this sync group to.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
-    const { syncGroupName, syncMaster, syncSlaves, ...optionalParams } = context;
+    const { name, ...rest } = context;
 
     if (!config.cmsUrl) {
       const message = 'CMS URL is not configured.';
@@ -66,17 +59,15 @@ export const addSyncGroup = createTool({
 
     try {
       const headers = await getAuthHeaders();
-      const url = new URL(`${config.cmsUrl}/api/sync/group`);
+      const url = new URL(`${config.cmsUrl}/api/syncgroup/add`);
       
-      const params = new URLSearchParams({
-        syncGroupName,
-        syncMaster: String(syncMaster),
-        syncSlaves: syncSlaves.join(','),
-        isSyncEnabled: String(optionalParams.isSyncEnabled ?? 1),
-        isSyncTimeEnabled: String(optionalParams.isSyncTimeEnabled ?? 1),
-        isSyncOffsetEnabled: String(optionalParams.isSyncOffsetEnabled ?? 0),
-        syncOffset: String(optionalParams.syncOffset ?? 0),
-      });
+      const params = new URLSearchParams({ name });
+      if (rest.syncPublisherPort !== undefined) {
+        params.append('syncPublisherPort', String(rest.syncPublisherPort));
+      }
+      if (rest.folderId !== undefined) {
+        params.append('folderId', String(rest.folderId));
+      }
 
       logger.debug({ url: url.toString(), params: params.toString() }, 'Attempting to add a new sync group');
 
@@ -99,7 +90,7 @@ export const addSyncGroup = createTool({
 
       const validationResult = syncGroupSchema.safeParse(responseData);
       if (!validationResult.success) {
-        const message = 'Sync group response validation failed.';
+        const message = 'Add sync group response validation failed.';
         logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
         return {
           success: false as const,

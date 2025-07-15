@@ -13,7 +13,7 @@
 /**
  * @module getSyncGroupDisplays
  * @description Provides a tool to retrieve displays assigned to a specific Sync Group in the Xibo CMS.
- * It implements the GET /sync/group/{id}/displays API endpoint.
+ * It implements the GET /syncgroup/{id}/displays API endpoint.
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core';
@@ -44,10 +44,12 @@ export const getSyncGroupDisplays = createTool({
   description: 'Retrieves a list of displays assigned to a specific Sync Group.',
   inputSchema: z.object({
     syncGroupId: z.number().describe('The ID of the sync group to retrieve displays for.'),
+    displayId: z.number().optional().describe('Filter by an individual Display ID.'),
+    displayGroupId: z.number().optional().describe('Filter by an individual Display Group ID.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
-    const { syncGroupId } = context;
+    const { syncGroupId, ...filters } = context;
 
     if (!config.cmsUrl) {
       const message = 'CMS URL is not configured.';
@@ -57,7 +59,14 @@ export const getSyncGroupDisplays = createTool({
 
     try {
       const headers = await getAuthHeaders();
-      const url = new URL(`${config.cmsUrl}/api/sync/group/${syncGroupId}/displays`);
+      const url = new URL(`${config.cmsUrl}/api/syncgroup/${syncGroupId}/displays`);
+
+      if (filters.displayId) {
+        url.searchParams.append('displayId', String(filters.displayId));
+      }
+      if (filters.displayGroupId) {
+        url.searchParams.append('displayGroupId', String(filters.displayGroupId));
+      }
 
       logger.debug({ url: url.toString() }, `Attempting to get displays for sync group ID: ${syncGroupId}`);
 
@@ -74,7 +83,11 @@ export const getSyncGroupDisplays = createTool({
         return { success: false as const, message, errorData: responseData };
       }
 
-      const validationResult = z.array(syncGroupDisplaySchema).safeParse(responseData);
+      const responseValidationSchema = z.object({
+        displays: z.array(syncGroupDisplaySchema),
+      });
+
+      const validationResult = responseValidationSchema.safeParse(responseData);
       if (!validationResult.success) {
         const message = 'Get sync group displays response validation failed.';
         logger.error({ error: validationResult.error.flatten(), data: responseData, syncGroupId }, message);
@@ -86,8 +99,8 @@ export const getSyncGroupDisplays = createTool({
         };
       }
 
-      logger.info(`Successfully retrieved ${validationResult.data.length} displays for sync group ID ${syncGroupId}.`);
-      return { success: true as const, data: validationResult.data };
+      logger.info(`Successfully retrieved ${validationResult.data.displays.length} displays for sync group ID ${syncGroupId}.`);
+      return { success: true as const, data: validationResult.data.displays };
 
     } catch (error) {
       const message = 'An unexpected error occurred while getting sync group displays.';

@@ -12,33 +12,49 @@
 
 /**
  * @module schemas
- * @description Provides shared Zod schemas for Xibo Sync Group tools.
- * This centralization of schemas ensures consistency and reusability across
- * different tools that interact with Sync Group entities in the CMS.
+ * @description Provides shared Zod schemas for Xibo Sync Group tools,
+ * ensuring consistency with the xibo-api.json specification.
  */
 import { z } from 'zod';
 
 /**
- * Schema for a single Sync Group object as returned by the Xibo API.
+ * Schema for a single Sync Group object, based on #/definitions/SyncGroup.
  */
 export const syncGroupSchema = z.object({
-  syncGroupId: z.number().describe('The unique ID of the sync group.'),
-  syncGroupName: z.string().describe('The name of the sync group.'),
-  isSyncEnabled: z.number().describe('Flag indicating if sync is enabled (0 or 1).'),
-  isSyncTimeEnabled: z.number().describe('Flag indicating if sync time is enabled (0 or 1).'),
-  isSyncOffsetEnabled: z.number().describe('Flag indicating if sync offset is enabled (0 or 1).'),
-  syncOffset: z.number().describe('The sync offset value.'),
-  syncMaster: z.number().describe('The display ID of the sync master.'),
-  syncMasterMac: z.string().describe('The MAC address of the sync master.'),
-  syncSlaves: z.array(z.number()).describe('An array of display IDs for the sync slaves.'),
-  syncMasterCode: z.string().describe('The identification code for the sync master.'),
+  syncGroupId: z.number().describe('The ID of this Entity'),
+  name: z.string().describe('The name of this Entity'),
+  createdDt: z.string().nullable().describe('The datetime this entity was created'),
+  modifiedDt: z.string().nullable().describe('The datetime this entity was last modified'),
+  modifiedBy: z.number().nullable().describe('The ID of the user that last modified this sync group'),
+  modifiedByName: z.string().nullable().describe('The name of the user that last modified this sync group'),
+  ownerId: z.number().describe('The ID of the owner of this sync group'),
+  owner: z.string().nullable().describe('The name of the owner of this sync group'),
+  syncPublisherPort: z.number().describe('The publisher port number'),
+  syncSwitchDelay: z.number().nullable().describe('The delay (in ms) when displaying the changes in content'),
+  syncVideoPauseDelay: z.number().nullable().describe('The delay (in ms) before unpausing the video on start.'),
+  leadDisplayId: z.number().nullable().describe('The ID of the lead Display for this sync group'),
+  leadDisplay: z.string().nullable().describe('The name of the lead Display for this sync group'),
+  folderId: z.number().optional().describe('The id of the Folder this Sync Group belongs to'),
+  permissionsFolderId: z.number().optional().describe('The id of the Folder responsible for providing permissions for this Sync Group'),
+  groupsWithPermissions: z.any().optional().nullable().describe('Groups with permissions for this sync group'),
 });
 
 /**
- * Schema for the success response of an operation.
+ * Schema for a display that is a member of a Sync Group.
+ * This combines relevant fields from #/definitions/Display and the response of GET /syncgroup/{syncGroupId}/displays.
  */
-export const successResponseSchema = z.object({
-  success: z.literal(true).describe('Indicates the operation was successful.'),
+export const syncGroupDisplaySchema = z.object({
+  displayId: z.number().describe("The unique ID of the display."),
+  display: z.string().describe("The name of the display."),
+  isMaster: z.number().describe("Flag indicating if this display is the master (1) or a slave (0).").optional(), // This field is not in the base Display definition but is in the sync group context
+  macAddress: z.string().optional().describe("The MAC address of the display."),
+  version: z.string().optional().describe("The player software version."),
+  playerSoftware: z.string().optional().describe("The name of the player software."),
+  playerSoftwareId: z.number().optional().describe("The ID of the player software."),
+  // The API for GET /syncgroup/{syncGroupId}/displays seems to return a variant of the Display object.
+  // The fields below are from the main Display definition and might not all be present.
+  authorised: z.number().optional().describe('Flag indicating if the display is authorised.'),
+  loggedIn: z.number().optional().describe('Flag indicating if the display is logged in.'),
 });
 
 /**
@@ -49,36 +65,4 @@ export const errorResponseSchema = z.object({
   message: z.string().describe('A human-readable error message.'),
   error: z.any().optional().describe('Optional technical details about the error.'),
   errorData: z.any().optional().describe('Optional raw error data from the API.'),
-});
-
-/**
- * Schema for a display associated with a Sync Group.
- */
-export const syncGroupDisplaySchema = z.object({
-    displayGroupId: z.number().describe("The ID of the display group."),
-    displayId: z.number().describe("The unique ID of the display."),
-    display: z.string().describe("The name of the display."),
-    isMaster: z.number().describe("Flag indicating if this display is the master (1) or a slave (0)."),
-    macAddress: z.string().describe("The MAC address of the display."),
-    version: z.string().describe("The player software version."),
-    playerSoftware: z.string().describe("The name of the player software."),
-    playerSoftwareId: z.number().describe("The ID of the player software."),
-});
-
-/**
- * Schema for the user object within a response.
- */
-export const userSchema = z.object({
-  userId: z.number().describe("The user's ID"),
-  userName: z.string().describe("The user's name"),
-  userGroupId: z.number().describe("The ID of the user's group"),
-  userGroupName: z.string().describe("The name of the user's group"),
-  isRetired: z.number().describe("Flag indicating if the user is retired"),
-  isDisplayAdmin: z.number().describe("Flag indicating if the user has display admin privileges"),
-  isGroupAdmin: z.number().describe("Flag indicating if the user has group admin privileges"),
-  userTypeId: z.number().describe("The ID of the user's type"),
-  userType: z.string().describe("The user's type (e.g., 'System', 'Group')"),
-  lastAccessed: z.string().describe("The last access timestamp"),
-  loggedIn: z.string().describe("The last login timestamp"),
-  homePage: z.string().describe("The user's home page"),
 }); 
