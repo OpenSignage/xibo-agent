@@ -12,155 +12,106 @@
 
 /**
  * @module getModules
- * @description This module provides functionality to retrieve information about all available
- * modules in the Xibo CMS. It accesses the /api/module endpoint to get details
- * about module properties, configuration options, and compatibility.
+ * @description Provides a tool to retrieve information about all available modules in the Xibo CMS.
+ * It implements the GET /module API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from '@mastra/core/tools';
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
-import { 
-  TreeNode, 
-  treeResponseSchema, 
-  createTreeViewResponse 
-} from '../utility/treeView';
+import { processError } from '../utility/error';
+import { moduleSchema } from './schemas';
+import { TreeNode, createTreeViewResponse } from '../utility/treeView';
 
 /**
- * Schema for module property definition.
- * Represents configurable properties of Xibo modules.
+ * Schema for the successful response, containing an array of modules.
  */
-const propertySchema = z.object({
-  id: z.string(),
-  type: z.string(),
-  title: z.string().nullable(),
-  helpText: z.string().nullable(),
-  default: z.union([z.string(), z.number(), z.null()]),
+const getModulesSuccessSchema = z.object({
+  success: z.literal(true),
+  data: z.array(moduleSchema.passthrough()),
 });
 
 /**
- * Schema for module response data from the Xibo API.
- * Defines the comprehensive structure of module information, including metadata,
- * compatibility settings, and configuration options.
+ * Schema for the successful tree view response.
  */
-const moduleSchema = z.object({
-  moduleId: z.union([z.number(), z.string().transform(Number)]),
-  name: z.string().nullable(),
-  author: z.string().nullable(),
-  description: z.string().nullable(),
-  icon: z.string().nullable(),
-  type: z.string().nullable(),
-  legacyTypes: z.union([z.array(z.string()), z.array(z.object({}))]),
-  dataType: z.string().nullable(),
-  group: z.union([z.array(z.string()), z.object({})]),
-  dataCacheKey: z.string().nullable(),
-  fallbackData: z.union([z.number(), z.string().transform(Number)]),
-  regionSpecific: z.union([z.number(), z.string().transform(Number)]),
-  schemaVersion: z.union([z.number(), z.string().transform(Number)]),
-  compatibilityClass: z.string().nullable(),
-  showIn: z.string().nullable(),
-  assignable: z.union([z.number(), z.string().transform(Number)]),
-  hasThumbnail: z.union([z.number(), z.string().transform(Number)]),
-  thumbnail: z.string().nullable(),
-  startWidth: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  startHeight: z.union([z.number(), z.string().transform(Number)]).nullable(),
-  renderAs: z.string().nullable(),
-  class: z.string().nullable(),
-  validatorClass: z.array(z.string()),
-  preview: z.any().nullable(),
-  stencil: z.any().nullable(),
-  properties: z.array(propertySchema),
-  assets: z.any().nullable(),
-  onInitialize: z.string().nullable(),
-  onParseData: z.string().nullable(),
-  onDataLoad: z.string().nullable(),
-  onRender: z.string().nullable(),
-  onVisible: z.string().nullable(),
-  sampleData: z.union([z.string(), z.array(z.any()), z.null()]),
-  enabled: z.union([z.number(), z.string().transform(Number)]),
-  previewEnabled: z.union([z.number(), z.string().transform(Number)]),
-  defaultDuration: z.union([z.number(), z.string().transform(Number)]),
-  settings: z.array(propertySchema),
-  propertyGroups: z.array(z.string()),
-  requiredElements: z.array(z.string()),
-  isInstalled: z.boolean(),
-  isError: z.boolean(),
-  errors: z.array(z.string()),
-  allowPreview: z.union([z.number(), z.string().transform(Number)]).nullable(),
+const getModulesTreeSuccessSchema = z.object({
+  success: z.literal(true),
+  data: z.array(z.any()),
+  tree: z.string(),
+  message: z.string(),
 });
 
-const successSchema = z.union([
-  treeResponseSchema,
-  z.array(moduleSchema),
-]);
+/**
+ * Schema for a standardized error response.
+ */
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
+});
 
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
 const outputSchema = z.union([
-  successSchema,
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
+  getModulesSuccessSchema,
+  getModulesTreeSuccessSchema,
+  errorResponseSchema,
 ]);
 
 /**
- * Builds a tree structure from a flat list of modules.
- * @param modules - The array of module data from the API.
- * @returns An array of TreeNode objects representing the module hierarchy.
+ * Builds a tree structure from a flat list of modules for the tree view.
  */
-function buildModuleTree(modules: any[]): TreeNode[] {
+function buildModuleTree(modules: z.infer<typeof moduleSchema>[]): TreeNode[] {
+  let idCounter = 0;
+
   return modules.map(module => {
     const moduleNode: TreeNode = {
-      id: module.moduleId,
-      name: `${module.name || 'Unnamed Module'} (ID: ${module.moduleId})`,
+      id: idCounter++,
+      name: `(ID: ${module.moduleId ?? 'N/A'}) ${
+        module.name || 'Unnamed Module'
+      } (Type: ${module.type || 'N/A'})`,
       type: 'module',
-      children: []
+      children: [],
     };
 
-    // Information Node
     const infoChildren: TreeNode[] = [];
-    if (module.author) infoChildren.push({ id: -module.moduleId * 10 - 1, name: `Author: ${module.author}`, type: 'info-detail' });
-    if (module.type) infoChildren.push({ id: -module.moduleId * 10 - 2, name: `Type: ${module.type}`, type: 'info-detail' });
-    if (module.dataType) infoChildren.push({ id: -module.moduleId * 10 - 3, name: `Data Type: ${module.dataType}`, type: 'info-detail' });
-    if (module.description) infoChildren.push({ id: -module.moduleId * 10 - 4, name: `Description: ${module.description}`, type: 'info-detail' });
+    if (module.author) {
+      infoChildren.push({
+        id: idCounter++,
+        name: `Author: ${module.author}`,
+        type: 'info-detail',
+      });
+    }
+    if (module.description) {
+      infoChildren.push({
+        id: idCounter++,
+        name: `Description: ${module.description}`,
+        type: 'info-detail',
+      });
+    }
 
     if (infoChildren.length > 0) {
       moduleNode.children?.push({
-        id: -module.moduleId * 10,
+        id: idCounter++,
         name: 'Information',
         type: 'info',
-        children: infoChildren
-      });
-    }
-    
-    // Properties Node
-    if (module.properties && module.properties.length > 0) {
-      moduleNode.children?.push({
-        id: -module.moduleId * 100,
-        name: 'Properties',
-        type: 'properties',
-        children: module.properties.map((prop: any, index: number) => ({
-          id: -module.moduleId * 100 - (index + 1),
-          name: `${prop.title || prop.id}: ${prop.type}`,
-          type: 'property'
-        }))
+        children: infoChildren,
       });
     }
 
-    // Settings Node
-    if (module.settings && module.settings.length > 0) {
+    if (module.properties && module.properties.length > 0) {
       moduleNode.children?.push({
-        id: -module.moduleId * 1000,
-        name: 'Settings',
-        type: 'settings',
-        children: module.settings.map((setting: any, index: number) => ({
-          id: -module.moduleId * 1000 - (index + 1),
-          name: `${setting.title || setting.id}: ${setting.type}`,
-          type: 'setting'
-        }))
+        id: idCounter++,
+        name: 'Properties',
+        type: 'properties',
+        children: module.properties.map(prop => ({
+          id: idCounter++,
+          name: `${prop.title || prop.id}: ${prop.type}`,
+          type: 'property',
+        })),
       });
     }
 
@@ -169,82 +120,85 @@ function buildModuleTree(modules: any[]): TreeNode[] {
 }
 
 /**
- * Formats a tree node for display in the text-based tree view.
- * @param node - The TreeNode to format.
- * @returns A string representation of the node with an icon.
+ * Formats a tree node for the text-based tree view.
  */
 function moduleNodeFormatter(node: TreeNode): string {
-  switch (node.type) {
-    case 'module':
-      return `📦 ${node.name}`;
-    case 'info':
-      return `ℹ️ ${node.name}`;
-    case 'properties':
-      return `🔧 ${node.name}`;
-    case 'settings':
-      return `⚙️ ${node.name}`;
-    case 'property':
-    case 'setting':
-    case 'info-detail':
-      return node.name;
-    default:
-      return node.name;
-  }
+  const iconMap: { [key: string]: string } = {
+    module: '📦',
+    info: 'ℹ️',
+    properties: '🔧',
+    property: '🔹',
+    'info-detail': '🔸',
+    default: '•',
+  };
+  const icon = iconMap[node.type] || iconMap.default;
+  return `${icon} ${node.name}`;
 }
 
 /**
- * Tool for retrieving all module information from the Xibo CMS.
+ * Tool for retrieving all available modules from the Xibo CMS.
  */
 export const getModules = createTool({
   id: 'get-modules',
-  description: 'Get information about all available Xibo CMS modules',
+  description: 'Gets a list of all available modules in the Xibo CMS.',
   inputSchema: z.object({
-    treeView: z.boolean().optional().describe("Set to true to return modules in a tree structure."),
+    treeView: z.boolean().optional().describe("Set to true to return modules in a hierarchical tree structure."),
   }),
   outputSchema,
   execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured.";
-      logger.error(message);
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
       return { success: false as const, message };
     }
 
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${config.cmsUrl}/api/module`, {
+      const url = new URL(`${config.cmsUrl}/api/module`);
+      
+      logger.debug({ url: url.toString() }, 'Attempting to get all modules');
+      
+      const response = await fetch(url.toString(), {
+        method: 'GET',
         headers,
       });
 
-      const rawData = await response.json();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const message = `Failed to get modules. API responded with status ${response.status}`;
-        logger.error(message, { response: rawData });
-        return { success: false as const, message, errorData: rawData };
+        const message = `Failed to get modules. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: responseData }, message);
+        return { success: false as const, message, errorData: responseData };
       }
-
-      const validationResult = z.array(moduleSchema).safeParse(rawData);
+      
+      // Use passthrough to allow extra fields not defined in the schema
+      const validationResult = z.array(moduleSchema.passthrough()).safeParse(responseData);
       if (!validationResult.success) {
-        const message = "API response validation failed";
-        logger.error(message, { error: validationResult.error, data: rawData });
-        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+        const message = 'Get modules response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
       }
+      
+      const modules = validationResult.data as z.infer<typeof moduleSchema>[];
 
-      // If treeView is requested, build and return the tree structure.
       if (context.treeView) {
-        const moduleTree = buildModuleTree(validationResult.data);
-        return createTreeViewResponse(validationResult.data, moduleTree, moduleNodeFormatter);
+        const moduleTree = buildModuleTree(modules);
+        return createTreeViewResponse(modules, moduleTree, moduleNodeFormatter);
       }
 
-      return validationResult.data;
+      logger.info(`Successfully retrieved ${modules.length} modules.`);
+      return { success: true as const, data: modules };
+
     } catch (error) {
-      const message = "An unexpected error occurred while getting modules.";
-      logger.error(message, { error });
-      return {
-        success: false as const,
-        message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      };
+      const message = 'An unexpected error occurred while getting modules.';
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 });

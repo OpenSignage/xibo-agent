@@ -11,12 +11,9 @@
  */
 
 /**
- * Xibo CMS Module Management Tools
- * 
- * This module exports tools for retrieving information about modules, 
- * module properties, and module templates from the Xibo CMS API.
- * These tools help in understanding available module configurations
- * and template options for content creation.
+ * @module moduleTools
+ * @description This module serves as the entry point for all tools related to
+ * module and template management in the Xibo CMS.
  */
 
 export { getModules } from './getModules';
