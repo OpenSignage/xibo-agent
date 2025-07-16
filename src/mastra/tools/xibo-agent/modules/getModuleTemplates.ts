@@ -12,133 +12,102 @@
 
 /**
  * @module getModuleTemplates
- * @description This module provides functionality to retrieve module templates
- * from the Xibo CMS, filtered by data type.
+ * @description Provides a tool to retrieve module templates from the Xibo CMS,
+ * filtered by data type. It implements the GET /module/templates/{dataType} endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-
-/**
- * Schema for the 'stencil' object within a module template.
- */
-const stencilSchema = z.object({
-  elementGroups: z.array(z.any()).optional(),
-}).nullable();
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { moduleTemplateSchema } from './schemas';
 
 /**
- * Schema for the 'extends' object, defining template inheritance.
+ * Schema for the successful response, containing an array of module templates.
  */
-const extendsSchema = z.object({
-  templateId: z.string().optional(),
-  type: z.string().optional(),
-}).nullable();
-
-/**
- * Schema for individual properties within a module template.
- */
-const propertySchema = z.object({
-  id: z.string(),
-  type: z.string(),
-  title: z.string().nullable(),
-  helpText: z.string().nullable(),
-  default: z.union([z.string(), z.number(), z.boolean()]).nullable(),
+const getModuleTemplatesResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(moduleTemplateSchema),
 });
 
 /**
- * Schema for the main module template structure.
+ * Schema for a standardized error response.
  */
-const moduleTemplateSchema = z.object({
-  templateId: z.string(),
-  type: z.string(),
-  extends: extendsSchema,
-  dataType: z.string(),
-  title: z.string(),
-  description: z.string().nullable(),
-  icon: z.string().nullable(),
-  thumbnail: z.string().nullable(),
-  showIn: z.string().nullable(),
-  properties: z.array(propertySchema),
-  isVisible: z.boolean(),
-  isEnabled: z.boolean(),
-  propertyGroups: z.array(z.string()),
-  stencil: stencilSchema,
-  assets: z.array(z.any()),
-  groupsWithPermissions: z.string().nullable(),
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: z.array(moduleTemplateSchema),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([getModuleTemplatesResponseSchema, errorResponseSchema]);
 
 /**
- * Tool to retrieve a list of module templates from the Xibo CMS.
- * Filters templates based on the specified data type.
+ * Tool to retrieve a list of module templates from the Xibo CMS,
+ * filtered by the specified data type.
  */
 export const getModuleTemplates = createTool({
-  id: "get-module-templates",
-  description: "Get module templates by data type",
+  id: 'get-module-templates',
+  description: 'Gets module templates by data type.',
   inputSchema: z.object({
-    dataType: z.string().describe("DataType to return templates for"),
-    type: z.string().optional().describe("Type to return templates for"),
+    dataType: z.string().describe("DataType to return templates for (e.g., 'article', 'dataset')."),
+    type: z.string().optional().describe("Further filter by template type."),
   }),
   outputSchema,
   execute: async ({ context }) => {
+    const { dataType, type } = context;
+
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured.";
-      logger.error(message);
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
       return { success: false as const, message };
     }
 
     try {
-      const url = new URL(`${config.cmsUrl}/api/module/templates/${context.dataType}`);
-      if (context.type) {
-        url.searchParams.append("type", context.type);
+      const url = new URL(`${config.cmsUrl}/api/module/templates/${dataType}`);
+      if (type) {
+        url.searchParams.append("type", type);
       }
 
+      logger.debug({ url: url.toString() }, `Attempting to get templates for dataType: ${dataType}`);
+
       const response = await fetch(url.toString(), {
-        method: "GET",
+        method: 'GET',
         headers: await getAuthHeaders(),
       });
 
-      const rawData = await response.json();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const message = `Failed to get module templates. API responded with status ${response.status}`;
-        logger.error(message, { response: rawData });
-        return { success: false as const, message, errorData: rawData };
+        const message = `Failed to get module templates. API responded with status ${response.status}.`;
+        logger.error({ status: response.status, response: responseData, dataType }, message);
+        return { success: false as const, message, errorData: responseData };
       }
 
-      const validationResult = z.array(moduleTemplateSchema).safeParse(rawData);
+      const validationResult = z.array(moduleTemplateSchema).safeParse(responseData);
       if (!validationResult.success) {
-        const message = "API response validation failed";
-        logger.error(message, { error: validationResult.error, data: rawData });
-        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+        const message = 'Get module templates response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData, dataType }, message);
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
       }
+      
+      logger.info(`Successfully retrieved ${validationResult.data.length} templates for dataType '${dataType}'.`);
+      return { success: true as const, data: validationResult.data };
 
-      const message = "Module templates retrieved successfully";
-      return { success: true, data: validationResult.data, message };
     } catch (error) {
-      const message = "An unexpected error occurred while getting module templates.";
-      logger.error(message, { error });
-      return {
-        success: false as const,
-        message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      };
+      const message = 'An unexpected error occurred while getting module templates.';
+      const processedError = processError(error);
+      logger.error({ error: processedError, dataType }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 
