@@ -1,143 +1,134 @@
 /*
- * Copyright 2024 Mastra, Inc.
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
 /**
  * @module editDayPart
- * @description This module provides functionality to edit an existing DayPart in the Xibo CMS.
+ * @description Provides a tool to edit an existing DayPart record in the Xibo CMS.
+ * It implements the PUT /daypart/{id} API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-
-// Schema for a single DayPart object
-const dayPartSchema = z.object({
-  dayPartId: z.number(),
-  isAlways: z.number(),
-  isCustom: z.number(),
-  name: z.string(),
-  description: z.string().nullable(),
-  startTime: z.string(),
-  endTime: z.string(),
-  exceptionDays: z.array(z.string()).optional(),
-  exceptionStartTimes: z.array(z.string()).optional(),
-  exceptionEndTimes: z.array(z.string()).optional(),
-});
-
-// Schema for the output of the tool, covering both success and error cases
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    data: dayPartSchema,
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-    errorData: z.any().optional(),
-  }),
-]);
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { dayPartSchema } from './schemas';
 
 /**
- * Tool to edit an existing DayPart
- * This tool interfaces with the Xibo API to update a DayPart record.
+ * Schema for the successful response, containing the updated DayPart.
+ */
+const editDayPartSuccessSchema = z.object({
+  success: z.literal(true),
+  data: dayPartSchema,
+});
+
+/**
+ * Schema for a standardized error response.
+ */
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z
+    .any()
+    .optional()
+    .describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([editDayPartSuccessSchema, errorResponseSchema]);
+
+/**
+ * Tool to edit an existing DayPart record in the Xibo CMS.
  */
 export const editDayPart = createTool({
-  id: "edit-daypart",
-  description: "Edit a DayPart",
+  id: 'edit-daypart',
+  description: 'Edits an existing DayPart record in the Xibo CMS.',
   inputSchema: z.object({
-    dayPartId: z.number().describe("The ID of the DayPart to edit (required)"),
-    name: z.string().describe("New name for the DayPart (required)"),
-    description: z.string().optional().describe("New description for the DayPart (optional)"),
-    startTime: z.string().describe("New start time in HH:mm:ss format (required)"),
-    endTime: z.string().describe("New end time in HH:mm:ss format (required)"),
-    exceptionDays: z.array(z.string()).optional().describe("New array of exception dates in YYYY-MM-DD format"),
-    exceptionStartTimes: z.array(z.string()).optional().describe("New array of exception start times in HH:mm:ss format"),
-    exceptionEndTimes: z.array(z.string()).optional().describe("New array of exception end times in HH:mm:ss format"),
+    dayPartId: z.number().describe('The ID of the DayPart record to edit.'),
+    name: z.string().describe('The new name for the DayPart.'),
+    description: z.string().optional().describe('The new description for the DayPart.'),
+    startTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/).describe('The new start time in HH:mm:ss format.'),
+    endTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/).describe('The new end time in HH:mm:ss format.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
+    const { dayPartId, ...updates } = context;
+
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured.";
-      logger.error(message);
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
       return { success: false as const, message };
     }
 
     try {
-      const url = new URL(`${config.cmsUrl}/api/daypart/${context.dayPartId}`);
-      const params = new URLSearchParams();
-      params.append("name", context.name);
-      params.append("startTime", context.startTime);
-      params.append("endTime", context.endTime);
-      if (context.description) {
-        params.append("description", context.description);
-      }
-      if (context.exceptionDays) {
-        context.exceptionDays.forEach((day: string) => params.append("exceptionDays[]", day));
-      }
-      if (context.exceptionStartTimes) {
-        context.exceptionStartTimes.forEach((time: string) => params.append("exceptionStartTimes[]", time));
-      }
-      if (context.exceptionEndTimes) {
-        context.exceptionEndTimes.forEach((time: string) => params.append("exceptionEndTimes[]", time));
-      }
+      const url = new URL(`${config.cmsUrl}/api/daypart/${dayPartId}`);
+      const authHeaders = await getAuthHeaders();
+      const headers = {
+        ...authHeaders,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      };
 
-      logger.info(`Attempting to edit DayPart at: ${url.toString()}`);
-      logger.debug("Request body:", { body: params.toString() });
+      const body = new URLSearchParams(updates as Record<string, string>);
+
+      logger.debug(
+        { url: url.toString(), body: body.toString() },
+        `Attempting to edit DayPart ${dayPartId}`
+      );
 
       const response = await fetch(url.toString(), {
-        method: "PUT",
-        headers: {
-          ...(await getAuthHeaders()),
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: params,
+        method: 'PUT',
+        headers,
+        body,
       });
 
-      const rawData = await response.json();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const message = `Failed to edit DayPart. API responded with status ${response.status}`;
-        logger.error(message, { response: rawData });
-        return { success: false as const, message, errorData: rawData };
+        const message = `Failed to edit DayPart. API responded with status ${response.status}.`;
+        logger.error(
+          { status: response.status, response: responseData },
+          message
+        );
+        return { success: false as const, message, errorData: responseData };
       }
 
-      const validationResult = dayPartSchema.safeParse(rawData);
+      const validationResult = dayPartSchema.safeParse(responseData);
       if (!validationResult.success) {
-        const message = "API response validation failed";
-        logger.error(message, { error: validationResult.error, data: rawData });
-        return { success: false as const, message, error: validationResult.error, errorData: rawData };
+        const message = 'Edit DayPart response validation failed.';
+        logger.error(
+          { error: validationResult.error.flatten(), data: responseData },
+          message
+        );
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
       }
 
-      const message = "DayPart edited successfully";
-      logger.info(message, { data: validationResult.data });
-      return { success: true, data: validationResult.data, message };
+      logger.info(
+        { dayPartId },
+        `Successfully edited DayPart ID ${dayPartId}.`
+      );
+      return { success: true as const, data: validationResult.data };
     } catch (error) {
-      const message = "An unexpected error occurred while editing DayPart.";
-      logger.error(message, { error });
-      return {
-        success: false as const,
-        message,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      };
+      const message = `An unexpected error occurred while editing DayPart ${dayPartId}.`;
+      const processedError = processError(error);
+      logger.error({ error: processedError, dayPartId }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 });
-
-export default editDayPart; 
