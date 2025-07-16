@@ -11,141 +11,140 @@
  */
 
 /**
- * Add Command Tool
- * 
- * This module provides functionality to add new commands to the Xibo CMS.
- * It implements the command creation API and handles the necessary validation
- * and data transformation for command management.
+ * @module addCommand
+ * @description Provides a tool to add a new command to the Xibo CMS.
+ * It implements the POST /command API endpoint.
  */
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { commandSchema } from './schemas';
 
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-
-// Schema for command object
-const commandSchema = z.object({
-  commandId: z.number(),
-  command: z.string(),
-  code: z.string(),
-  description: z.string().nullable(),
-  userId: z.number(),
-  commandString: z.string().nullable(),
-  validationString: z.string().nullable(),
-  displayProfileId: z.number().nullable(),
-  commandStringDisplayProfile: z.string().nullable(),
-  validationStringDisplayProfile: z.string().nullable(),
-  availableOn: z.string().nullable(),
-  createAlertOn: z.string().nullable(),
-  createAlertOnDisplayProfile: z.string().nullable(),
-  groupsWithPermissions: z.string().nullable(),
-});
-
-// Schema for successful response
-const successResponseSchema = z.object({
+/**
+ * Schema for the successful response, containing the newly created command.
+ */
+const addCommandSuccessSchema = z.object({
   success: z.literal(true),
   data: commandSchema,
 });
 
-// Schema for error response
+/**
+ * Schema for a standardized error response.
+ */
 const errorResponseSchema = z.object({
   success: z.literal(false),
-  message: z.string(),
-  error: z.any().optional(),
-  errorData: z.any().optional(),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z
+    .any()
+    .optional()
+    .describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-// Union schema for all possible responses
-const responseSchema = z.union([successResponseSchema, errorResponseSchema]);
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([addCommandSuccessSchema, errorResponseSchema]);
 
 /**
- * Tool for adding commands
- * 
- * This tool creates new commands in the Xibo CMS system.
+ * Tool to add a new command to the Xibo CMS.
  */
 export const addCommand = createTool({
-  id: "add-command",
-  description: "Add a new command to the Xibo CMS",
+  id: 'add-command',
+  description: 'Adds a new command to the Xibo CMS.',
   inputSchema: z.object({
-    command: z.string().min(1, "Command name must be at least 1 character").max(254, "Command name must not exceed 254 characters").describe("The command name (required, 1-254 characters)"),
-    code: z.string().min(1, "Command code must be at least 1 character").describe("The command code/identifier (required)"),
-    description: z.string().describe("Description of the command (required)"),
-    commandString: z.string().optional().describe("The command string to execute (optional)"),
-    validationString: z.string().optional().describe("Validation string for the command (optional)"),
-    availableOn: z.string().optional().describe("Platforms where the command is available (optional)"),
-    createAlertOn: z.enum(["success", "failure", "always", "never"]).optional().describe("When to create alerts for this command (optional)"),
+    command: z.string().describe('The name of the command.'),
+    description: z
+      .string()
+      .optional()
+      .describe('A description for the command.'),
+    code: z
+      .string()
+      .describe(
+        'A code to identify the command, used in web hooks, etc.'
+      ),
+    commandString: z
+      .string()
+      .optional()
+      .describe('The command string to be sent to the Player.'),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<z.infer<typeof responseSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        const message = "CMS URL is not configured";
-        logger.error(message);
-        return { success: false, message };
+      const url = new URL(`${config.cmsUrl}/api/command`);
+      const authHeaders = await getAuthHeaders();
+      const headers = {
+        ...authHeaders,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      };
+
+      const body = new URLSearchParams();
+      body.append('command', context.command);
+      body.append('code', context.code);
+      if (context.description) {
+        body.append('description', context.description);
+      }
+      if (context.commandString) {
+        body.append('commandString', context.commandString);
       }
 
-      const url = new URL(`${config.cmsUrl}/api/command`);
-      
-      // Create form data with URL-encoded format
-      const formData = new URLSearchParams();
-      formData.append("command", context.command.trim());
-      formData.append("code", context.code.trim());
-      formData.append("description", context.description);
-      if (context.commandString) formData.append("commandString", context.commandString);
-      if (context.validationString) formData.append("validationString", context.validationString);
-      if (context.availableOn) formData.append("availableOn", context.availableOn);
-      if (context.createAlertOn) formData.append("createAlertOn", context.createAlertOn);
+      logger.debug({ url: url.toString(), body: body.toString() }, 'Attempting to add a new command');
 
-      logger.info("Adding command", { command: context.command, code: context.code });
-
-      // Send POST request to create command
       const response = await fetch(url.toString(), {
-        method: "POST",
-        headers: {
-          ...await getAuthHeaders(),
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: formData.toString(),
+        method: 'POST',
+        headers,
+        body,
       });
 
-      const rawData = await response.json();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const message = `HTTP error! status: ${response.status}`;
-        logger.error(message, { status: response.status, response: rawData });
-        return { success: false, message, errorData: rawData };
+        const message = `Failed to add command. API responded with status ${response.status}.`;
+        logger.error(
+          { status: response.status, response: responseData },
+          message
+        );
+        return { success: false as const, message, errorData: responseData };
       }
 
-      // Try to parse as direct command response first
-      const directValidationResult = commandSchema.safeParse(rawData);
-      if (directValidationResult.success) {
-        logger.info("Command added successfully", { commandId: directValidationResult.data.commandId });
+      const validationResult = commandSchema.safeParse(responseData);
+      if (!validationResult.success) {
+        const message = 'Add command response validation failed.';
+        logger.error(
+          { error: validationResult.error.flatten(), data: responseData },
+          message
+        );
         return {
-          success: true,
-          data: directValidationResult.data
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
         };
       }
-
-      // Fallback to wrapped response format
-      const validationResult = successResponseSchema.safeParse(rawData);
-      if (!validationResult.success) {
-        const message = "API response validation failed";
-        logger.error(message, { error: validationResult.error, data: rawData });
-        return { success: false, message, error: validationResult.error, errorData: rawData };
-      }
-
-      logger.info("Command added successfully", { commandId: validationResult.data.data.commandId });
-      return validationResult.data;
+      
+      logger.info(
+        {
+          commandId: validationResult.data.commandId,
+          commandName: validationResult.data.command,
+        },
+        `Successfully added command '${validationResult.data.command}' (ID: ${validationResult.data.commandId}).`
+      );
+      return { success: true as const, data: validationResult.data };
 
     } catch (error) {
-      const message = "Unexpected error occurred while adding command";
-      logger.error(message, { error });
-      return {
-        success: false,
-        message,
-        error: error instanceof Error ? error.message : "Unknown error"
-      };
+      const message = 'An unexpected error occurred while adding a command.';
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 });

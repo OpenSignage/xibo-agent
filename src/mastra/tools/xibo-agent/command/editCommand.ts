@@ -11,140 +11,129 @@
  */
 
 /**
- * Edit Command Tool
- * 
- * This module provides functionality to edit existing commands in the Xibo CMS.
- * It implements the command editing API and handles the necessary validation
- * and data transformation for command management.
+ * @module editCommand
+ * @description Provides a tool to edit an existing command in the Xibo CMS.
+ * It implements the PUT /command/{id} API endpoint.
  */
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { commandSchema } from './schemas';
 
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-
-// Schema for command object
-const commandSchema = z.object({
-  commandId: z.number(),
-  command: z.string(),
-  code: z.string(),
-  description: z.string().nullable(),
-  userId: z.number(),
-  commandString: z.string().nullable(),
-  validationString: z.string().nullable(),
-  displayProfileId: z.number().nullable(),
-  commandStringDisplayProfile: z.string().nullable(),
-  validationStringDisplayProfile: z.string().nullable(),
-  availableOn: z.string().nullable(),
-  createAlertOn: z.string().nullable(),
-  createAlertOnDisplayProfile: z.string().nullable(),
-  groupsWithPermissions: z.string().nullable(),
-});
-
-// Schema for successful response
-const successResponseSchema = z.object({
+/**
+ * Schema for the successful response, containing the updated command.
+ */
+const editCommandSuccessSchema = z.object({
   success: z.literal(true),
   data: commandSchema,
 });
 
-// Schema for error response
+/**
+ * Schema for a standardized error response.
+ */
 const errorResponseSchema = z.object({
   success: z.literal(false),
-  message: z.string(),
-  error: z.any().optional(),
-  errorData: z.any().optional(),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z
+    .any()
+    .optional()
+    .describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-// Union schema for all possible responses
-const responseSchema = z.union([successResponseSchema, errorResponseSchema]);
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([editCommandSuccessSchema, errorResponseSchema]);
 
 /**
- * Tool for editing commands
- * 
- * This tool edits existing commands in the Xibo CMS system.
+ * Tool to edit an existing command in the Xibo CMS.
  */
 export const editCommand = createTool({
-  id: "edit-command",
-  description: "Edit an existing command in the Xibo CMS",
+  id: 'edit-command',
+  description: 'Edits an existing command in the Xibo CMS.',
   inputSchema: z.object({
-    commandId: z.number().describe("ID of the command to edit (required)"),
-    command: z.string().min(1, "Command name must be at least 1 character").max(254, "Command name must not exceed 254 characters").describe("The command name (required, 1-254 characters)"),
-    description: z.string().describe("Description of the command (required)"),
-    commandString: z.string().optional().describe("The command string to execute (optional)"),
-    validationString: z.string().optional().describe("Validation string for the command (optional)"),
-    availableOn: z.string().optional().describe("Platforms where the command is available (optional)"),
-    createAlertOn: z.enum(["success", "failure", "always", "never"]).optional().describe("When to create alerts for this command (optional)"),
+    commandId: z.number().describe('The ID of the command to edit.'),
+    command: z.string().describe('The new name for the command.'),
+    description: z
+      .string()
+      .optional()
+      .describe('The new description for the command.'),
+    code: z
+      .string()
+      .describe(
+        'The new code for the command, used in web hooks, etc.'
+      ),
+    commandString: z
+      .string()
+      .optional()
+      .describe('The new command string to be sent to the Player.'),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<z.infer<typeof responseSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
+    const { commandId, ...updates } = context;
+
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        const message = "CMS URL is not configured";
-        logger.error(message);
-        return { success: false, message };
-      }
+      const url = new URL(`${config.cmsUrl}/api/command/${commandId}`);
+      const authHeaders = await getAuthHeaders();
+      const headers = {
+        ...authHeaders,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      };
 
-      const url = new URL(`${config.cmsUrl}/api/command/${context.commandId}`);
-      
-      // Create form data with URL-encoded format
-      const formData = new URLSearchParams();
-      formData.append("command", context.command.trim());
-      formData.append("description", context.description);
-      if (context.commandString) formData.append("commandString", context.commandString);
-      if (context.validationString) formData.append("validationString", context.validationString);
-      if (context.availableOn) formData.append("availableOn", context.availableOn);
-      if (context.createAlertOn) formData.append("createAlertOn", context.createAlertOn);
+      const body = new URLSearchParams(updates as Record<string, string>);
 
-      logger.info("Editing command", { commandId: context.commandId, command: context.command });
+      logger.debug({ url: url.toString(), body: body.toString() }, `Attempting to edit command ${commandId}`);
 
-      // Send PUT request to update command
       const response = await fetch(url.toString(), {
-        method: "PUT",
-        headers: {
-          ...await getAuthHeaders(),
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: formData.toString(),
+        method: 'PUT',
+        headers,
+        body,
       });
 
-      const rawData = await response.json();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const message = `HTTP error! status: ${response.status}`;
-        logger.error(message, { status: response.status, response: rawData });
-        return { success: false, message, errorData: rawData };
+        const message = `Failed to edit command. API responded with status ${response.status}.`;
+        logger.error(
+          { status: response.status, response: responseData },
+          message
+        );
+        return { success: false as const, message, errorData: responseData };
       }
 
-      // Try to parse as direct command response first
-      const directValidationResult = commandSchema.safeParse(rawData);
-      if (directValidationResult.success) {
-        logger.info("Command edited successfully", { commandId: context.commandId });
+      const validationResult = commandSchema.safeParse(responseData);
+      if (!validationResult.success) {
+        const message = 'Edit command response validation failed.';
+        logger.error(
+          { error: validationResult.error.flatten(), data: responseData },
+          message
+        );
         return {
-          success: true,
-          data: directValidationResult.data
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
         };
       }
 
-      // Fallback to wrapped response format
-      const validationResult = successResponseSchema.safeParse(rawData);
-      if (!validationResult.success) {
-        const message = "API response validation failed";
-        logger.error(message, { error: validationResult.error, data: rawData });
-        return { success: false, message, error: validationResult.error, errorData: rawData };
-      }
-
-      logger.info("Command edited successfully", { commandId: context.commandId });
-      return validationResult.data;
+      logger.info({ commandId }, `Successfully edited command ID ${commandId}.`);
+      return { success: true as const, data: validationResult.data };
 
     } catch (error) {
-      const message = "Unexpected error occurred while editing command";
-      logger.error(message, { error, commandId: context.commandId });
-      return {
-        success: false,
-        message,
-        error: error instanceof Error ? error.message : "Unknown error"
-      };
+      const message = `An unexpected error occurred while editing command ${commandId}.`;
+      const processedError = processError(error);
+      logger.error({ error: processedError, commandId }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 });
