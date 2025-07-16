@@ -11,148 +11,150 @@
  */
 
 /**
- * Get Commands Tool
- * 
- * This module provides functionality to retrieve commands from the Xibo CMS.
- * It implements the command search API and handles the necessary validation
- * and data transformation for command management.
+ * @module getCommands
+ * @description Provides a tool to retrieve a list of commands from the Xibo CMS.
+ * It implements the GET /command API endpoint and supports various filter options.
  */
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { commandSchema } from './schemas';
 
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-
-// Schema for command object
-const commandSchema = z.object({
-  commandId: z.number(),
-  command: z.string(),
-  code: z.string(),
-  description: z.string().nullable(),
-  userId: z.number(),
-  commandString: z.string().nullable(),
-  validationString: z.string().nullable(),
-  displayProfileId: z.number().nullable(),
-  commandStringDisplayProfile: z.string().nullable(),
-  validationStringDisplayProfile: z.string().nullable(),
-  availableOn: z.string().nullable(),
-  createAlertOn: z.string().nullable(),
-  createAlertOnDisplayProfile: z.string().nullable(),
-  groupsWithPermissions: z.string().nullable(),
-});
-
-// Schema for successful response
-const successResponseSchema = z.object({
+/**
+ * Schema for the successful response, containing an array of commands.
+ */
+const getCommandsSuccessSchema = z.object({
   success: z.literal(true),
   data: z.array(commandSchema),
 });
 
-// Schema for direct API response (array format)
-const directApiResponseSchema = z.array(commandSchema);
-
-// Schema for error response
+/**
+ * Schema for a standardized error response.
+ */
 const errorResponseSchema = z.object({
   success: z.literal(false),
-  message: z.string(),
-  error: z.any().optional(),
-  errorData: z.any().optional(),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z
+    .any()
+    .optional()
+    .describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-// Union schema for all possible responses
-const responseSchema = z.union([successResponseSchema, errorResponseSchema]);
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([getCommandsSuccessSchema, errorResponseSchema]);
 
 /**
- * Tool for retrieving commands
- * 
- * This tool searches and retrieves commands from the Xibo CMS system.
+ * Tool for retrieving a list of commands from the Xibo CMS.
  */
 export const getCommands = createTool({
-  id: "get-commands",
-  description: "Search and retrieve commands from the Xibo CMS",
+  id: 'get-commands',
+  description: 'Gets a list of all commands from the Xibo CMS.',
   inputSchema: z.object({
-    commandId: z.number().optional().describe("Filter by specific command ID (optional)"),
-    command: z.string().optional().describe("Filter by command name (optional)"),
-    code: z.string().optional().describe("Filter by command code (optional)"),
-    useRegexForName: z.number().optional().describe("Use regex for command name search (0 or 1, optional)"),
-    useRegexForCode: z.number().optional().describe("Use regex for command code search (0 or 1, optional)"),
-    logicalOperatorName: z.enum(["AND", "OR"]).optional().describe("Logical operator for name search (optional)"),
-    logicalOperatorCode: z.enum(["AND", "OR"]).optional().describe("Logical operator for code search (optional)"),
+    commandId: z
+      .number()
+      .optional()
+      .describe('Filter by a specific command ID.'),
+    command: z.string().optional().describe('Filter by the command name.'),
+    code: z.string().optional().describe('Filter by the command code.'),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<z.infer<typeof responseSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        const message = "CMS URL is not configured";
-        logger.error(message);
-        return { success: false, message };
+      const url = new URL(`${config.cmsUrl}/api/command`);
+
+      // Append query parameters from context if they exist
+      if (context.commandId) {
+        url.searchParams.append('commandId', context.commandId.toString());
+      }
+      if (context.command) {
+        url.searchParams.append('command', context.command);
+      }
+      if (context.code) {
+        url.searchParams.append('code', context.code);
       }
 
-      const url = new URL(`${config.cmsUrl}/api/command`);
-      
-      // Add query parameters if provided
-      if (context.commandId) url.searchParams.append("commandId", context.commandId.toString());
-      if (context.command) url.searchParams.append("command", context.command);
-      if (context.code) url.searchParams.append("code", context.code);
-      if (context.useRegexForName) url.searchParams.append("useRegexForName", context.useRegexForName.toString());
-      if (context.useRegexForCode) url.searchParams.append("useRegexForCode", context.useRegexForCode.toString());
-      if (context.logicalOperatorName) url.searchParams.append("logicalOperatorName", context.logicalOperatorName);
-      if (context.logicalOperatorCode) url.searchParams.append("logicalOperatorCode", context.logicalOperatorCode);
-
-      logger.info("Retrieving commands");
+      logger.debug(
+        { url: url.toString() },
+        'Attempting to get a list of commands'
+      );
 
       const response = await fetch(url.toString(), {
-        method: "GET",
+        method: 'GET',
         headers: await getAuthHeaders(),
       });
 
-      const rawData = await response.json();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const message = `HTTP error! status: ${response.status}`;
-        logger.error(message, { status: response.status, response: rawData });
-        return { success: false, message, errorData: rawData };
+        const message = `Failed to get commands. API responded with status ${response.status}.`;
+        logger.error(
+          { status: response.status, response: responseData },
+          message
+        );
+        return { success: false as const, message, errorData: responseData };
       }
 
-      try {
-        // First try to parse as direct array response from API
-        const directValidationResult = directApiResponseSchema.safeParse(rawData);
-        if (directValidationResult.success) {
-          logger.info("Commands retrieved successfully", { count: directValidationResult.data.length });
-          return {
-            success: true,
-            data: directValidationResult.data
-          };
-        }
-
-        // If direct array parsing fails, try wrapped response format
-        const validationResult = successResponseSchema.safeParse(rawData);
-        if (!validationResult.success) {
-          const message = "API response validation failed";
-          logger.error(message, { 
-            directError: directValidationResult.error, 
-            wrappedError: validationResult.error, 
-            data: rawData 
-          });
-          return { success: false, message, error: validationResult.error, errorData: rawData };
-        }
-
-        logger.info("Commands retrieved successfully", { count: validationResult.data.data.length });
-        return validationResult.data;
-      } catch (validationError) {
-        const message = "Response validation error";
-        logger.error(message, { error: validationError, data: rawData });
-        return { success: false, message, error: validationError, errorData: rawData };
+      // The API can return a direct array or an object with a data property.
+      // We'll try to parse the direct array first.
+      const arrayValidation = z.array(commandSchema).safeParse(responseData);
+      if (arrayValidation.success) {
+        logger.info(
+          { count: arrayValidation.data.length },
+          `Successfully retrieved ${arrayValidation.data.length} commands.`
+        );
+        return { success: true as const, data: arrayValidation.data };
       }
 
-    } catch (error) {
-      const message = "Unexpected error occurred while retrieving commands";
-      logger.error(message, { error });
+      // If array parsing fails, it might be a wrapped object.
+      // Let's create a temporary schema for that case and parse.
+      const objectValidation = z
+        .object({ data: z.array(commandSchema) })
+        .safeParse(responseData);
+      if (objectValidation.success) {
+        logger.info(
+          { count: objectValidation.data.data.length },
+          `Successfully retrieved ${objectValidation.data.data.length} commands.`
+        );
+        return { success: true as const, data: objectValidation.data.data };
+      }
+
+      // If both validations fail, return a validation error.
+      const message =
+        'Get commands response validation failed for both array and object formats.';
+      logger.error(
+        {
+          arrayError: arrayValidation.error.flatten(),
+          objectError: objectValidation.error.flatten(),
+          data: responseData,
+        },
+        message
+      );
       return {
-        success: false,
+        success: false as const,
         message,
-        error: error instanceof Error ? error.message : "Unknown error"
+        error: {
+          arrayError: arrayValidation.error.flatten(),
+          objectError: objectValidation.error.flatten(),
+        },
+        errorData: responseData,
       };
+    } catch (error) {
+      const message = 'An unexpected error occurred while getting commands.';
+      const processedError = processError(error);
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 });

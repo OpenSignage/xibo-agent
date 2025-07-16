@@ -11,11 +11,8 @@
  */
 
 /**
- * Xibo CMS Command Management Tools
- * 
- * This module exports tools for managing commands in the Xibo CMS.
- * It provides functionality to create, read, update, and delete commands
- * for display management and automation in digital signage systems.
+ * @module CommandTools
+ * @description This module exports all tools related to command management in the Xibo CMS.
  */
 
 export { addCommand } from './addCommand';

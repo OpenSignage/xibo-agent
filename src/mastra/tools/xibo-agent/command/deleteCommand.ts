@@ -11,115 +11,94 @@
  */
 
 /**
- * Delete Command Tool
- * 
- * This module provides functionality to delete commands from the Xibo CMS.
- * It implements the command deletion API and handles the necessary validation
- * and data transformation for command management.
+ * @module deleteCommand
+ * @description Provides a tool to delete a command from the Xibo CMS.
+ * It implements the DELETE /command/{id} API endpoint.
  */
-
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
-
-// Schema for successful response
-const successResponseSchema = z.object({
-  success: z.literal(true),
-  data: z.object({
-    message: z.string().describe("Success message")
-  })
-});
-
-// Schema for error response
-const errorResponseSchema = z.object({
-  success: z.literal(false),
-  message: z.string(),
-  error: z.any().optional(),
-  errorData: z.any().optional(),
-});
-
-// Union schema for all possible responses
-const responseSchema = z.union([successResponseSchema, errorResponseSchema]);
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
 
 /**
- * Tool for deleting commands
- * 
- * This tool deletes commands from the Xibo CMS system.
+ * Schema for the successful response, which is a simple confirmation message.
+ * The API returns a 204 No Content on success, so we don't expect a data body.
+ */
+const deleteCommandSuccessSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
+
+/**
+ * Schema for a standardized error response.
+ */
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z
+    .any()
+    .optional()
+    .describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([
+  deleteCommandSuccessSchema,
+  errorResponseSchema,
+]);
+
+/**
+ * Tool to delete a command from the Xibo CMS.
  */
 export const deleteCommand = createTool({
-  id: "delete-command",
-  description: "Delete a command from the Xibo CMS",
+  id: 'delete-command',
+  description: 'Deletes a command from the Xibo CMS by its ID.',
   inputSchema: z.object({
-    commandId: z.number().describe("ID of the command to delete (required)"),
+    commandId: z.number().describe('The ID of the command to delete.'),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<z.infer<typeof responseSchema>> => {
-    try {
-      if (!config.cmsUrl) {
-        const message = "CMS URL is not configured";
-        logger.error(message);
-        return { success: false, message };
-      }
+  outputSchema,
+  execute: async ({ context }) => {
+    const { commandId } = context;
 
-      const url = new URL(`${config.cmsUrl}/api/command/${context.commandId}`);
-      
-      logger.info("Deleting command", { commandId: context.commandId });
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
+    try {
+      const url = new URL(`${config.cmsUrl}/api/command/${commandId}`);
+      logger.debug({ url: url.toString() }, `Attempting to delete command ${commandId}`);
 
       const response = await fetch(url.toString(), {
-        method: "DELETE",
+        method: 'DELETE',
         headers: await getAuthHeaders(),
       });
 
-      if (!response.ok) {
-        let errorData;
-        try {
-          errorData = await response.json();
-        } catch {
-          // Fallback to text if JSON parsing fails
-          errorData = await response.text();
-        }
-        
-        const message = `HTTP error! status: ${response.status}`;
-        logger.error(message, { status: response.status, response: errorData });
-        return { success: false, message, errorData };
-      }
-
-      // DELETE requests typically return 204 No Content on success
       if (response.status === 204) {
-        logger.info("Command deleted successfully", { commandId: context.commandId });
-        return {
-          success: true,
-          data: { message: "Command deleted successfully" }
-        };
+        const message = `Command ${commandId} deleted successfully.`;
+        logger.info({ commandId }, message);
+        return { success: true as const, message };
       }
 
-      // Handle other successful responses with potential JSON content
-      try {
-        const rawData = await response.json();
-        logger.info("Command deleted successfully", { commandId: context.commandId });
-        return {
-          success: true,
-          data: { message: "Command deleted successfully" }
-        };
-      } catch {
-        // If no JSON response, still consider it successful
-        logger.info("Command deleted successfully", { commandId: context.commandId });
-        return {
-          success: true,
-          data: { message: "Command deleted successfully" }
-        };
-      }
+      const responseData = await response.json().catch(() => null);
 
+      const message = `Failed to delete command. API responded with status ${response.status}.`;
+      logger.error(
+        { status: response.status, response: responseData },
+        message
+      );
+      return { success: false as const, message, errorData: responseData };
     } catch (error) {
-      const message = "Unexpected error occurred while deleting command";
-      logger.error(message, { error, commandId: context.commandId });
-      return {
-        success: false,
-        message,
-        error: error instanceof Error ? error.message : "Unknown error"
-      };
+      const message = `An unexpected error occurred while deleting command ${commandId}.`;
+      const processedError = processError(error);
+      logger.error({ error: processedError, commandId }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 });
