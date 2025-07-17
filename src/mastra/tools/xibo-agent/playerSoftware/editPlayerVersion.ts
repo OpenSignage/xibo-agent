@@ -12,101 +12,135 @@
 
 /**
  * @module editPlayerVersion
- * @description This module provides functionality to edit a specific player software version's
- * information in the Xibo CMS. It implements the PUT /api/playersoftware/{versionId} endpoint.
+ * @description Provides a tool to edit a specific player software version's information
+ * in the Xibo CMS. It implements the PUT /playersoftware/{versionId} endpoint.
  */
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { playerVersionSchema } from './schemas';
 
-// Schema for the Player Version object returned by the API, based on error logs
-const playerVersionSchema = z.object({
-  versionId: z.number(),
-  type: z.string().nullable(),
-  version: z.string().nullable(),
-  code: z.number().nullable(),
-  playerShowVersion: z.string(),
-  createdAt: z.string(),
-  modifiedAt: z.string(),
-  modifiedBy: z.string(),
-  fileName: z.string(),
-  size: z.number(),
-  md5: z.string().nullable(),
+/**
+ * Schema for the successful response, containing the updated player version.
+ */
+const editPlayerVersionSuccessSchema = z.object({
+  success: z.literal(true),
+  data: playerVersionSchema,
 });
 
-// Schema for the overall response, which can be a success or error
-const responseSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        data: playerVersionSchema,
-    }),
-    z.object({
-        success: z.literal(false),
-        message: z.string(),
-        error: z.any().optional(),
-        errorData: z.any().optional(),
-    }),
+/**
+ * Schema for a standardized error response.
+ */
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z
+    .any()
+    .optional()
+    .describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([
+  editPlayerVersionSuccessSchema,
+  errorResponseSchema,
 ]);
 
+/**
+ * Tool to edit an existing player software version in the Xibo CMS.
+ */
 export const editPlayerVersion = createTool({
-  id: "edit-player-version",
-  description: "Edit a player software version.",
+  id: 'edit-player-version',
+  description: 'Edits an existing player software version.',
   inputSchema: z.object({
-    versionId: z.number().describe("The ID of the player software version to edit."),
-    playerShowVersion: z.string().describe("The display name for the player version."),
-    version: z.string().describe("The version number."),
-    code: z.number().describe("The code number."),
+    versionId: z
+      .number()
+      .describe('The ID of the player software version to edit.'),
+    playerShowVersion: z
+      .string()
+      .optional()
+      .describe('The new display name for the player version.'),
+    version: z.string().optional().describe('The new version number.'),
+    code: z.number().optional().describe('The new version code.'),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<z.infer<typeof responseSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
+    const { versionId, ...updates } = context;
+
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured";
-      logger.error(`editPlayerVersion: ${message}`);
-      return { success: false, message };
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
     }
 
-    const url = `${config.cmsUrl}/api/playersoftware/${context.versionId}`;
-    
-    const body = new URLSearchParams();
-    if (context.playerShowVersion) body.append("playerShowVersion", context.playerShowVersion);
-    if (context.version) body.append("version", context.version);
-    if (context.code) body.append("code", context.code.toString());
-
-    let responseData: any;
     try {
-      logger.info(`editPlayerVersion: Requesting URL: ${url}`);
-      const response = await fetch(url, {
-        method: "PUT",
-        headers: {
-            ...await getAuthHeaders(),
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: body,
+      const url = new URL(`${config.cmsUrl}/api/playersoftware/${versionId}`);
+      const authHeaders = await getAuthHeaders();
+      const headers = {
+        ...authHeaders,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      };
+
+      const body = new URLSearchParams();
+      if (updates.playerShowVersion)
+        body.append('playerShowVersion', updates.playerShowVersion);
+      if (updates.version) body.append('version', updates.version);
+      if (updates.code) body.append('code', updates.code.toString());
+
+      logger.debug(
+        { url: url.toString(), body: body.toString() },
+        `Attempting to edit player software version ${versionId}`
+      );
+
+      const response = await fetch(url.toString(), {
+        method: 'PUT',
+        headers,
+        body,
       });
 
-      responseData = await response.json();
+      const responseData = await response.json();
 
       if (!response.ok) {
-        const message = `HTTP error! status: ${response.status}`;
-        logger.error(`editPlayerVersion: ${message}`, { errorData: responseData });
-        return { success: false, message, errorData: responseData };
+        const message = `Failed to edit player software version. API responded with status ${response.status}.`;
+        logger.error(
+          { status: response.status, response: responseData },
+          message
+        );
+        return { success: false as const, message, errorData: responseData };
       }
 
-      const validatedData = playerVersionSchema.parse(responseData);
-      logger.info("Player version edited successfully");
-      return { success: true, data: validatedData };
+      const validationResult = playerVersionSchema.safeParse(responseData);
+      if (!validationResult.success) {
+        const message =
+          'Edit player software version response validation failed.';
+        logger.error(
+          { error: validationResult.error.flatten(), data: responseData },
+          message
+        );
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
+      }
 
+      logger.info(
+        { versionId },
+        `Successfully edited player software version ID ${versionId}.`
+      );
+      return { success: true as const, data: validationResult.data };
     } catch (error) {
-        if (error instanceof z.ZodError) {
-            const message = "Validation error occurred while parsing the API response.";
-            logger.error(`editPlayerVersion: ${message}`, { error: error.issues, errorData: responseData });
-            return { success: false, message, error: error.issues, errorData: responseData };
-        }
-        const message = error instanceof Error ? error.message : "An unknown error occurred";
-        logger.error(`editPlayerVersion: ${message}`, { error });
-        return { success: false, message, error };
+      const message = `An unexpected error occurred while editing player software version ${versionId}.`;
+      const processedError = processError(error);
+      logger.error({ error: processedError, versionId }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
-}); 
+});
