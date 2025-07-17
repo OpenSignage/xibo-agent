@@ -12,9 +12,7 @@
 
 /**
  * @module PlayerSoftwareTools
- * @description This module exports all tools related to player software management in Xibo.
- * It serves as a central point for accessing tools that handle deleting, downloading,
- * editing, and uploading player software versions.
+ * @description This module exports all tools related to Player Software management in the Xibo CMS.
  */
 export { deletePlayerVersion } from "./deletePlayerVersion";
 export { downloadPlayerVersion } from "./downloadPlayerVersion";

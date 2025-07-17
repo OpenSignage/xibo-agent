@@ -35,7 +35,7 @@ import { getLayouts, addLayout, deleteLayout, retireLayout, unretireLayout,
 import { getFolders, addFolder, editFolder, deleteFolder } from './folder';
 import { getResolutions, addResolution, editResolution, deleteResolution } from './resolution';
 import { getGoogleFonts, uploadGoogleFonts, getUploadFiles, deleteUploadFiles,
-  generateQRCode } from './etc';
+  generateQRCode, getLatestPlayer } from './etc';
 import { getFonts, getFontDetails, uploadFont, downloadFont, deleteFont } from './font';
 import { getUserGroups, addUserGroup, deleteUserGroup, editUserGroup, copyUserGroup,
   assignUserToGroup, unassignUserFromGroup } from './usergroup';
@@ -162,6 +162,7 @@ export function getTools() {
     getResolutions,addResolution,editResolution,deleteResolution,
     // Etc
     getGoogleFonts,uploadGoogleFonts,getUploadFiles,deleteUploadFiles,
+    getLatestPlayer,
     // Font
     getFonts,getFontDetails,uploadFont,downloadFont,deleteFont,
     // User group

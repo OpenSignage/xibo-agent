@@ -12,117 +12,208 @@
 
 /**
  * @module uploadPlayerSoftware
- * @description This module provides functionality to upload a new player software version
- * to the Xibo CMS. It implements the POST /api/playersoftware endpoint.
+ * @description Provides a tool to upload a new player software version to the Xibo CMS.
+ * It implements the POST /playersoftware endpoint for file uploads.
  */
-import { z } from "zod";
-import { createTool } from "@mastra/core/tools";
-import { config } from "../config";
-import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
+import { z } from 'zod';
+import { createTool } from '@mastra/core';
+import axios from 'axios';
+import FormData from 'form-data';
+import fs from 'fs';
+import path from 'path';
+import { getAuthHeaders } from '../auth';
+import { config } from '../config';
+import { logger } from '../../../index';
+import { processError } from '../utility/error';
 
-// Schema for the Media object returned by the API, based on xibo-api.json
-const mediaSchema = z.object({
-    mediaId: z.number(),
-    ownerId: z.number(),
-    parentId: z.number().nullable(),
-    name: z.string(),
-    mediaType: z.string(),
-    storedAs: z.string(),
-    fileName: z.string(),
-    fileSize: z.number(),
-    duration: z.number(),
-    valid: z.number(),
-    moduleSystemFile: z.number(),
-    expires: z.number(),
-    retired: z.number(),
-    isEdited: z.number(),
-    md5: z.string().nullable(),
-    owner: z.string(),
-    groupsWithPermissions: z.string().nullable(),
-    released: z.number(),
-    apiRef: z.string().nullable(),
-    createdDt: z.string(),
-    modifiedDt: z.string(),
-    enableStat: z.string().nullable(),
-    orientation: z.string().nullable(),
-    width: z.number().nullable(),
-    height: z.number().nullable(),
-    folderId: z.number().nullable(),
-    permissionsFolderId: z.number().nullable(),
-    tags: z.array(z.any()).optional(), // Assuming TagLink structure is not critical here
+/**
+ * Schema for a successfully uploaded file object.
+ */
+const successFileSchema = z.object({
+  id: z.number().describe('The ID of the uploaded file record.'),
+  name: z.string().describe('The original name of the uploaded file.'),
+  fileName: z.string().describe('The stored file name.'),
+  type: z.string().describe('The MIME type of the file.'),
+  size: z.number().describe('The size of the file in bytes.'),
+  md5: z.string().describe('The MD5 hash of the file.'),
 });
 
-// The API returns an array of media objects
-const uploadResponseSchema = z.array(mediaSchema);
+/**
+ * Schema for a file object that has an error reported by the CMS.
+ */
+const errorFileSchema = z.object({
+  name: z.string().describe('The original name of the uploaded file.'),
+  fileName: z
+    .string()
+    .optional()
+    .describe('The stored file name (if available in the response).'),
+  type: z.string().describe('The MIME type of the file.'),
+  size: z.number().describe('The size of the file in bytes.'),
+  error: z
+    .string()
+    .describe('An error message if the upload failed for this file.'),
+});
 
-// Schema for the overall response, which can be a success or error
-const responseSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        data: uploadResponseSchema,
-    }),
-    z.object({
-        success: z.literal(false),
-        message: z.string(),
-        error: z.any().optional(),
-        errorData: z.any().optional(),
-    }),
+/**
+ * Union schema to handle both successful and errored file responses.
+ */
+const uploadedFileSchema = z.union([successFileSchema, errorFileSchema]);
+
+/**
+ * Schema for the full API response, which contains an array of file objects.
+ */
+const apiResponseSchema = z.object({
+  files: z
+    .array(uploadedFileSchema)
+    .min(1, 'API response must contain at least one file.'),
+});
+
+/**
+ * Schema for the successful response, containing the new player version details.
+ */
+const uploadPlayerSoftwareSuccessSchema = z.object({
+  success: z.literal(true),
+  data: successFileSchema,
+});
+
+/**
+ * Schema for a standardized error response.
+ */
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z
+    .any()
+    .optional()
+    .describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
+});
+
+/**
+ * Union schema for tool output, covering both success and error cases.
+ */
+const outputSchema = z.union([
+  uploadPlayerSoftwareSuccessSchema,
+  errorResponseSchema,
 ]);
 
+/**
+ * Tool to upload a new player software version to the Xibo CMS.
+ */
 export const uploadPlayerSoftware = createTool({
-  id: "upload-player-software",
-  description: "Upload a player software file.",
+  id: 'upload-player-software',
+  description: 'Uploads a new player software version.',
   inputSchema: z.object({
-    fileContent: z.instanceof(Buffer).describe("The content of the file as a Buffer."),
-    fileName: z.string().describe("The name of the file."),
+    fileName: z
+      .string()
+      .describe(
+        'The file name of the player software to upload, located in the configured upload directory.'
+      ),
   }),
-  outputSchema: responseSchema,
-  execute: async ({ context }): Promise<z.infer<typeof responseSchema>> => {
+  outputSchema,
+  execute: async ({ context }) => {
     if (!config.cmsUrl) {
-      const message = "CMS URL is not configured";
-      logger.error(`uploadPlayerSoftware: ${message}`);
-      return { success: false, message };
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
     }
 
-    const url = `${config.cmsUrl}/api/playersoftware`;
-    
-    const formData = new FormData();
-    formData.append("files", new Blob([context.fileContent]), context.fileName);
-
-    let responseData: any;
     try {
-      logger.debug(`uploadPlayerSoftware: Requesting URL: ${url}`);
-      const response = await fetch(url.toString(), {
-        method: "POST",
-        headers: {
-            ...(await getAuthHeaders()),
-            // Content-Type is set automatically by browser/fetch with FormData
-        },
-        body: formData,
-      });
-
-      responseData = await response.json();
-
-      if (!response.ok) {
-        const message = `HTTP error! status: ${response.status}`;
-        logger.error(`uploadPlayerSoftware: ${message}`, { errorData: responseData });
-        return { success: false, message, errorData: responseData };
+      const resolvedPath = path.join(config.uploadDir, context.fileName);
+      if (!fs.existsSync(resolvedPath)) {
+        const message = `File not found at path: ${resolvedPath}`;
+        logger.error({ path: resolvedPath }, message);
+        return { success: false as const, message };
       }
 
-      const validatedData = uploadResponseSchema.parse(responseData);
-      logger.info("Player software uploaded successfully");
-      return { success: true, data: validatedData };
+      const form = new FormData();
+      form.append('files', fs.createReadStream(resolvedPath));
 
+      const url = new URL(`${config.cmsUrl}/api/playersoftware`);
+      const authHeaders = await getAuthHeaders();
+      const formHeaders = form.getHeaders();
+
+      const headers = {
+        ...authHeaders,
+        ...formHeaders,
+      };
+
+      logger.debug(
+        { url: url.toString() },
+        `Attempting to upload player software from ${resolvedPath}`
+      );
+
+      const response = await axios.post(url.toString(), form, { headers });
+      const responseData = response.data;
+
+      // Axios considers non-2xx statuses as errors and throws,
+      // so we mostly handle success cases here.
+      // The validation a few lines below will handle if the response body is not what we expect
+
+      const validationResult = apiResponseSchema.safeParse(responseData);
+      if (!validationResult.success) {
+        const message = 'Upload player software response validation failed.';
+        logger.error(
+          { error: validationResult.error.flatten(), data: responseData },
+          message
+        );
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
+      }
+
+      // We uploaded one file, so we expect one file object in the response.
+      const uploadedFile = validationResult.data.files[0];
+
+      // Check if the CMS returned a specific error for the file (e.g., duplicate)
+      if ('error' in uploadedFile && uploadedFile.error) {
+        const message = `CMS returned an error for the file: ${uploadedFile.error}`;
+        logger.error({ file: uploadedFile }, message);
+        return {
+          success: false as const,
+          message,
+          error: uploadedFile.error,
+          errorData: responseData,
+        };
+      }
+
+      // If we are here, it should be a successful upload. We use a type guard to be safe.
+      if ('id' in uploadedFile) {
+        logger.info(
+          { versionId: uploadedFile.id },
+          `Successfully uploaded player software file. ID: ${uploadedFile.id}.`
+        );
+        return { success: true as const, data: uploadedFile };
+      }
+
+      // This case should not be reached if API behavior is consistent.
+      const fallbackMessage = 'Unexpected API response structure after upload.';
+      logger.error({ data: responseData }, fallbackMessage);
+      return {
+        success: false as const,
+        message: fallbackMessage,
+        error: 'Unexpected response format.',
+        errorData: responseData,
+      };
     } catch (error) {
-        if (error instanceof z.ZodError) {
-            const message = "Validation error occurred while parsing the API response.";
-            logger.error(`uploadPlayerSoftware: ${message}`, { error: error.issues, errorData: responseData });
-            return { success: false, message, error: error.issues, errorData: responseData };
-        }
-        const message = error instanceof Error ? error.message : "An unknown error occurred";
-        logger.error(`uploadPlayerSoftware: ${message}`, { error });
-        return { success: false, message, error };
+      const processedError = processError(error);
+      const message = 'An unexpected error occurred while uploading player software.';
+      logger.error({ error: processedError }, message);
+      
+      // If the error is from axios, it might contain response data
+      if (axios.isAxiosError(error) && error.response) {
+        return {
+          success: false as const,
+          message: error.response.data?.message || message,
+          error: processedError,
+          errorData: error.response.data
+        };
+      }
+      
+      return { success: false as const, message, error: processedError };
     }
   },
-}); 
+});
