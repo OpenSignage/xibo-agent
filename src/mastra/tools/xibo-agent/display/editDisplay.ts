@@ -11,101 +11,162 @@
  */
 
 /**
- * @module
- * This module provides a tool for editing display information in the Xibo CMS.
- * It accesses the /api/display/:displayId endpoint to update display properties.
+ * @module editDisplay
+ * @description Provides a tool to edit an existing display in the Xibo CMS.
+ * It implements the PUT /display/{displayId} endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
+import { processError } from '../utility/error';
 import { displaySchema } from './schemas';
 
-const inputSchema = z.object({
-  displayId: z.number().describe('The ID of the display to edit.'),
-  display: z.string().describe('The new name for the display.'),
-  description: z.string().optional().describe('An optional description for the display.'),
-  tags: z.string().optional().describe('A comma-separated string of tags to assign to the display.'),
-  auditingUntil: z.string().optional().describe('The date until which auditing is enabled (e.g., "yyyy-mm-dd hh:mm:ss").'),
-  longitude: z.number().optional().describe('The longitude coordinate for the display.'),
-  timeZone: z.string().optional().describe('The timezone for the display (e.g., "America/New_York").'),
-  languages: z.string().optional().describe('A comma-separated list of languages.'),
-  displayProfileId: z.number().optional().describe('The ID of the display profile to assign.'),
-  displayTypeId: z.number().optional().describe('The ID of the display type.'),
-  screenSize: z.number().optional().describe('The screen size of the display.'),
-  customId: z.string().optional().describe('A custom identifier for the display.'),
-  ref1: z.string().optional().describe('Optional reference field 1.'),
-  ref2: z.string().optional().describe('Optional reference field 2.'),
-  ref3: z.string().optional().describe('Optional reference field 3.'),
-  ref4: z.string().optional().describe('Optional reference field 4.'),
-  ref5: z.string().optional().describe('Optional reference field 5.'),
-  clearCachedData: z.number().optional().describe('Flag to clear cached data (1 for yes).'),
+/**
+ * Schema for a standardized error response.
+ */
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z
+    .any()
+    .optional()
+    .describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-    data: displaySchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+const editDisplaySuccessSchema = z.object({
+  success: z.literal(true),
+  data: displaySchema,
+});
+
+const outputSchema = z.union([editDisplaySuccessSchema, errorResponseSchema]);
 
 export const editDisplay = createTool({
   id: 'edit-display',
-  description: 'Edit the details of a specific display.',
-  inputSchema,
+  description: 'Edits an existing display.',
+  inputSchema: z.object({
+    displayId: z.number().describe('The Display ID'),
+    display: z.string().describe('The Display Name'),
+    description: z.string().optional().describe('A description of the Display'),
+    tags: z.string().optional().describe('A comma separated list of tags for this item'),
+    auditingUntil: z.string().optional().describe('A date this Display records auditing information until.'),
+    defaultLayoutId: z.number().describe('A Layout ID representing the Default Layout for this Display.'),
+    licensed: z.number().describe('Flag indicating whether this display is licensed.'),
+    license: z.string().describe('The hardwareKey to use as the licence key for this Display'),
+    incSchedule: z.number().describe('Flag indicating whether the Default Layout should be included in the Schedule'),
+    emailAlert: z.number().describe('Flag indicating whether the Display generates up/down email alerts.'),
+    alertTimeout: z.number().optional().describe("How long in seconds should this display wait before alerting when it hasn't connected. Override for the collection interval."),
+    wakeOnLanEnabled: z.number().describe('Flag indicating if Wake On LAN is enabled for this Display'),
+    wakeOnLanTime: z.string().optional().describe('A h:i string representing the time that the Display should receive its Wake on LAN command'),
+    broadCastAddress: z.string().optional().describe('The BroadCast Address for this Display - used by Wake On LAN'),
+    secureOn: z.string().optional().describe('The secure on configuration for this Display'),
+    cidr: z.string().optional().describe('The CIDR configuration for this Display'), // API docs say integer, but this is likely a string.
+    latitude: z.number().optional().describe('The Latitude of this Display'),
+    longitude: z.number().optional().describe('The Longitude of this Display'),
+    timeZone: z.string().optional().describe('The timezone for this display, or empty to use the CMS timezone'),
+    languages: z.string().optional().describe('An array of languages supported in this display location'),
+    displayProfileId: z.number().optional().describe('The Display Settings Profile ID'),
+    displayTypeId: z.number().optional().describe('The Display Type ID of this Display'),
+    screenSize: z.number().optional().describe('The screen size of this Display'),
+    venueId: z.number().optional().describe('The Venue ID of this Display'),
+    address: z.string().optional().describe('The Location Address of this Display'),
+    isMobile: z.number().optional().describe('Is this Display mobile?'),
+    isOutdoor: z.number().optional().describe('Is this Display Outdoor?'),
+    costPerPlay: z.number().optional().describe('The Cost Per Play of this Display'),
+    impressionsPerPlay: z.number().optional().describe('The Impressions Per Play of this Display'),
+    customId: z.string().optional().describe('The custom ID of this Display'),
+    ref1: z.string().optional().describe('Reference 1'),
+    ref2: z.string().optional().describe('Reference 2'),
+    ref3: z.string().optional().describe('Reference 3'),
+    ref4: z.string().optional().describe('Reference 4'),
+    ref5: z.string().optional().describe('Reference 5'),
+    clearCachedData: z.number().optional().describe('Clear all Cached data for this display'),
+    rekeyXmr: z.number().optional().describe('Clear the cached XMR configuration and send a rekey'),
+    teamViewerSerial: z.string().optional().describe('The TeamViewer serial number for this Display, if applicable'),
+    webkeySerial: z.string().optional().describe('The Webkey serial number for this Display, if applicable'),
+    folderId: z.number().optional().describe('Folder ID to which this object should be assigned to'),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
-    try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
-      
-      const { displayId, ...bodyParams } = input;
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
+  execute: async ({ context }) => {
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
 
+    try {
+      const { displayId, ...bodyParams } = context;
+      const url = new URL(`${config.cmsUrl}/api/display/${displayId}`);
+
+      const body = new URLSearchParams();
       Object.entries(bodyParams).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          params.append(key, String(value));
+        // Exclude undefined, null, and empty strings from the request body.
+        if (value !== undefined && value !== null && value !== '') {
+          body.append(key, value.toString());
         }
       });
-      
-      const url = `${config.cmsUrl}/api/display/${displayId}`;
-      logger.debug(`editDisplay: Requesting URL = ${url}, Body = ${params.toString()}`);
-      
-      const response = await fetch(url, {
+
+      const authHeaders = await getAuthHeaders();
+      const headers = {
+        ...authHeaders,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      };
+
+      logger.debug(
+        { url: url.toString(), body: body.toString() },
+        `Editing display ${displayId}`
+      );
+
+      const response = await fetch(url.toString(), {
         method: 'PUT',
-        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
+        headers,
+        body,
       });
 
-      const responseData = await response.json();
-
       if (!response.ok) {
-        logger.error(`editDisplay: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+        const message = `Failed to edit display ${displayId}. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try {
+          errorData = JSON.parse(errorData);
+        } catch (e) {
+          // Not a JSON response
+        }
+        logger.error({ status: response.status, data: errorData }, message);
+        return {
+          success: false as const,
+          message,
+          errorData,
+        };
       }
 
-      const validatedData = displaySchema.parse(responseData);
-      return { success: true, message: 'Display edited successfully.', data: validatedData };
+      const responseData = await response.json();
+      const validationResult = displaySchema.safeParse(responseData);
 
+      if (!validationResult.success) {
+        const message = `Edit display ${displayId} response validation failed.`;
+        logger.error(
+          { error: validationResult.error.flatten(), data: responseData },
+          message
+        );
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
+      }
+      return { success: true as const, data: validationResult.data };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('editDisplay: An unexpected error occurred', { error });
-
-      if (error instanceof z.ZodError) {
-        return { success: false, message: 'Validation error occurred.', error: error.issues };
-      }
-      
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const processedError = processError(error);
+      const message = 'An unexpected error occurred while editing a display.';
+      logger.error({ error: processedError }, message);
+      return {
+        success: false as const,
+        message,
+        error: processedError,
+      };
     }
   },
 }); 

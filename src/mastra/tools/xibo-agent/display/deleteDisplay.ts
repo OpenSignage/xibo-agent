@@ -11,9 +11,9 @@
  */
 
 /**
- * @module checkDisplayLicence
- * @description Provides a tool to check the license status of a specific display.
- * It implements the GET /display/licenceCheck/{displayId} endpoint.
+ * @module deleteDisplay
+ * @description Provides a tool to delete a specific display from the Xibo CMS.
+ * It implements the DELETE /display/{displayId} endpoint.
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core';
@@ -21,7 +21,6 @@ import { getAuthHeaders } from '../auth';
 import { config } from '../config';
 import { logger } from '../../../index';
 import { processError } from '../utility/error';
-import { displayLicenceSchema } from './schemas';
 
 /**
  * Schema for a standardized error response.
@@ -36,24 +35,33 @@ const errorResponseSchema = z.object({
   errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const checkDisplayLicenceSuccessSchema = z.object({
+/**
+ * Schema for a successful response.
+ * This endpoint returns a 204 No Content, so we provide a success message.
+ */
+const successResponseSchema = z.object({
   success: z.literal(true),
-  data: displayLicenceSchema,
+  message: z.string(),
 });
 
-const outputSchema = z.union([
-  checkDisplayLicenceSuccessSchema,
-  errorResponseSchema,
-]);
+/**
+ * Union schema for the tool's output, covering both success and error cases.
+ */
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
-export const checkDisplayLicence = createTool({
-  id: 'check-display-licence',
-  description: 'Checks the license status of a specific display.',
+/**
+ * Tool to delete a specific display.
+ */
+export const deleteDisplay = createTool({
+  id: 'delete-display',
+  description: 'Deletes a specific display.',
   inputSchema: z.object({
-    displayId: z.number().describe('The ID of the display to check.'),
+    displayId: z.number().describe('The ID of the display to delete.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
+    logger.debug({ context }, 'Executing deleteDisplay tool.');
+
     if (!config.cmsUrl) {
       const message = 'CMS URL is not configured.';
       logger.error({}, message);
@@ -61,23 +69,22 @@ export const checkDisplayLicence = createTool({
     }
 
     try {
-      const url = new URL(
-        `${config.cmsUrl}/api/display/licenceCheck/${context.displayId}`
-      );
+      const url = new URL(`${config.cmsUrl}/api/display/${context.displayId}`);
       const authHeaders = await getAuthHeaders();
 
       logger.debug(
         { url: url.toString() },
-        `Checking licence for display ${context.displayId}`
+        `Attempting to delete display ${context.displayId}`
       );
 
       const response = await fetch(url.toString(), {
-        method: 'PUT',
+        method: 'DELETE',
         headers: authHeaders,
       });
 
+      // A successful deletion returns a 204 No Content status.
       if (!response.ok) {
-        const message = `Failed to check licence for display ${context.displayId}. Status: ${response.status}`;
+        const message = `Failed to delete display ${context.displayId}. Status: ${response.status}`;
         let errorData: any = await response.text();
         try {
           errorData = JSON.parse(errorData);
@@ -92,40 +99,13 @@ export const checkDisplayLicence = createTool({
         };
       }
 
-      const responseData = await response.json();
-      const validationResult = z
-        .array(displayLicenceSchema)
-        .safeParse(responseData);
-
-      if (!validationResult.success) {
-        const message = 'Check display licence response validation failed.';
-        logger.error(
-          { error: validationResult.error.flatten(), data: responseData },
-          message
-        );
-        return {
-          success: false as const,
-          message,
-          error: validationResult.error.flatten(),
-          errorData: responseData,
-        };
-      }
-
-      if (validationResult.data.length === 0) {
-        const message = `No licence information found for display ${context.displayId}.`;
-        logger.warn({ displayId: context.displayId }, message);
-        return {
-          success: false as const,
-          message,
-          errorData: responseData,
-        };
-      }
-
-      return { success: true as const, data: validationResult.data[0] };
+      const message = `Successfully deleted display ${context.displayId}.`;
+      logger.info({ displayId: context.displayId }, message);
+      return { success: true as const, message };
     } catch (error) {
       const processedError = processError(error);
       const message =
-        'An unexpected error occurred while checking display licence.';
+        'An unexpected error occurred while deleting a display.';
       logger.error({ error: processedError }, message);
       return {
         success: false as const,
