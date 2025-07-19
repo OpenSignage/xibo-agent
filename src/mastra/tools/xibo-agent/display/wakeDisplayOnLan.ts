@@ -11,9 +11,9 @@
  */
 
 /**
- * @module checkDisplayLicence
- * @description Provides a tool to check the license status of a specific display.
- * It implements the GET /display/licenceCheck/{displayId} endpoint.
+ * @module wakeOnLan
+ * @description Provides a tool to send a Wake On LAN packet to a specific display.
+ * It implements the POST /display/{displayId}/wol endpoint.
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core';
@@ -21,7 +21,6 @@ import { getAuthHeaders } from '../auth';
 import { config } from '../config';
 import { logger } from '../../../index';
 import { processError } from '../utility/error';
-import { displayLicenceSchema } from './schemas';
 
 /**
  * Schema for a standardized error response.
@@ -36,21 +35,18 @@ const errorResponseSchema = z.object({
   errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const checkDisplayLicenceSuccessSchema = z.object({
+const successResponseSchema = z.object({
   success: z.literal(true),
-  data: displayLicenceSchema,
+  message: z.string(),
 });
 
-const outputSchema = z.union([
-  checkDisplayLicenceSuccessSchema,
-  errorResponseSchema,
-]);
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
-export const checkDisplayLicence = createTool({
-  id: 'check-display-licence',
-  description: 'Checks the license status of a specific display.',
+export const wakeDisplayOnLan = createTool({
+  id: 'wake-on-lan',
+  description: 'Sends a Wake On LAN packet to a display.',
   inputSchema: z.object({
-    displayId: z.number().describe('The ID of the display to check.'),
+    displayId: z.number().describe('The ID of the display to send the WoL packet to.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
@@ -62,22 +58,22 @@ export const checkDisplayLicence = createTool({
 
     try {
       const url = new URL(
-        `${config.cmsUrl}/api/display/licenceCheck/${context.displayId}`
+        `${config.cmsUrl}/api/display/wol/${context.displayId}`
       );
       const authHeaders = await getAuthHeaders();
 
       logger.debug(
         { url: url.toString() },
-        `Checking licence for display ${context.displayId}`
+        `Sending Wake On LAN to display ${context.displayId}`
       );
 
       const response = await fetch(url.toString(), {
-        method: 'PUT',
+        method: 'POST',
         headers: authHeaders,
-      });
+      }); 
 
       if (!response.ok) {
-        const message = `Failed to check licence for display ${context.displayId}. Status: ${response.status}`;
+        const message = `Failed to send Wake On LAN to display ${context.displayId}. Status: ${response.status}`;
         let errorData: any = await response.text();
         try {
           errorData = JSON.parse(errorData);
@@ -92,40 +88,12 @@ export const checkDisplayLicence = createTool({
         };
       }
 
-      const responseData = await response.json();
-      const validationResult = z
-        .array(displayLicenceSchema)
-        .safeParse(responseData);
-
-      if (!validationResult.success) {
-        const message = 'Check display licence response validation failed.';
-        logger.error(
-          { error: validationResult.error.flatten(), data: responseData },
-          message
-        );
-        return {
-          success: false as const,
-          message,
-          error: validationResult.error.flatten(),
-          errorData: responseData,
-        };
-      }
-
-      if (validationResult.data.length === 0) {
-        const message = `No licence information found for display ${context.displayId}.`;
-        logger.warn({ displayId: context.displayId }, message);
-        return {
-          success: false as const,
-          message,
-          errorData: responseData,
-        };
-      }
-
-      return { success: true as const, data: validationResult.data[0] };
+      const message = `Successfully sent Wake On LAN packet to display ${context.displayId}.`;
+      logger.info(message);
+      return { success: true as const, message };
     } catch (error) {
       const processedError = processError(error);
-      const message =
-        'An unexpected error occurred while checking display licence.';
+      const message = 'An unexpected error occurred while sending Wake On LAN.';
       logger.error({ error: processedError }, message);
       return {
         success: false as const,

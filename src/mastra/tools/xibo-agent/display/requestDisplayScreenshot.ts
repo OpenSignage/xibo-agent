@@ -11,9 +11,9 @@
  */
 
 /**
- * @module checkDisplayLicence
- * @description Provides a tool to check the license status of a specific display.
- * It implements the GET /display/licenceCheck/{displayId} endpoint.
+ * @module requestDisplayScreenshot
+ * @description Provides a tool to request a screenshot from a specific display.
+ * It implements the PUT /display/requestscreenshot/{displayId} endpoint and returns the updated display object.
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core';
@@ -21,7 +21,7 @@ import { getAuthHeaders } from '../auth';
 import { config } from '../config';
 import { logger } from '../../../index';
 import { processError } from '../utility/error';
-import { displayLicenceSchema } from './schemas';
+import { displaySchema } from './schemas';
 
 /**
  * Schema for a standardized error response.
@@ -36,24 +36,36 @@ const errorResponseSchema = z.object({
   errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const checkDisplayLicenceSuccessSchema = z.object({
+/**
+ * Schema for a successful response, which is the updated display object.
+ * The API may return an empty array on success, so data can be the object or an empty array.
+ */
+const successResponseSchema = z.object({
   success: z.literal(true),
-  data: displayLicenceSchema,
+  data: z.union([displaySchema, z.array(z.any()).max(0)]),
+  message: z.string().optional(),
 });
 
-const outputSchema = z.union([
-  checkDisplayLicenceSuccessSchema,
-  errorResponseSchema,
-]);
+/**
+ * Union schema for the tool's output, covering both success and error cases.
+ */
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
-export const checkDisplayLicence = createTool({
-  id: 'check-display-licence',
-  description: 'Checks the license status of a specific display.',
+/**
+ * Tool to request a screenshot from a specific display.
+ */
+export const requestDisplayScreenshot = createTool({
+  id: 'request-display-screenshot',
+  description: 'Requests a screenshot from a specific display.',
   inputSchema: z.object({
-    displayId: z.number().describe('The ID of the display to check.'),
+    displayId: z
+      .number()
+      .describe('The ID of the display to request a screenshot from.'),
   }),
   outputSchema,
   execute: async ({ context }) => {
+    logger.debug({ context }, 'Executing requestDisplayScreenshot tool.');
+
     if (!config.cmsUrl) {
       const message = 'CMS URL is not configured.';
       logger.error({}, message);
@@ -62,13 +74,13 @@ export const checkDisplayLicence = createTool({
 
     try {
       const url = new URL(
-        `${config.cmsUrl}/api/display/licenceCheck/${context.displayId}`
+        `${config.cmsUrl}/api/display/requestscreenshot/${context.displayId}`
       );
       const authHeaders = await getAuthHeaders();
 
       logger.debug(
         { url: url.toString() },
-        `Checking licence for display ${context.displayId}`
+        `Requesting screenshot from display ${context.displayId}`
       );
 
       const response = await fetch(url.toString(), {
@@ -77,7 +89,7 @@ export const checkDisplayLicence = createTool({
       });
 
       if (!response.ok) {
-        const message = `Failed to check licence for display ${context.displayId}. Status: ${response.status}`;
+        const message = `Failed to request screenshot for display ${context.displayId}. Status: ${response.status}`;
         let errorData: any = await response.text();
         try {
           errorData = JSON.parse(errorData);
@@ -93,12 +105,11 @@ export const checkDisplayLicence = createTool({
       }
 
       const responseData = await response.json();
-      const validationResult = z
-        .array(displayLicenceSchema)
-        .safeParse(responseData);
+      // The API returns an array containing the updated display object.
+      const validationResult = z.array(displaySchema).safeParse(responseData);
 
       if (!validationResult.success) {
-        const message = 'Check display licence response validation failed.';
+        const message = 'Request screenshot response validation failed.';
         logger.error(
           { error: validationResult.error.flatten(), data: responseData },
           message
@@ -112,20 +123,25 @@ export const checkDisplayLicence = createTool({
       }
 
       if (validationResult.data.length === 0) {
-        const message = `No licence information found for display ${context.displayId}.`;
-        logger.warn({ displayId: context.displayId }, message);
+        const message = `Successfully requested screenshot for display ${context.displayId}. The API returned no data, which is expected.`;
+        logger.info({ displayId: context.displayId }, message);
         return {
-          success: false as const,
+          success: true as const,
+          data: [],
           message,
-          errorData: responseData,
         };
       }
 
+      logger.info(
+        { displayId: context.displayId },
+        `Successfully requested screenshot for display ${context.displayId}.`
+      );
+      // Return the first element of the array as the updated display object.
       return { success: true as const, data: validationResult.data[0] };
     } catch (error) {
       const processedError = processError(error);
       const message =
-        'An unexpected error occurred while checking display licence.';
+        'An unexpected error occurred while requesting a display screenshot.';
       logger.error({ error: processedError }, message);
       return {
         success: false as const,

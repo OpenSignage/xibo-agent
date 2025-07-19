@@ -9,136 +9,135 @@
  * You should have received a copy of the GElastic License 2.0 (ELv2).
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
-
-/**
- * @module
- * This module defines common Zod schemas for the Display tools in the Xibo Agent.
- * These schemas are used for data validation and type inference across multiple tools.
- */
-
 import { z } from 'zod';
 
 /**
- * Schema for tag data associated with displays or display groups.
+ * Schema for Display Group membership details.
+ * This is often used when embedding display group information in other objects.
  */
-export const tagSchema = z.object({
-  tag: z.string().describe('The name of the tag.'),
-  tagId: z.number().describe('The unique identifier for the tag.'),
-  value: z.string().describe('The value associated with the tag.'),
-});
-
-/**
- * Schema for display group data.
- */
-export const displayGroupSchema = z.object({
-  displayGroupId: z.number().describe('The unique identifier for the display group.'),
+export const displayGroupMembershipSchema = z.object({
+  displayGroupId: z.number().describe('The ID of the display group.'),
   displayGroup: z.string().describe('The name of the display group.'),
-  description: z.string().describe('A description for the display group.'),
-  isDisplaySpecific: z.number().describe('Flag indicating if the group is display-specific.'),
-  isDynamic: z.number().describe('Flag indicating if the group is dynamic.'),
-  dynamicCriteria: z.string().describe('The criteria for a dynamic group.'),
-  dynamicCriteriaLogicalOperator: z.string().describe('The logical operator for dynamic criteria.'),
-  dynamicCriteriaTags: z.string().describe('Tags used for dynamic criteria.'),
-  dynamicCriteriaExactTags: z.number().describe('Flag for exact tag matching in dynamic criteria.'),
-  dynamicCriteriaTagsLogicalOperator: z.string().describe('The logical operator for dynamic tag criteria.'),
-  userId: z.number().describe('The user ID of the group owner.'),
-  tags: z.array(tagSchema).describe('An array of tags associated with the display group.'),
-  bandwidthLimit: z.number().describe('The bandwidth limit for the group.'),
-  groupsWithPermissions: z.string().describe('Permissions for the group.'),
-  createdDt: z.string().describe('The creation date of the group.'),
-  modifiedDt: z.string().describe('The last modification date of the group.'),
-  folderId: z.number().describe('The ID of the folder containing the group.'),
-  permissionsFolderId: z.number().describe('The ID of the folder that defines permissions.'),
-  ref1: z.string().describe('Optional reference field 1.'),
-  ref2: z.string().describe('Optional reference field 2.'),
-  ref3: z.string().describe('Optional reference field 3.'),
-  ref4: z.string().describe('Optional reference field 4.'),
-  ref5: z.string().describe('Optional reference field 5.'),
 });
 
 /**
- * Schema for a single display object.
+ * Core schema for a Display object, based on the Xibo API definition.
+ * This schema is based on actual API response data to ensure compatibility.
  */
 export const displaySchema = z.object({
-  displayId: z.number().describe('The unique identifier for the display.'),
-  displayTypeId: z.number().describe('The ID of the display type.'),
-  venueId: z.number().describe('The ID of the venue.'),
-  address: z.string().describe('The physical address of the display.'),
-  isMobile: z.number().describe('Flag indicating if the display is mobile.'),
-  languages: z.string().describe('Languages supported by the display.'),
-  displayType: z.string().describe('The type of the display.'),
-  screenSize: z.number().describe('The screen size.'),
-  isOutdoor: z.number().describe('Flag indicating if the display is outdoors.'),
-  customId: z.string().describe('A custom identifier for the display.'),
-  costPerPlay: z.number().describe('The cost per play for advertising.'),
-  impressionsPerPlay: z.number().describe('The number of impressions per play.'),
-  ref1: z.string().describe('Optional reference field 1.'),
-  ref2: z.string().describe('Optional reference field 2.'),
-  ref3: z.string().describe('Optional reference field 3.'),
-  ref4: z.string().describe('Optional reference field 4.'),
-  ref5: z.string().describe('Optional reference field 5.'),
-  auditingUntil: z.number().describe('Timestamp until which auditing is active.'),
+  displayId: z.number().describe('The unique ID of the display.'),
+  displayTypeId: z.number().optional().nullable().describe('The ID of the display type.'),
+  venueId: z.number().optional().nullable().describe('The ID of the venue.'),
+  address: z.string().optional().nullable().describe('The physical address of the display.'),
+  isMobile: z.number().optional().nullable().describe('Flag indicating if the display is a mobile device (1 for yes).'),
+  languages: z.string().optional().nullable().describe('Supported languages for the display location.'),
+  displayType: z.string().optional().nullable().describe('The type of the display.'),
+  screenSize: z.string().optional().nullable().describe('The physical screen size of the display.'),
+  isOutdoor: z.number().optional().nullable().describe('Flag indicating if the display is outdoors (1 for yes).'),
+  customId: z.string().optional().nullable().describe('A custom identifier, often from an external system.'),
+  costPerPlay: z.string().optional().nullable().describe('The cost associated with each media play.'),
+  impressionsPerPlay: z.string().optional().nullable().describe('The number of impressions generated per play.'),
+  ref1: z.string().optional().nullable().describe('Custom reference field 1.'),
+  ref2: z.string().optional().nullable().describe('Custom reference field 2.'),
+  ref3: z.string().optional().nullable().describe('Custom reference field 3.'),
+  ref4: z.string().optional().nullable().describe('Custom reference field 4.'),
+  ref5: z.string().optional().nullable().describe('Custom reference field 5.'),
+  auditingUntil: z.number().describe('Timestamp until which auditing is recorded.'),
   display: z.string().describe('The name of the display.'),
-  description: z.string().describe('A description for the display.'),
-  defaultLayoutId: z.number().describe('The ID of the default layout.'),
-  license: z.string().describe('The license key for the display.'),
+  description: z.string().nullable().describe('The description for the display.'),
+  defaultLayoutId: z.number().describe('The ID of the default layout for this display.'),
+  license: z.string().nullable().describe('The license key or identifier.'),
   licensed: z.number().describe('Flag indicating if the display is licensed.'),
-  loggedIn: z.number().describe('Flag indicating if the display is logged in.'),
-  lastAccessed: z.number().describe('Timestamp of the last access.'),
-  incSchedule: z.number().describe('Flag to include in schedule.'),
-  emailAlert: z.number().describe('Flag for email alerts.'),
-  alertTimeout: z.number().describe('The timeout for alerts.'),
-  clientAddress: z.string().describe('The IP address of the client.'),
-  mediaInventoryStatus: z.number().describe('The status of the media inventory.'),
-  macAddress: z.string().describe('The MAC address of the display.'),
-  lastChanged: z.number().describe('Timestamp of the last change.'),
-  numberOfMacAddressChanges: z.number().describe('The number of MAC address changes.'),
-  lastWakeOnLanCommandSent: z.number().describe('Timestamp of the last WoL command.'),
-  wakeOnLanEnabled: z.number().describe('Flag indicating if WoL is enabled.'),
-  wakeOnLanTime: z.string().describe('The time for WoL.'),
-  broadCastAddress: z.string().describe('The broadcast address for WoL.'),
-  secureOn: z.string().describe('SecureOn settings.'),
-  cidr: z.string().describe('CIDR notation for the network.'),
-  latitude: z.number().describe('The latitude coordinate of the display.'),
-  longitude: z.number().describe('The longitude coordinate of the display.'),
-  clientType: z.string().describe('The type of the client software.'),
-  clientVersion: z.string().describe('The version of the client software.'),
-  clientCode: z.number().describe('The code of the client software.'),
-  displayProfileId: z.number().describe('The ID of the display profile.'),
-  currentLayoutId: z.number().describe('The ID of the currently displayed layout.'),
+  loggedIn: z.number().describe('Flag indicating if the display is currently logged in.'),
+  lastAccessed: z.string().nullable().describe('The date and time the display last connected, in ISO 8601 format.'),
+  incSchedule: z.number().describe('Flag indicating if the display is included in schedule calculations.'),
+  emailAlert: z.number().describe('Flag indicating if email alerts are enabled for this display.'),
+  alertTimeout: z.number().describe('The timeout in seconds before an alert is sent.'),
+  clientAddress: z.string().nullable().describe('The IP address of the display client.'),
+  mediaInventoryStatus: z.number().describe('The current media inventory status.'),
+  macAddress: z.string().nullable().describe('The MAC address of the display.'),
+  lastChanged: z.number().optional().nullable().describe('Timestamp of the last change to the display settings.'),
+  numberOfMacAddressChanges: z.number().optional().nullable().describe('The number of times the MAC address has been changed.'),
+  lastWakeOnLanCommandSent: z.number().optional().nullable().describe('Timestamp of the last Wake On LAN command sent.'),
+  wakeOnLanEnabled: z.number().describe('Flag indicating if WOL is enabled.'),
+  wakeOnLanTime: z.string().optional().nullable().describe('The scheduled time for Wake On LAN.'),
+  broadCastAddress: z.string().optional().nullable().describe('The broadcast address for WOL.'),
+  secureOn: z.string().optional().nullable().describe('Secure ON configuration details.'),
+  cidr: z.string().optional().nullable().describe('The CIDR network configuration.'),
+  latitude: z.number().optional().nullable().describe('The geographic latitude.'),
+  longitude: z.number().optional().nullable().describe('The geographic longitude.'),
+  clientType: z.string().nullable().describe('The type of the client software (e.g., windows, android).'),
+  clientVersion: z.string().optional().nullable().describe('The version of the client software.'),
+  clientCode: z.number().optional().nullable().describe('The version code of the client software.'),
+  displayProfileId: z.number().nullable().describe('The ID of the assigned display profile.'),
+  currentLayoutId: z.number().nullable().describe('The ID of the currently displayed layout.'),
   screenShotRequested: z.number().describe('Flag indicating if a screenshot has been requested.'),
-  storageAvailableSpace: z.number().describe('Available storage space on the device.'),
-  storageTotalSpace: z.number().describe('Total storage space on the device.'),
+  storageAvailableSpace: z
+    .union([z.string(), z.number()])
+    .nullable()
+    .describe('Available storage space (e.g., "3.03 GiB" or bytes as number).'),
+  storageTotalSpace: z
+    .union([z.string(), z.number()])
+    .nullable()
+    .describe('Total storage space (e.g., "57.05 GiB" or bytes as number).'),
   displayGroupId: z.number().describe('The ID of the primary display group.'),
-  currentLayout: z.string().describe('The name of the current layout.'),
-  defaultLayout: z.string().describe('The name of the default layout.'),
-  displayGroups: z.array(displayGroupSchema).describe('An array of display groups this display belongs to.'),
+  currentLayout: z.string().nullable().describe('The name of the currently displayed layout.'),
+  defaultLayout: z.string().nullable().describe('The name of the default layout.'),
+  displayGroups: z.array(displayGroupMembershipSchema).optional().describe('A list of display groups this display is a member of.'),
   xmrChannel: z.string().describe('The XMR channel for real-time communication.'),
-  xmrPubKey: z.string().describe('The XMR public key.'),
-  lastCommandSuccess: z.number().describe('Timestamp of the last successful command.'),
-  deviceName: z.string().describe('The name of the device.'),
-  timeZone: z.string().describe('The time zone of the display.'),
-  tags: z.array(tagSchema).describe('An array of tags associated with the display.'),
-  overrideConfig: z.string().describe('JSON string for overriding configuration.'),
-  bandwidthLimit: z.number().describe('The bandwidth limit for the display.'),
-  newCmsAddress: z.string().describe('A new CMS address for redirection.'),
-  newCmsKey: z.string().describe('A new CMS key for redirection.'),
-  orientation: z.string().describe('The screen orientation.'),
-  resolution: z.string().describe('The screen resolution.'),
-  commercialLicence: z.number().describe('Flag for commercial license.'),
-  teamViewerSerial: z.string().describe('The TeamViewer serial number.'),
-  webkeySerial: z.string().describe('The Webkey serial number.'),
-  groupsWithPermissions: z.string().describe('Permissions for the groups.'),
-  createdDt: z.string().describe('The creation date of the display.'),
-  modifiedDt: z.string().describe('The last modification date of the display.'),
-  folderId: z.number().describe('The ID of the folder containing the display.'),
-  permissionsFolderId: z.number().describe('The ID of the folder that defines permissions.'),
-  countFaults: z.number().describe('The number of faults recorded.'),
-  lanIpAddress: z.string().describe('The LAN IP address of the display.'),
-  syncGroupId: z.number().describe('The ID of the sync group.'),
-  osVersion: z.string().describe('The operating system version.'),
-  osSdk: z.string().describe('The operating system SDK version.'),
-  manufacturer: z.string().describe('The manufacturer of the device.'),
-  brand: z.string().describe('The brand of the device.'),
-  model: z.string().describe('The model of the device.'),
+  xmrPubKey: z.string().describe('The public key for XMR communication.'),
+  lastCommandSuccess: z.number().optional().describe('Flag indicating if the last command was successful.'),
+  deviceName: z.string().optional().nullable().describe('The device name reported by the player.'),
+  timeZone: z.string().optional().nullable().describe('The timezone setting for the display.'),
+  tags: z.array(z.any()).describe('A list of tags associated with the display.'), // Keeping as z.any() for now as structure is not in log.
+  overrideConfig: z.array(z.any()).describe('Array of override configuration settings.'), // Keeping as z.any() as structure is not in log.
+  bandwidthLimit: z.number().describe('The bandwidth limit setting.'),
+  newCmsAddress: z.string().optional().nullable().describe('A new CMS address, if the display is being migrated.'),
+  newCmsKey: z.string().optional().nullable().describe('A new CMS key, if the display is being migrated.'),
+  orientation: z.string().optional().nullable().describe('The display orientation (e.g., "landscape").'),
+  resolution: z.string().optional().nullable().describe('The resolution of the display (e.g., "1024x768").'),
+  commercialLicence: z.number().describe('The commercial license status.'),
+  teamViewerSerial: z.string().optional().nullable().describe('The TeamViewer serial number, if applicable.'),
+  webkeySerial: z.string().optional().nullable().describe('The Webkey serial number, if applicable.'),
+  groupsWithPermissions: z.any().nullable().describe('Groups with permissions for this display.'), // Type unknown from log
+  createdDt: z.string().describe('The creation date of the display record.'),
+  modifiedDt: z.string().describe('The last modification date of the display record.'),
+  folderId: z.number().describe('The ID of the folder containing this display.'),
+  permissionsFolderId: z.number().describe('The ID of the folder used for permissions.'),
+  countFaults: z.number().describe('The number of faults recorded for this display.'),
+  lanIpAddress: z.string().optional().nullable().describe('The LAN IP address of the display.'),
+  syncGroupId: z.number().describe('The ID of the sync group, if any.'),
+  osVersion: z.string().describe('The operating system version of the player.'),
+  osSdk: z.string().describe('The SDK version of the operating system.'),
+  manufacturer: z.string().optional().nullable().describe('The manufacturer of the display hardware.'),
+  brand: z.string().optional().nullable().describe('The brand of the display hardware.'),
+  model: z.string().optional().nullable().describe('The model of the display hardware.'),
+  currentMacAddress: z.string().describe('The currently reported MAC address.'),
+  bandwidthLimitFormatted: z.number().optional().describe('The bandwidth limit, formatted for display.'),
+  // These fields were in the old schema but not in the new response log, so commenting out.
+  // ownerId: z.number().describe('The user ID of the display owner.'),
+  // resolutionId: z.number().describe('The ID of the display resolution.'),
+  // isAuthorized: z.number().describe('Flag indicating if the display is authorized (1 for yes, 0 for no).'),
+});
+
+/**
+ * Schema for the Display Status object.
+ * This schema is based on actual API response data.
+ */
+export const displayStatusSchema = z.object({
+  lastActivity: z.string().describe('The date and time of the last player activity.'),
+  applicationState: z.string().describe('The current state of the player application (e.g., "Running").'),
+  xmdsLastActivity: z.string().describe('The date and time of the last XMDS activity.'),
+  scheduleStatus: z.string().describe('The current schedule status message.'),
+  requiredFilesStatus: z.string().describe('The status of required file downloads.'),
+  xmrStatus: z.string().describe('The status of the XMR connection.'),
+});
+
+/**
+ * Schema for the Display Licence object.
+ */
+export const displayLicenceSchema = z.object({
+  isLicensed: z.boolean().describe('Whether the display is currently licensed.'),
+  availableSlots: z.number().describe('The number of available license slots for this display type.'),
+  message: z.string().describe('A message regarding the license status.'),
 }); 

@@ -11,66 +11,100 @@
  */
 
 /**
- * @module
- * This module provides a tool to toggle the authorization status of a display.
- * It sends a PUT request to the /api/display/authorise/:displayId endpoint.
+ * @module toggleAuthoriseForDisplay
+ * @description Provides a tool to authorize or de-authorize a specific display.
+ * It implements the PUT /display/authorise/{displayId} endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
+import { processError } from '../utility/error';
 
-const inputSchema = z.object({
-  displayId: z.number().describe('The ID of the display to toggle authorization for.'),
+/**
+ * Schema for a standardized error response.
+ */
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z
+    .any()
+    .optional()
+    .describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
+
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 export const toggleAuthoriseForDisplay = createTool({
   id: 'toggle-authorise-for-display',
-  description: 'Toggle the authorization status of a specific display.',
-  inputSchema,
+  description: 'Authorizes or de-authorizes a display.',
+  inputSchema: z.object({
+    displayId: z.number().describe('The ID of the display to toggle.'),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }) => {
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
+      const url = new URL(
+        `${config.cmsUrl}/api/display/authorise/${context.displayId}`
+      );
+      const authHeaders = await getAuthHeaders();
+      const headers = {
+        ...authHeaders,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      };
 
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/display/authorise/${input.displayId}`;
-      logger.debug(`toggleAuthorise: Requesting URL = ${url}`);
+      logger.debug(
+        { url: url.toString() },
+        `Toggling authorization for display ${context.displayId}`
+      );
 
-      const response = await fetch(url, {
+      const response = await fetch(url.toString(), {
         method: 'PUT',
         headers,
       });
 
       if (!response.ok) {
-        const errorData = await response.text();
-        logger.error(`toggleAuthorise: HTTP error: ${response.status}`, { error: errorData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+        const message = `Failed to toggle authorization for display ${context.displayId}. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try {
+          errorData = JSON.parse(errorData);
+        } catch (e) {
+          // Not a JSON response
+        }
+        logger.error({ status: response.status, data: errorData }, message);
+        return {
+          success: false as const,
+          message,
+          errorData,
+        };
       }
 
-      // A successful response is typically a 204 No Content
-      return { success: true, message: 'Display authorization toggled successfully.' };
-
+      const message = `Successfully toggled authorization for display ${context.displayId}.`;
+      logger.info(message);
+      return { success: true as const, message };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('toggleAuthorise: An unexpected error occurred', { error });
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const processedError = processError(error);
+      const message =
+        'An unexpected error occurred while toggling display authorization.';
+      logger.error({ error: processedError }, message);
+      return {
+        success: false as const,
+        message,
+        error: processedError,
+      };
     }
   },
 }); 

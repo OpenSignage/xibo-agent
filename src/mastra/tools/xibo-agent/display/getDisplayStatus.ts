@@ -11,80 +11,114 @@
  */
 
 /**
- * @module
- * This module provides a tool for retrieving the status of a specific display.
- * It accesses the /api/display/status/:displayId endpoint.
+ * @module getDisplayStatus
+ * @description Provides a tool to get the current status of a specific display.
+ * It implements the GET /display/{displayId}/status endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
+import { processError } from '../utility/error';
+import { displayStatusSchema } from './schemas';
 
-const inputSchema = z.object({
-  displayId: z.number().describe('The ID of the display to get the status for.'),
+/**
+ * Schema for a standardized error response.
+ */
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z
+    .any()
+    .optional()
+    .describe('Detailed error information, e.g., from Zod.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const statusDataSchema = z.object({
-  onLayoutId: z.number().describe('The ID of the layout currently being displayed.'),
-  onLayout: z.string().describe('The name of the layout currently being displayed.'),
-  onScheduleId: z.number().describe('The ID of the schedule currently active.'),
-  onSchedule: z.string().describe('The name of the schedule currently active.'),
+const getDisplayStatusSuccessSchema = z.object({
+  success: z.literal(true),
+  data: displayStatusSchema,
 });
 
 const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-    data: statusDataSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
+  getDisplayStatusSuccessSchema,
+  errorResponseSchema,
 ]);
 
 export const getDisplayStatus = createTool({
   id: 'get-display-status',
-  description: 'Retrieve the status of a specific display.',
-  inputSchema,
+  description: 'Gets the current status of a specific display.',
+  inputSchema: z.object({
+    displayId: z.number().describe('The ID of the display to get the status for.'),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }) => {
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
+      const url = new URL(
+        `${config.cmsUrl}/api/display/status/${context.displayId}`
+      );
+      const authHeaders = await getAuthHeaders();
 
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/display/status/${input.displayId}`;
-      logger.debug(`getDisplayStatus: Requesting URL = ${url}`);
+      logger.debug(
+        { url: url.toString() },
+        `Getting status for display ${context.displayId}`
+      );
 
-      const response = await fetch(url, {
+      const response = await fetch(url.toString(), {
         method: 'GET',
-        headers,
+        headers: authHeaders,
       });
 
-      const responseData = await response.json();
-
       if (!response.ok) {
-        logger.error(`getDisplayStatus: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+        const message = `Failed to get status for display ${context.displayId}. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try {
+          errorData = JSON.parse(errorData);
+        } catch (e) {
+          // Not a JSON response
+        }
+        logger.error({ status: response.status, data: errorData }, message);
+        return {
+          success: false as const,
+          message,
+          errorData,
+        };
       }
 
-      const validatedData = statusDataSchema.parse(responseData);
-      return { success: true, message: 'Display status retrieved successfully.', data: validatedData };
-      
+      const responseData = await response.json();
+      const validationResult = displayStatusSchema.safeParse(responseData);
+
+      if (!validationResult.success) {
+        const message = 'Get display status response validation failed.';
+        logger.error(
+          { error: validationResult.error.flatten(), data: responseData },
+          message
+        );
+        return {
+          success: false as const,
+          message,
+          error: validationResult.error.flatten(),
+          errorData: responseData,
+        };
+      }
+      return { success: true as const, data: validationResult.data };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('getDisplayStatus: An unexpected error occurred', { error });
-
-      if (error instanceof z.ZodError) {
-        return { success: false, message: 'Validation error occurred.', error: error.issues };
-      }
-      
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const processedError = processError(error);
+      const message =
+        'An unexpected error occurred while getting display status.';
+      logger.error({ error: processedError }, message);
+      return {
+        success: false as const,
+        message,
+        error: processedError,
+      };
     }
   },
 }); 
