@@ -11,79 +11,71 @@
  */
 
 /**
- * @module
- * This module provides a tool for unassigning displays from a display group.
- * It sends a POST request to the /api/displaygroup/:displayGroupId/display/unassign endpoint.
+ * @module unassignDisplaysFromDisplayGroup
+ * @description Provides a tool to unassign one or more displays from a Display Group.
+ * It implements the POST /displaygroup/{id}/action/unassign endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
-import { displayGroupSchema } from './schemas';
+import { processError } from '../utility/error';
 
-const inputSchema = z.object({
-  displayGroupId: z.number().describe('The ID of the display group to unassign displays from.'),
-  displayIds: z.array(z.number()).describe('An array of display IDs to unassign from the group.'),
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-    data: displayGroupSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
+
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 export const unassignDisplaysFromDisplayGroup = createTool({
   id: 'unassign-displays-from-display-group',
-  description: 'Unassign one or more displays from a specific display group.',
-  inputSchema,
+  description: 'Unassigns one or more displays from a Display Group.',
+  inputSchema: z.object({
+    displayGroupId: z.number().describe('The ID of the Display Group to unassign from.'),
+    displayIds: z.array(z.number()).describe('An array of Display IDs to unassign.'),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }) => {
+    logger.debug({ context }, 'Executing unassignDisplaysFromDisplayGroup tool.');
+
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
+      const url = new URL(`${config.cmsUrl}/api/displaygroup/${context.displayGroupId}/action/unassign`);
+      const body = new URLSearchParams();
+      context.displayIds.forEach(id => body.append('displayIds[]', id.toString()));
+
+      const authHeaders = await getAuthHeaders();
+      const headers = { ...authHeaders, 'Content-Type': 'application/x-www-form-urlencoded' };
+      const response = await fetch(url.toString(), { method: 'POST', headers, body });
+
+      if (response.status !== 204) {
+        const message = `Failed to unassign displays from group ${context.displayGroupId}. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try { errorData = JSON.parse(errorData); } catch (e) { /* Not JSON */ }
+        logger.error({ status: response.status, data: errorData }, message);
+        return { success: false as const, message, errorData };
       }
 
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
-      input.displayIds.forEach(id => params.append('displayIds[]', String(id)));
-
-      const url = `${config.cmsUrl}/api/displaygroup/${input.displayGroupId}/display/unassign`;
-      logger.debug(`unassignDisplaysFromDisplayGroup: Requesting URL = ${url}, Body = ${params.toString()}`);
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
-      });
-
-      const responseData = await response.json();
-
-      if (!response.ok) {
-        logger.error(`unassignDisplaysFromDisplayGroup: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
-      }
-
-      const validatedData = displayGroupSchema.parse(responseData);
-      return { success: true, message: 'Displays unassigned successfully.', data: validatedData };
-
+      return { success: true as const, message: `Displays unassigned successfully from group ${context.displayGroupId}.` };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('unassignDisplaysFromDisplayGroup: An unexpected error occurred', { error });
-
-      if (error instanceof z.ZodError) {
-        return { success: false, message: 'Validation error occurred.', error: error.issues };
-      }
-      
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const processedError = processError(error);
+      const message = 'An unexpected error occurred while unassigning displays.';
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

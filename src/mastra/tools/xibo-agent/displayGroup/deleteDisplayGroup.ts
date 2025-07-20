@@ -11,66 +11,66 @@
  */
 
 /**
- * @module
- * This module provides a tool for deleting a display group from the Xibo CMS.
- * It sends a DELETE request to the /api/displaygroup/:displayGroupId endpoint.
+ * @module deleteDisplayGroup
+ * @description Provides a tool to delete a Display Group from the Xibo CMS.
+ * It implements the DELETE /displaygroup/{id} endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
+import { processError } from '../utility/error';
 
-const inputSchema = z.object({
-  displayGroupId: z.number().describe('The ID of the display group to delete.'),
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
+
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 export const deleteDisplayGroup = createTool({
   id: 'delete-display-group',
-  description: 'Delete a specific display group.',
-  inputSchema,
+  description: 'Deletes a Display Group.',
+  inputSchema: z.object({
+    displayGroupId: z.number().describe('The ID of the Display Group to delete.'),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }) => {
+    logger.debug({ context }, 'Executing deleteDisplayGroup tool.');
+
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
+      const url = new URL(`${config.cmsUrl}/api/displaygroup/${context.displayGroupId}`);
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch(url.toString(), { method: 'DELETE', headers: authHeaders });
+
+      if (response.status !== 204) {
+        const message = `Failed to delete display group ${context.displayGroupId}. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try { errorData = JSON.parse(errorData); } catch (e) { /* Not JSON */ }
+        logger.error({ status: response.status, data: errorData }, message);
+        return { success: false as const, message, errorData };
       }
 
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/displaygroup/${input.displayGroupId}`;
-      logger.debug(`deleteDisplayGroup: Requesting URL = ${url}`);
-
-      const response = await fetch(url, {
-        method: 'DELETE',
-        headers,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        logger.error(`deleteDisplayGroup: HTTP error: ${response.status}`, { error: errorData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
-      }
-      
-      // Successful response is 204 No Content
-      return { success: true, message: 'Display group deleted successfully.' };
-
+      return { success: true as const, message: `Display Group ${context.displayGroupId} deleted successfully.` };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('deleteDisplayGroup: An unexpected error occurred', { error });
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const processedError = processError(error);
+      const message = 'An unexpected error occurred while deleting a display group.';
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

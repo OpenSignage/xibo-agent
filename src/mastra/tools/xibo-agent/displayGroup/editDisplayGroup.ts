@@ -11,94 +11,125 @@
  */
 
 /**
- * @module
- * This module provides a tool for editing an existing display group in the Xibo CMS.
- * It sends a PUT request to the /api/displaygroup/:displayGroupId endpoint.
+ * @module editDisplayGroup
+ * @description Provides a tool to edit an existing Display Group in the Xibo CMS.
+ * It implements the PUT /displaygroup/{id} endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
+import { processError } from '../utility/error';
 import { displayGroupSchema } from './schemas';
 
-const inputSchema = z.object({
-  displayGroupId: z.number().describe('The ID of the display group to edit.'),
-  name: z.string().describe('The new name for the display group.'),
-  description: z.string().optional().describe('An optional new description for the display group.'),
-  isDynamic: z.number().optional().describe('Flag to set the group as dynamic (0 or 1).'),
-  tags: z.string().optional().describe('A comma-separated list of tags for the display group.'),
-  dynamicCriteria: z.string().optional().describe('SQL filter for dynamic groups.'),
-  folderId: z.number().optional().describe('The ID of the folder to move the group to.'),
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-    data: displayGroupSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: displayGroupSchema,
+});
 
+/**
+ * Union schema for the tool's output, covering both success and error cases.
+ */
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+/**
+ * Tool to edit an existing Display Group in the Xibo CMS.
+ */
 export const editDisplayGroup = createTool({
   id: 'edit-display-group',
-  description: 'Edit an existing display group in the CMS.',
-  inputSchema,
+  description: 'Edits an existing Display Group.',
+  inputSchema: z.object({
+    displayGroupId: z.number().describe('The ID of the Display Group to edit.'),
+    displayGroup: z.string().describe('The new name for the Display Group.'),
+    description: z.string().optional().describe('An optional new description.'),
+    isDynamic: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Flag for dynamic group.'),
+    dynamicCriteria: z
+      .string()
+      .optional()
+      .describe('The filter criteria for a dynamic group.'),
+    dynamicCriteriaLogicalOperator: z
+      .enum(['AND', 'OR'])
+      .optional()
+      .describe('Logical operator for dynamic criteria.'),
+    dynamicCriteriaTags: z
+      .string()
+      .optional()
+      .describe('Tags for dynamic criteria.'),
+    dynamicCriteriaExactTags: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Flag for exact tag matching in dynamic criteria.'),
+    dynamicCriteriaTagsLogicalOperator: z
+      .enum(['AND', 'OR'])
+      .optional()
+      .describe('Logical operator for tags in dynamic criteria.'),
+    tags: z.string().optional().describe('A comma-separated list of tags.'),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
-    try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
-      
-      const { displayGroupId, ...bodyParams } = input;
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
+  execute: async ({ context }) => {
+    logger.debug({ context }, 'Executing editDisplayGroup tool.');
 
-      // The API expects 'displayGroup' for the name field
-      params.append('displayGroup', bodyParams.name);
-      
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
+    try {
+      const { displayGroupId, ...bodyParams } = context;
+      const url = new URL(`${config.cmsUrl}/api/displaygroup/${displayGroupId}`);
+      const body = new URLSearchParams();
       Object.entries(bodyParams).forEach(([key, value]) => {
-        // 'name' is already handled, so we skip it
-        if (key !== 'name' && value !== undefined && value !== null) {
-          params.append(key, String(value));
+        if (value !== undefined) {
+          body.append(key, value.toString());
         }
       });
-      
-      const url = `${config.cmsUrl}/api/displaygroup/${displayGroupId}`;
-      logger.debug(`editDisplayGroup: Requesting URL = ${url}, Body = ${params.toString()}`);
-      
-      const response = await fetch(url, {
-        method: 'PUT',
-        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
-      });
 
-      const responseData = await response.json();
+      const authHeaders = await getAuthHeaders();
+      const headers = { ...authHeaders, 'Content-Type': 'application/x-www-form-urlencoded' };
+      
+      logger.debug({ url: url.toString(), body: body.toString() }, `Editing display group ${displayGroupId}.`);
+      const response = await fetch(url.toString(), { method: 'PUT', headers, body });
 
       if (!response.ok) {
-        logger.error(`editDisplayGroup: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+        const message = `Failed to edit display group ${displayGroupId}. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try { errorData = JSON.parse(errorData); } catch (e) { /* Not JSON */ }
+        logger.error({ status: response.status, data: errorData }, message);
+        return { success: false as const, message, errorData };
       }
 
-      const validatedData = displayGroupSchema.parse(responseData);
-      return { success: true, message: 'Display group edited successfully.', data: validatedData };
+      const responseData = await response.json();
+      const validationResult = displayGroupSchema.safeParse(responseData);
 
+      if (!validationResult.success) {
+        const message = 'Edit display group response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return { success: false as const, message, error: validationResult.error.flatten(), errorData: responseData };
+      }
+
+      logger.info({ displayGroupId }, 'Successfully edited display group.');
+      return { success: true as const, data: validationResult.data };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('editDisplayGroup: An unexpected error occurred', { error });
-
-      if (error instanceof z.ZodError) {
-        return { success: false, message: 'Validation error occurred.', error: error.issues };
-      }
-      
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const processedError = processError(error);
+      const message = 'An unexpected error occurred while editing a display group.';
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

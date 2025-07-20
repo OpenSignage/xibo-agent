@@ -17,8 +17,8 @@
  * in the Xibo CMS, such as retrieving, uploading, and deleting fonts.
  */
 
-export { getFonts } from "./getFonts";
-export { uploadFont } from "./uploadFont";
-export { getFontDetails } from "./getFontDetails";
-export { downloadFont } from "./downloadFont";
-export { deleteFont } from "./deleteFont"; 
+export { getFonts } from './getFonts';
+export { getFontDetails } from './getFontDetails';
+export { uploadFont } from './uploadFont';
+export { downloadFont } from './downloadFont';
+export { deleteFont } from './deleteFont';

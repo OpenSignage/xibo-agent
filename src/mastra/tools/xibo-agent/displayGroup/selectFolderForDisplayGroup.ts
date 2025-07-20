@@ -11,78 +11,80 @@
  */
 
 /**
- * @module
- * This module provides a tool for assigning a display group to a folder.
- * It sends a POST request to the /api/displaygroup/:displayGroupId/folder endpoint.
+ * @module selectFolderForDisplayGroup
+ * @description Provides a tool for assigning a display group to a folder.
+ * It implements the POST /displaygroup/{id}/action/selectfolder endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
+import { processError } from '../utility/error';
 import { displayGroupSchema } from './schemas';
 
-const inputSchema = z.object({
-  displayGroupId: z.number().describe('The ID of the display group to move.'),
-  folderId: z.number().describe('The ID of the destination folder.'),
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-    data: displayGroupSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: displayGroupSchema,
+});
+
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 export const selectFolderForDisplayGroup = createTool({
   id: 'select-folder-for-display-group',
   description: 'Assign a display group to a specific folder.',
-  inputSchema,
+  inputSchema: z.object({
+    displayGroupId: z.number().describe('The ID of the display group to move.'),
+    folderId: z.number().describe('The ID of the destination folder.'),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }) => {
+    logger.debug({ context }, 'Executing selectFolderForDisplayGroup tool.');
+    
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
+      const url = new URL(`${config.cmsUrl}/api/displaygroup/${context.displayGroupId}/action/selectfolder`);
+      const body = new URLSearchParams({ folderId: context.folderId.toString() });
 
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams({ folderId: String(input.folderId) });
-
-      const url = `${config.cmsUrl}/api/displaygroup/${input.displayGroupId}/folder`;
-      logger.debug(`selectFolderForDisplayGroup: Requesting URL = ${url}, Body = ${params.toString()}`);
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
-      });
-
-      const responseData = await response.json();
+      const authHeaders = await getAuthHeaders();
+      const headers = { ...authHeaders, 'Content-Type': 'application/x-www-form-urlencoded' };
+      const response = await fetch(url.toString(), { method: 'POST', headers, body });
 
       if (!response.ok) {
-        logger.error(`selectFolderForDisplayGroup: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
-      }
-
-      const validatedData = displayGroupSchema.parse(responseData);
-      return { success: true, message: 'Display group moved to folder successfully.', data: validatedData };
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('selectFolderForDisplayGroup: An unexpected error occurred', { error });
-
-      if (error instanceof z.ZodError) {
-        return { success: false, message: 'Validation error occurred.', error: error.issues };
+        const message = `Failed to move display group ${context.displayGroupId} to folder ${context.folderId}. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try { errorData = JSON.parse(errorData); } catch (e) { /* Not JSON */ }
+        logger.error({ status: response.status, data: errorData }, message);
+        return { success: false as const, message, errorData };
       }
       
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const responseData = await response.json();
+      const validationResult = displayGroupSchema.safeParse(responseData);
+      
+      if (!validationResult.success) {
+        const message = 'Select folder response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return { success: false as const, message, error: validationResult.error.flatten(), errorData: responseData };
+      }
+
+      return { success: true as const, data: validationResult.data };
+    } catch (error) {
+      const processedError = processError(error);
+      const message = 'An unexpected error occurred while moving a display group.';
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 
