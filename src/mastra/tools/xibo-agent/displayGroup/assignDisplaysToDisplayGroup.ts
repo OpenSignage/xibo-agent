@@ -11,79 +11,116 @@
  */
 
 /**
- * @module
- * This module provides a tool for assigning displays to a display group.
- * It sends a POST request to the /api/displaygroup/:displayGroupId/display/assign endpoint.
+ * @module assignDisplaysToDisplayGroup
+ * @description Provides a tool to assign one or more displays to a Display Group.
+ * It implements the POST /displaygroup/{id}/action/assign endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
-import { displayGroupSchema } from './schemas';
+import { processError } from '../utility/error';
+import { assignedDisplaySchema } from './schemas';
 
-const inputSchema = z.object({
-  displayGroupId: z.number().describe('The ID of the display group to assign displays to.'),
-  displayIds: z.array(z.number()).describe('An array of display IDs to assign to the group.'),
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-    data: displayGroupSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+/**
+ * Schema for a successful response, containing an array of assigned displays.
+ */
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(assignedDisplaySchema),
+});
 
+/**
+ * Union schema for the tool's output, covering both success and error cases.
+ */
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+/**
+ * Tool to assign one or more displays to a Display Group.
+ */
 export const assignDisplaysToDisplayGroup = createTool({
   id: 'assign-displays-to-display-group',
-  description: 'Assign one or more displays to a specific display group.',
-  inputSchema,
+  description: 'Assigns one or more displays to a Display Group.',
+  inputSchema: z.object({
+    displayGroupId: z
+      .number()
+      .describe('The ID of the Display Group to assign to.'),
+    displayIds: z.array(z.number()).describe('An array of Display IDs to assign.'),
+    unassign: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe(
+        'Flag to unassign all other displays before assigning the new ones.'
+      ),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }) => {
+    logger.debug({ context }, 'Executing assignDisplaysToDisplayGroup tool.');
+
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
+      const url = new URL(
+        `${config.cmsUrl}/api/displaygroup/${context.displayGroupId}/action/assign`
+      );
+      const body = new URLSearchParams();
+
+      // The API expects an array parameter, so we append each ID with '[]'.
+      context.displayIds.forEach((id) =>
+        body.append('displayIds[]', id.toString())
+      );
+      if (context.unassign !== undefined) {
+        body.append('unassign', context.unassign.toString());
       }
 
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
-      input.displayIds.forEach(id => params.append('displayIds[]', String(id)));
-
-      const url = `${config.cmsUrl}/api/displaygroup/${input.displayGroupId}/display/assign`;
-      logger.debug(`assignDisplaysToDisplayGroup: Requesting URL = ${url}, Body = ${params.toString()}`);
+      const authHeaders = await getAuthHeaders();
+      const headers = { ...authHeaders, 'Content-Type': 'application/x-www-form-urlencoded' };
       
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
-      });
+      logger.debug({ url: url.toString(), body: body.toString() }, 'Assigning displays to group.');
 
-      const responseData = await response.json();
+      const response = await fetch(url.toString(), { method: 'POST', headers, body });
 
       if (!response.ok) {
-        logger.error(`assignDisplaysToDisplayGroup: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+        const message = `Failed to assign displays to group ${context.displayGroupId}. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try { errorData = JSON.parse(errorData); } catch (e) { /* Not JSON */ }
+        logger.error({ status: response.status, data: errorData }, message);
+        return { success: false as const, message, errorData };
       }
 
-      const validatedData = displayGroupSchema.parse(responseData);
-      return { success: true, message: 'Displays assigned successfully.', data: validatedData };
+      const responseData = await response.json();
+      const validationResult = z.array(assignedDisplaySchema).safeParse(responseData);
 
+      if (!validationResult.success) {
+        const message = 'Assign displays response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return { success: false as const, message, error: validationResult.error.flatten(), errorData: responseData };
+      }
+
+      logger.info(
+        { displayGroupId: context.displayGroupId, count: validationResult.data.length },
+        'Successfully assigned displays to group.'
+      );
+      return { success: true as const, data: validationResult.data };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('assignDisplaysToDisplayGroup: An unexpected error occurred', { error });
-
-      if (error instanceof z.ZodError) {
-        return { success: false, message: 'Validation error occurred.', error: error.issues };
-      }
-      
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const processedError = processError(error);
+      const message = 'An unexpected error occurred while assigning displays.';
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

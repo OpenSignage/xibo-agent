@@ -11,66 +11,66 @@
  */
 
 /**
- * @module
- * This module provides a tool to trigger an immediate data collection for a display group.
- * It sends a POST request to the /api/displaygroup/:displayGroupId/collectNow endpoint.
+ * @module collectNowForDisplayGroup
+ * @description Provides a tool to trigger a "Collect Now" action for a Display Group.
+ * It implements the POST /displaygroup/{id}/action/collectnow endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
+import { processError } from '../utility/error';
 
-const inputSchema = z.object({
-  displayGroupId: z.number().describe('The ID of the display group to trigger data collection for.'),
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
+
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 export const collectNowForDisplayGroup = createTool({
   id: 'collect-now-for-display-group',
-  description: 'Trigger immediate data collection for a specific display group.',
-  inputSchema,
+  description: 'Triggers a "Collect Now" action for a Display Group.',
+  inputSchema: z.object({
+    displayGroupId: z.number().describe('The ID of the Display Group.'),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }) => {
+    logger.debug({ context }, 'Executing collectNowForDisplayGroup tool.');
+
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
+      const url = new URL(`${config.cmsUrl}/api/displaygroup/${context.displayGroupId}/action/collectnow`);
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch(url.toString(), { method: 'POST', headers: authHeaders });
+
+      if (response.status !== 204) {
+        const message = `Failed to trigger Collect Now for group ${context.displayGroupId}. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try { errorData = JSON.parse(errorData); } catch (e) { /* Not JSON */ }
+        logger.error({ status: response.status, data: errorData }, message);
+        return { success: false as const, message, errorData };
       }
 
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/displaygroup/${input.displayGroupId}/collectNow`;
-      logger.debug(`collectNowForDisplayGroup: Requesting URL = ${url}`);
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        logger.error(`collectNowForDisplayGroup: HTTP error: ${response.status}`, { error: errorData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
-      }
-      
-      // Successful response is 204 No Content
-      return { success: true, message: 'Data collection triggered successfully.' };
-
+      return { success: true as const, message: `Collect Now triggered for group ${context.displayGroupId}.` };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('collectNowForDisplayGroup: An unexpected error occurred', { error });
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const processedError = processError(error);
+      const message = 'An unexpected error occurred during Collect Now action.';
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

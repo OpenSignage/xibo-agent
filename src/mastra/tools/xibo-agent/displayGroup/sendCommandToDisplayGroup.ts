@@ -11,71 +11,76 @@
  */
 
 /**
- * @module
- * This module provides a tool for sending a command to a display group.
- * It sends a POST request to the /api/displaygroup/:displayGroupId/command endpoint.
+ * @module sendCommandToDisplayGroup
+ * @description Provides a tool for sending a command to a display group.
+ * It implements the POST /displaygroup/{id}/action/command endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
+import { processError } from '../utility/error';
 
-const inputSchema = z.object({
-  displayGroupId: z.number().describe('The ID of the display group to send the command to.'),
-  commandId: z.number().describe('The ID of the command to send.'),
-  // Additional parameters can be sent if required by the command.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
+
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 export const sendCommandToDisplayGroup = createTool({
   id: 'send-command-to-display-group',
   description: 'Send a predefined command to a specific display group.',
-  inputSchema,
+  inputSchema: z.object({
+    displayGroupId: z
+      .number()
+      .describe('The ID of the display group to send the command to.'),
+    commandId: z.number().describe('The ID of the command to send.'),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }) => {
+    logger.debug({ context }, 'Executing sendCommandToDisplayGroup tool.');
+
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
-
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams({ commandId: String(input.commandId) });
-
-      const url = `${config.cmsUrl}/api/displaygroup/${input.displayGroupId}/command`;
-      logger.debug(`sendCommandToDisplayGroup: Requesting URL = ${url}, Body = ${params.toString()}`);
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
+      const url = new URL(
+        `${config.cmsUrl}/api/displaygroup/${context.displayGroupId}/action/command`
+      );
+      const body = new URLSearchParams({
+        commandId: context.commandId.toString(),
       });
 
-      if (!response.ok) {
-        const errorData = await response.text();
-        logger.error(`sendCommandToDisplayGroup: HTTP error: ${response.status}`, { error: errorData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+      const authHeaders = await getAuthHeaders();
+      const headers = { ...authHeaders, 'Content-Type': 'application/x-www-form-urlencoded' };
+      const response = await fetch(url.toString(), { method: 'POST', headers, body });
+
+      if (response.status !== 204) {
+        const message = `Failed to send command to group ${context.displayGroupId}. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try { errorData = JSON.parse(errorData); } catch (e) { /* Not JSON */ }
+        logger.error({ status: response.status, data: errorData }, message);
+        return { success: false as const, message, errorData };
       }
       
-      // Successful response is 204 No Content
-      return { success: true, message: 'Command sent successfully.' };
-
+      return { success: true as const, message: 'Command sent successfully.' };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('sendCommandToDisplayGroup: An unexpected error occurred', { error });
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const processedError = processError(error);
+      const message = 'An unexpected error occurred while sending a command.';
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

@@ -9,18 +9,24 @@
  * You should have received a copy of the GElastic License 2.0 (ELv2).
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
+import { getGoogleFonts } from './getGoogleFonts';
+import { getUploadFiles } from './getUploadFiles';
+import { deleteUploadFiles } from './deleteUploadFiles';
+import { uploadGoogleFonts } from './uploadGoogleFonts';
+import { getLatestPlayer } from './getLatestPlayer';
 
-/**
- * Xibo CMS Folder Management Tools
- * 
- * This module exports folder management tools for the Xibo CMS system.
- * These tools provide functionality for creating, editing, retrieving,
- * and deleting folders within the CMS structure.
- */
+export const etcTools = [
+  getGoogleFonts,
+  getUploadFiles,
+  deleteUploadFiles,
+  uploadGoogleFonts,
+  getLatestPlayer,
+];
 
-export { getGoogleFonts } from './getGoogleFonts';
-export { uploadGoogleFonts } from './uploadGoogleFonts';
-export { getUploadFiles } from './getUploadFiles';
-export { deleteUploadFiles } from './deleteUploadFiles';    
-export { generateQRCode } from './QRcodeGenegation';
-export { getLatestPlayer } from './getLatestPlayer';
+export {
+  getGoogleFonts,
+  getUploadFiles,
+  deleteUploadFiles,
+  uploadGoogleFonts,
+  getLatestPlayer,
+};

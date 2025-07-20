@@ -11,66 +11,66 @@
  */
 
 /**
- * @module
- * This module provides a tool to revert a display group to its scheduled content.
- * It sends a POST request to the /api/displaygroup/:displayGroupId/revertToSchedule endpoint.
+ * @module revertDisplayGroupToSchedule
+ * @description Provides a tool to revert a Display Group's layout to its schedule.
+ * It implements the POST /displaygroup/{id}/action/revert endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
+import { processError } from '../utility/error';
 
-const inputSchema = z.object({
-  displayGroupId: z.number().describe('The ID of the display group to revert to schedule.'),
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
+
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
 
 export const revertDisplayGroupToSchedule = createTool({
   id: 'revert-display-group-to-schedule',
-  description: 'Revert a display group to its scheduled content, canceling any overrides.',
-  inputSchema,
+  description: "Reverts a Display Group's current layout to the scheduled layout.",
+  inputSchema: z.object({
+    displayGroupId: z.number().describe('The ID of the Display Group to revert.'),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }) => {
+    logger.debug({ context }, 'Executing revertDisplayGroupToSchedule tool.');
+
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
+      const url = new URL(`${config.cmsUrl}/api/displaygroup/${context.displayGroupId}/action/revert`);
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch(url.toString(), { method: 'POST', headers: authHeaders });
 
-      const headers = await getAuthHeaders();
-      const url = `${config.cmsUrl}/api/displaygroup/${input.displayGroupId}/revertToSchedule`;
-      logger.debug(`revertDisplayGroupToSchedule: Requesting URL = ${url}`);
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        logger.error(`revertDisplayGroupToSchedule: HTTP error: ${response.status}`, { error: errorData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
+      if (response.status !== 204) {
+        const message = `Failed to revert to schedule for group ${context.displayGroupId}. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try { errorData = JSON.parse(errorData); } catch (e) { /* Not JSON */ }
+        logger.error({ status: response.status, data: errorData }, message);
+        return { success: false as const, message, errorData };
       }
       
-      // Successful response is 204 No Content
-      return { success: true, message: 'Successfully reverted to schedule.' };
-
+      return { success: true as const, message: `Display Group ${context.displayGroupId} reverted to schedule.` };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('revertDisplayGroupToSchedule: An unexpected error occurred', { error });
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const processedError = processError(error);
+      const message = 'An unexpected error occurred while reverting to schedule.';
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 

@@ -21,13 +21,12 @@ export { getDisplayGroups } from './getDisplayGroups';
 export { addDisplayGroup } from './addDisplayGroup';
 export { editDisplayGroup } from './editDisplayGroup';
 export { deleteDisplayGroup } from './deleteDisplayGroup';
+export { copyDisplayGroup } from './copyDisplayGroup';
 export { assignDisplaysToDisplayGroup } from './assignDisplaysToDisplayGroup';
 export { unassignDisplaysFromDisplayGroup } from './unassignDisplaysFromDisplayGroup';
 export { collectNowForDisplayGroup } from './collectNowForDisplayGroup';
 export { clearStatsAndLogsForDisplayGroup } from './clearStatsAndLogsForDisplayGroup';
 export { revertDisplayGroupToSchedule } from './revertDisplayGroupToSchedule';
 export { sendCommandToDisplayGroup } from './sendCommandToDisplayGroup';
-export { copyDisplayGroup } from './copyDisplayGroup';
 export { selectFolderForDisplayGroup } from './selectFolderForDisplayGroup';
 export { triggerWebhookForDisplayGroup } from './triggerWebhookForDisplayGroup';
- 

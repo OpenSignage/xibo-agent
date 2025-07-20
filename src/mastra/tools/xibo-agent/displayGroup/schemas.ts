@@ -11,47 +11,82 @@
  */
 
 /**
- * @module
- * This module defines common Zod schemas for the Display Group tools in the Xibo Agent.
- * These schemas are used for data validation and type inference across multiple tools.
+ * @module displayGroup/schemas
+ * @description Provides shared Zod schemas for the Display Group tools,
+ * ensuring consistent data validation across all related operations.
  */
-
 import { z } from 'zod';
 
 /**
- * Schema for tag data associated with display groups.
+ * Schema for a minimal display object, often used in lists within a display group.
  */
-export const tagSchema = z.object({
-  tag: z.string().describe('The name of the tag.'),
-  tagId: z.number().describe('The unique identifier for the tag.'),
-  value: z.string().describe('The value associated with the tag.'),
+export const embeddedDisplaySchema = z.object({
+  displayId: z.number().describe('The ID of the display.'),
+  display: z.string().describe('The name of the display.'),
 });
 
 /**
- * Schema for a single display group object.
+ * Schema for the response object when assigning a display to a group.
+ */
+export const assignedDisplaySchema = z.object({
+  displayId: z.number().describe('The ID of the assigned display.'),
+  display: z.string().describe('The name of the assigned display.'),
+});
+
+/**
+ * Core schema for a Display Group object, based on the Xibo API definition.
  */
 export const displayGroupSchema = z.object({
-  displayGroupId: z.number().describe('The unique identifier for the display group.'),
+  displayGroupId: z.number().describe('The ID of the display group.'),
   displayGroup: z.string().describe('The name of the display group.'),
-  description: z.string().nullable().describe('A description for the display group.'),
-  isDisplaySpecific: z.number().describe('Flag indicating if the group is display-specific (0 or 1).'),
-  isDynamic: z.number().describe('Flag indicating if the group is dynamic (0 or 1).'),
-  dynamicCriteria: z.string().nullable().describe('The criteria for a dynamic group.'),
-  dynamicCriteriaLogicalOperator: z.string().nullable().describe('The logical operator for dynamic criteria (AND/OR).'),
-  dynamicCriteriaTags: z.string().nullable().describe('Tags used for dynamic criteria.'),
-  dynamicCriteriaExactTags: z.number().describe('Flag for exact tag matching in dynamic criteria (0 or 1).'),
-  dynamicCriteriaTagsLogicalOperator: z.string().nullable().describe('The logical operator for dynamic tag criteria (AND/OR).'),
-  userId: z.number().describe('The user ID of the group owner.'),
-  tags: z.array(tagSchema).describe('An array of tags associated with the display group.'),
-  bandwidthLimit: z.number().describe('The bandwidth limit for the group.'),
-  groupsWithPermissions: z.string().nullable().describe('Permissions for the group.'),
-  createdDt: z.string().describe('The creation date of the group (ISO 8601 format).'),
-  modifiedDt: z.string().describe('The last modification date of the group (ISO 8601 format).'),
-  folderId: z.number().describe('The ID of the folder containing the group.'),
-  permissionsFolderId: z.number().describe('The ID of the folder that defines permissions.'),
-  ref1: z.string().nullable().describe('Optional reference field 1.'),
-  ref2: z.string().nullable().describe('Optional reference field 2.'),
-  ref3: z.string().nullable().describe('Optional reference field 3.'),
-  ref4: z.string().nullable().describe('Optional reference field 4.'),
-  ref5: z.string().nullable().describe('Optional reference field 5.'),
+  description: z
+    .string()
+    .nullable()
+    .describe('An optional description for the group.'),
+  isDisplaySpecific: z
+    .number()
+    .describe('A flag indicating if this group is for a specific display.'),
+  isDynamic: z.number().describe('A flag indicating if this is a dynamic group.'),
+  dynamicCriteria: z
+    .string()
+    .nullable()
+    .describe('The filter criteria for a dynamic group.'),
+  dynamicCriteriaLogicalOperator: z
+    .string()
+    .optional()
+    .describe('Logical operator for dynamic criteria.'),
+  dynamicCriteriaTags: z.string().nullable().describe('Tags for dynamic criteria.'),
+  dynamicCriteriaExactTags: z
+    .number()
+    .optional()
+    .describe('Flag for exact tag matching in dynamic criteria.'),
+  dynamicCriteriaTagsLogicalOperator: z
+    .string()
+    .optional()
+    .describe('Logical operator for tags in dynamic criteria.'),
+  userId: z.number().describe('The ID of the user that owns this group.'),
+  tags: z
+    .array(z.any())
+    .nullable()
+    .describe('An array of tag objects associated with this group.'),
+  bandwidthLimit: z.number().optional().describe('Bandwidth limit for the group.'),
+  groupsWithPermissions: z
+    .any()
+    .nullable()
+    .describe('Information about groups with permissions.'),
+  createdDt: z.string().optional().describe('Creation date.'),
+  modifiedDt: z.string().optional().describe('Last modification date.'),
+  folderId: z.number().optional().describe('The ID of the folder.'),
+  permissionsFolderId: z.number().optional().describe('The ID of the permissions folder.'),
+  ref1: z.string().nullable().describe('Custom reference field 1.'),
+  ref2: z.string().nullable().describe('Custom reference field 2.'),
+  ref3: z.string().nullable().describe('Custom reference field 3.'),
+  ref4: z.string().nullable().describe('Custom reference field 4.'),
+  ref5: z.string().nullable().describe('Custom reference field 5.'),
+  displays: z
+    .array(embeddedDisplaySchema)
+    .optional()
+    .describe(
+      'An array of displays assigned to this group. Requires "embed=displays" parameter.'
+    ),
 }); 

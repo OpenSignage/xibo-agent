@@ -11,92 +11,130 @@
  */
 
 /**
- * @module
- * This module provides a tool for adding a new display group to the Xibo CMS.
- * It sends a POST request to the /api/displaygroup endpoint.
+ * @module addDisplayGroup
+ * @description Provides a tool to add a new Display Group to the Xibo CMS.
+ * It implements the POST /displaygroup endpoint.
  */
-
 import { z } from 'zod';
-import { createTool } from '@mastra/core/tools';
-import { config } from '../config';
+import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
+import { config } from '../config';
 import { logger } from '../../../index';
+import { processError } from '../utility/error';
 import { displayGroupSchema } from './schemas';
 
-const inputSchema = z.object({
-  name: z.string().describe('The name of the new display group.'),
-  description: z.string().optional().describe('An optional description for the display group.'),
-  isDynamic: z.number().optional().describe('Flag to set the group as dynamic (0 or 1).'),
-  tags: z.string().optional().describe('A comma-separated list of tags for the display group.'),
-  dynamicCriteria: z.string().optional().describe('SQL filter for dynamic groups.'),
-  folderId: z.number().optional().describe('The ID of the folder to create the group in.'),
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string().describe('A simple, readable error message.'),
+  error: z.any().optional().describe('Detailed error information.'),
+  errorData: z.any().optional().describe('Raw response data from the CMS.'),
 });
 
-const outputSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    message: z.string(),
-    data: displayGroupSchema,
-  }),
-  z.object({
-    success: z.literal(false),
-    message: z.string(),
-    error: z.any().optional(),
-  }),
-]);
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: displayGroupSchema,
+});
 
+/**
+ * Union schema for the tool's output, covering both success and error cases.
+ */
+const outputSchema = z.union([successResponseSchema, errorResponseSchema]);
+
+/**
+ * Tool to add a new Display Group to the Xibo CMS.
+ */
 export const addDisplayGroup = createTool({
   id: 'add-display-group',
-  description: 'Add a new display group to the CMS.',
-  inputSchema,
+  description: 'Adds a new Display Group.',
+  inputSchema: z.object({
+    displayGroup: z.string().describe('The name of the new Display Group.'),
+    description: z
+      .string()
+      .optional()
+      .describe('An optional description for the group.'),
+    isDynamic: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Flag for dynamic group (1 for yes).'),
+    dynamicCriteria: z
+      .string()
+      .optional()
+      .describe('The filter criteria for a dynamic group.'),
+    dynamicCriteriaLogicalOperator: z
+      .enum(['AND', 'OR'])
+      .optional()
+      .describe('Logical operator for dynamic criteria.'),
+    dynamicCriteriaTags: z
+      .string()
+      .optional()
+      .describe('Tags for dynamic criteria.'),
+    dynamicCriteriaExactTags: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Flag for exact tag matching in dynamic criteria.'),
+    dynamicCriteriaTagsLogicalOperator: z
+      .enum(['AND', 'OR'])
+      .optional()
+      .describe('Logical operator for tags in dynamic criteria.'),
+    tags: z.string().optional().describe('A comma-separated list of tags.'),
+    folderId: z.number().optional().describe('The ID of the folder to save in.'),
+  }),
   outputSchema,
-  execute: async ({ context: input }): Promise<z.infer<typeof outputSchema>> => {
+  execute: async ({ context }) => {
+    logger.debug({ context }, 'Executing addDisplayGroup tool.');
+
+    if (!config.cmsUrl) {
+      const message = 'CMS URL is not configured.';
+      logger.error({}, message);
+      return { success: false as const, message };
+    }
+
     try {
-      if (!config.cmsUrl) {
-        return { success: false, message: 'CMS URL is not configured.' };
-      }
-
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
-
-      // The API expects 'displayGroup' for the name field
-      params.append('displayGroup', input.name);
-
-      Object.entries(input).forEach(([key, value]) => {
-        // 'name' is already handled, so we skip it.
-        if (key !== 'name' && value !== undefined && value !== null) {
-          params.append(key, String(value));
+      const url = new URL(`${config.cmsUrl}/api/displaygroup`);
+      const body = new URLSearchParams();
+      Object.entries(context).forEach(([key, value]) => {
+        if (value !== undefined) {
+          body.append(key, value.toString());
         }
       });
-      
-      const url = `${config.cmsUrl}/api/displaygroup`;
-      logger.debug(`addDisplayGroup: Requesting URL = ${url}, Body = ${params.toString()}`);
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
-      });
 
-      const responseData = await response.json();
+      const authHeaders = await getAuthHeaders();
+      const headers = { ...authHeaders, 'Content-Type': 'application/x-www-form-urlencoded' };
+      
+      logger.debug({ url: url.toString(), body: body.toString() }, 'Adding new display group.');
+      const response = await fetch(url.toString(), { method: 'POST', headers, body });
 
       if (!response.ok) {
-        logger.error(`addDisplayGroup: HTTP error: ${response.status}`, { error: responseData });
-        return { success: false, message: `HTTP error! status: ${response.status}`, error: responseData };
+        const message = `Failed to add display group. Status: ${response.status}`;
+        let errorData: any = await response.text();
+        try { errorData = JSON.parse(errorData); } catch (e) { /* Not JSON */ }
+        logger.error({ status: response.status, data: errorData }, message);
+        return { success: false as const, message, errorData };
       }
 
-      const validatedData = displayGroupSchema.parse(responseData);
-      return { success: true, message: 'Display group added successfully.', data: validatedData };
+      const responseData = await response.json();
+      const validationResult = displayGroupSchema.safeParse(responseData);
 
+      if (!validationResult.success) {
+        const message = 'Add display group response validation failed.';
+        logger.error({ error: validationResult.error.flatten(), data: responseData }, message);
+        return { success: false as const, message, error: validationResult.error.flatten(), errorData: responseData };
+      }
+
+      logger.info(
+        { displayGroupId: validationResult.data.displayGroupId },
+        'Successfully added new display group.'
+      );
+      return { success: true as const, data: validationResult.data };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      logger.error('addDisplayGroup: An unexpected error occurred', { error });
-
-      if (error instanceof z.ZodError) {
-        return { success: false, message: 'Validation error occurred.', error: error.issues };
-      }
-      
-      return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
+      const processedError = processError(error);
+      const message = 'An unexpected error occurred while adding a display group.';
+      logger.error({ error: processedError }, message);
+      return { success: false as const, message, error: processedError };
     }
   },
 }); 
