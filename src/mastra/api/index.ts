@@ -17,7 +17,7 @@ import { helloHandler } from './handlers/hello';
 import { uploadHandler } from './handlers/upload';
 import { getImageHandler } from './handlers/getImage';
 import { swaggerHandler } from './handlers/swagger';
-import { getFontImage } from './handlers/getFontImage';
+import { getFontImageHandler } from './handlers/getFontImage';
 
 export const apiRoutes = [
   // Swagger UI - API Documentation
@@ -43,6 +43,6 @@ export const apiRoutes = [
   // Get Font Preview Image API - Serves generated font preview images
   registerApiRoute("/ext-api/getFontImage/:fileName", {
     method: "GET",
-    handler: getFontImage,
+    handler: getFontImageHandler,
   }),
 ]; 

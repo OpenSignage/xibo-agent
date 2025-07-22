@@ -54,8 +54,9 @@ const pinoLogger = pino(
         target: 'pino-roll',
         level: 'info',
         options: {
-          file: resolve(config.logsDir, 'agent.log'), // Base file name
+          file: resolve(config.logsDir, 'system.log'), // Base file name
           frequency: 'daily', // Rotate daily
+          pattern: '.yyyy-MM-dd',
           maxFiles: 14, // Keep 14 days of old logs
           mkdir: true,
         },

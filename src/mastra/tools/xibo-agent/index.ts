@@ -58,7 +58,6 @@ import { getDisplayGroups, addDisplayGroup, editDisplayGroup, deleteDisplayGroup
   copyDisplayGroup, selectFolderForDisplayGroup, triggerWebhookForDisplayGroup } from './displayGroup';
 import { getTemplate, addTemplate, addTemplateFromLayout } from './template';
 import { getLogs, getAgentLog } from './log';
-import { getTransition } from './transition';
 import { getDayParts, addDayPart, editDayPart, deleteDayPart } from './dayPart';
 import { changePassword } from './compound';
 import { getDisplayVenues } from './displayVenue';
@@ -88,6 +87,7 @@ import { deleteSchedule, deleteScheduleRecurrence, getSchedule, getScheduleDataE
   getScheduleDisplayGroupIdEvents, addSchedule, editSchedule } from './schedule';
 
 // Basic functionality - module exports
+/*
 export * from './misc';         // System information and utilities
 export * from './user';         // User management
 export * from './modules';      // Module management
@@ -126,6 +126,7 @@ export * from './syncGroup';    // Synchronization group management
 export * from './command';      // Command management
 export * from './dataset';      // Dataset management
 export * from './campaign';     // Campaign management
+*/
 
 /**
  * Returns all available Xibo API tools in a structured object
@@ -135,14 +136,13 @@ export * from './campaign';     // Campaign management
  * 
  * @returns Object containing all tool instances with their IDs as keys
  */
+
 export function getTools() {
   return {
     // Misc
     getCmsTime,getAbout,
     // Log
     getLogs,getAgentLog,
-    // Transition
-    getTransition,
     // User
     getUser,getUserMe,addUser,deleteUser,editUser,getUserPermissions,setUserPermissions,
     getMultiEntityPermissions,editUserPref,getUserPref,addUserPref,

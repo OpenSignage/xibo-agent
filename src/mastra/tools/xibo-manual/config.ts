@@ -19,11 +19,11 @@
  * to ensure path robustness.
  */
 import path from 'path';
-import { findUpSync } from 'find-up';
 
-// Dynamically find the project root by locating the package.json file.
-// This makes path resolution independent of the current working directory.
-const projectRoot = path.dirname(findUpSync('package.json') || '');
+// `find-up` は `mastra dev` の環境で予期せぬ動作をするため、
+// コマンド実行時のカレントディレクトリを直接使用します。
+// これにより、常にプロジェクトルートが正しく取得されます。
+const projectRoot = process.cwd();
 
 export const config = {
   // Base URL for the Xibo manual web pages.

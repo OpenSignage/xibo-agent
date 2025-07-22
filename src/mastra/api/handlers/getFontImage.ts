@@ -1,47 +1,45 @@
-import { Context } from 'hono';
-import * as path from 'path';
-import * as fs from 'fs';
+import { type Context } from 'hono';
+import { resolve } from 'path';
 import { config } from '../../tools/xibo-agent/config';
-import { logger } from './logger';
 
-/**
- * Handles requests to serve font preview images.
- * It retrieves the filename from the request parameters, locates the image
- * in the configured preview directory, and sends it as a response.
- *
- * @param c The Hono context object.
- */
-export async function getFontImage(c: Context) {
-  const { fileName } = c.req.param();
-  if (!fileName) {
-    logger.warn('getFontImage: No fileName provided in the request.');
-    return c.json({ message: 'Bad Request: No filename specified.' }, 400);
-  }
+export const getFontImageHandler = async (c: Context) => {
+  // ビルドツールの静的解析を回避するため、変数経由でrequireする
+  const canvasPackage = 'canvas';
+  const opentypePackage = 'opentype.js';
+  const { createCanvas, registerFont } = require(canvasPackage);
+  const opentype = require(opentypePackage);
+
+  const { fontFamily, text } = c.req.param();
+  const fontSize = parseInt(c.req.query('fontSize') || '32', 10);
+  const fontPath = resolve(config.previewFontImageDir, `${fontFamily}.ttf`);
 
   try {
-    const filePath = path.join(config.previewFontImageDir, fileName);
+    const font = opentype.loadSync(fontPath);
+    registerFont(fontPath, { family: fontFamily });
 
-    // Security check to prevent path traversal attacks
-    if (path.dirname(filePath) !== config.previewFontImageDir) {
-        logger.error(`getFontImage: Path traversal attempt detected for fileName: ${fileName}`);
-        return c.json({ message: 'Forbidden: Invalid file path.' }, 403);
-    }
+    const canvas = createCanvas(200, 200); // Temporary canvas to measure text
+    const ctx = canvas.getContext('2d');
+    ctx.font = `${fontSize}px ${fontFamily}`;
+    const metrics = ctx.measureText(text);
+    const textWidth = metrics.width;
+    const textHeight =
+      metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
 
-    if (!fs.existsSync(filePath)) {
-      logger.info(`getFontImage: File not found at path: ${filePath}`);
-      return c.json({ message: 'Not Found: The requested image does not exist.' }, 404);
-    }
+    const finalCanvas = createCanvas(
+      Math.ceil(textWidth),
+      Math.ceil(textHeight),
+    );
+    const finalCtx = finalCanvas.getContext('2d');
+    finalCtx.font = `${fontSize}px ${fontFamily}`;
+    finalCtx.fillStyle = 'black';
+    finalCtx.fillText(text, 0, metrics.actualBoundingBoxAscent);
 
-    const imageBuffer = fs.readFileSync(filePath);
-    logger.info(`getFontImage: Serving file: ${filePath}`);
-    return c.body(imageBuffer, {
-        headers: {
-            'Content-Type': 'image/png'
-        }
-    });
-    
-  } catch (error: any) {
-    logger.error(`getFontImage: An unexpected error occurred while serving ${fileName}: ${error.message}`, { error });
-    return c.json({ message: 'Internal Server Error' }, 500);
+    const buffer = finalCanvas.toBuffer('image/png');
+
+    c.header('Content-Type', 'image/png');
+    return c.body(buffer);
+  } catch (error) {
+    console.error('Font loading or image generation error:', error);
+    return c.json({ error: 'Failed to generate font image' }, 500);
   }
-} 
+};
