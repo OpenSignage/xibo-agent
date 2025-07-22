@@ -17,30 +17,36 @@ import fs from 'fs';
 import path from 'path';
 import { logger } from '../../index';
 
-// Use settings from config.ts
-const BASE_DIR = config.paths.root;
-const SOURCE_DIR = path.resolve(BASE_DIR, config.paths.contents);
-
+// config.tsで定義された、常に正しいソースディレクトリを指すパスを使用します。
+const CONTENTS_DIR = config.paths.contents;
 const MANUAL_BASE_URL = config.baseUrl;
 
-const CONTENTS_DIR = SOURCE_DIR;
+let manualContents: Record<string, string> = {};
 
-const loadManualContents = () => {
-  const contents: Record<string, string> = {};
-
-  const files = fs.readdirSync(CONTENTS_DIR);
-  for (const file of files) {
-    if (file.endsWith('.md')) {
-      const key = file.replace('.md', '');
-      const content = fs.readFileSync(path.join(CONTENTS_DIR, file), 'utf-8');
-      contents[key] = content;
+function loadManualContents() {
+  try {
+    const files = fs.readdirSync(CONTENTS_DIR);
+    for (const file of files) {
+      if (file.endsWith('.md')) {
+        const key = file.replace('.md', '');
+        const content = fs.readFileSync(path.join(CONTENTS_DIR, file), 'utf-8');
+        manualContents[key] = content;
+      }
     }
+  } catch (error) {
+    //logger.error(`Failed to load manual contents from '${CONTENTS_DIR}'`, { error });
+    throw new Error(`Failed to load manual contents from '${CONTENTS_DIR}'`);
   }
+}
 
-  return contents;
-};
-
-const manualContents = loadManualContents();
+// アプリケーション起動時に一度だけマニュアルを読み込む
+try {
+  loadManualContents();
+} catch (error) {
+  // 起動時の読み込みエラーは致命的であるため、コンソールにも表示
+  console.error(error);
+  // process.exit(1); // or handle it gracefully
+}
 
 // Function to parse front matter
 const parseFrontMatter = (content: string) => {

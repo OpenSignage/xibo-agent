@@ -1,0 +1,49 @@
+/*
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Logger Configuration
+ *
+ * This module sets up and exports a centralized pino logger instance for the application.
+ * It configures different transports for production (rolling file) and development (pretty print) environments.
+ */
+import pino from 'pino';
+import { resolve } from 'path';
+import { config } from './tools/xibo-agent/config';
+
+// ここで唯一のインスタンスが作られる
+export const logger = pino(
+  {
+    level: process.env.LOG_LEVEL || 'info',
+  },
+  pino.transport({
+    targets: [
+      {
+        level: 'info',
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+        },
+      },
+      {
+        level: 'info',
+        target: 'pino-roll',
+        options: {
+          file: resolve(config.logsDir, 'agent.log'),
+          frequency: 'daily',
+          maxFiles: 14,
+          mkdir: true,
+        },
+      },
+    ],
+  }),
+); 
