@@ -19,7 +19,7 @@
  */
 import { z } from "zod";
 import { createTool } from '@mastra/core';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 import { getAuthHeaders } from '../auth';
 import { config } from '../config';
 import fs from 'fs/promises';

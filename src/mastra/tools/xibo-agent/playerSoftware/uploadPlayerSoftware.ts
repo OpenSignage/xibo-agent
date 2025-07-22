@@ -23,7 +23,7 @@ import fs from 'fs';
 import path from 'path';
 import { getAuthHeaders } from '../auth';
 import { config } from '../config';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 import { processError } from '../utility/error';
 
 /**

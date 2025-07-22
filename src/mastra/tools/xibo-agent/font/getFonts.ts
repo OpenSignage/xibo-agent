@@ -21,7 +21,7 @@ import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage, processError } from "../utility/error";
-import { logger } from "../../../index";
+import { logger } from "../../../logger";
 
 // Schema definition for a single font record, based on the Xibo API.
 const fontSchema = z.object({

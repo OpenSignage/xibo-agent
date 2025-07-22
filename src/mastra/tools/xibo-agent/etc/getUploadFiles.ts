@@ -20,7 +20,7 @@
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
-import { logger } from '../../../index';
+import { logger } from '../../../logger';  
 import fs from 'fs';
 import path from 'path';
 

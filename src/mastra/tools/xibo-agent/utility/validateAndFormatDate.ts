@@ -10,7 +10,7 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 
 /**
  * Converts a date string to Y-m-d format

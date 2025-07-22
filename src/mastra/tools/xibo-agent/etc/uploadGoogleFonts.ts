@@ -19,7 +19,7 @@ import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
+import { logger } from "../../../logger";
 import { decodeErrorMessage } from "../utility/error";
 import * as fs from 'fs';
 import * as path from 'path';
@@ -79,6 +79,9 @@ export const uploadGoogleFonts = createTool({
         limit: 1,
         subset: 'latin',
         capability: ['VF'],
+        // Add missing required properties
+        preview: false,
+        fontSize: 20,
       },
       runtimeContext,
     });

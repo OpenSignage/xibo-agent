@@ -19,7 +19,7 @@
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 import { getMenuBoards } from './getMenuBoards';
 import { getMenuBoardCategories } from './getMenuBoardCategories';
 import { getMenuBoardProducts } from './getMenuBoardProducts';

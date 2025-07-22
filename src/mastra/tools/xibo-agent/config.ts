@@ -16,7 +16,9 @@ const findProjectRoot = (): string => {
   return path.dirname(packageJsonPath);
 };
 
-const projectRoot = findProjectRoot();
+//const projectRoot = findProjectRoot();
+const projectRoot = "/Users/miuramasataka/OpenSignage/xibo-agent";
+console.log(projectRoot);
 
 export const config = {
   cmsUrl: process.env.CMS_URL || "",

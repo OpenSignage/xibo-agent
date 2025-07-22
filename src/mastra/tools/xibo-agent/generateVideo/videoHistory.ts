@@ -20,7 +20,7 @@
 import { z } from "zod";
 import * as fs from 'fs';
 import * as path from 'path';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 import { config } from '../config';
 
 // Defines the storage path for the history database.

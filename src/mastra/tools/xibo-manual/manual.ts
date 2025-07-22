@@ -15,7 +15,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { config } from './config';
 import fs from 'fs';
 import path from 'path';
-import { logger } from '../../index';
+import { logger } from '../../logger';
 
 // config.tsで定義された、常に正しいソースディレクトリを指すパスを使用します。
 const CONTENTS_DIR = config.paths.contents;

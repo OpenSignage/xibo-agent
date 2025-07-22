@@ -19,7 +19,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { geocodingResponseSchema, weatherResponseSchema, weatherConditions } from './weatherTypes';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 
 /**
  * Defines the schema for a successful tool execution.

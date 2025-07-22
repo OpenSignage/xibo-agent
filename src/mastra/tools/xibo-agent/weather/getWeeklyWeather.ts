@@ -28,7 +28,7 @@ import {
   weeklyWeatherResponseSchema,
   weatherConditions,
 } from './weatherTypes';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 
 /**
  * Defines the schema for a successful tool execution.

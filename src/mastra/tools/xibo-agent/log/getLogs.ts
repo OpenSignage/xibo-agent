@@ -27,7 +27,7 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 
 /**
  * Schema for the log entries array from Xibo API.

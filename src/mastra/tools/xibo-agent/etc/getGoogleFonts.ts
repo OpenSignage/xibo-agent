@@ -19,7 +19,7 @@
 
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';  
 import { config } from '../config';
 import * as opentype from 'opentype.js';
 import { createCanvas } from 'canvas';

@@ -21,7 +21,7 @@ import * as path from 'path';
 import { createTool } from "@mastra/core/tools";
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
+import { logger } from "../../../logger";
 import { decodeErrorMessage, processError } from "../utility/error";
 
 // Schema for a successful download response.

@@ -18,7 +18,7 @@ import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { logger } from "../../../index";
+import { logger } from "../../../logger";
 
 export const setWidgetRegion = createTool({
   id: 'set-widget-region',

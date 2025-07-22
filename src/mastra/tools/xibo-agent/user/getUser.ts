@@ -20,7 +20,7 @@ import { createTool } from '@mastra/core/tools';
 import { config } from '../config';
 import { getAuthHeaders } from '../auth';
 import { TreeNode, createTreeViewResponse } from '../utility/treeView';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 import { decodeErrorMessage } from '../utility/error';
 import {
   userSchema,

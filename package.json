@@ -5,7 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "DATA_STORAGE_PATH=./persistent_data mastra dev",
-    "build": "NODE_ENV=production mastra build && cp -r public/. .mastra/output/public/ && mkdir -p .mastra/output/src/mastra/tools/xibo-manual && cp -r src/mastra/tools/xibo-manual/contents .mastra/output/src/mastra/tools/xibo-manual/",
+    "build": "mastra build && cp -r public/. .mastra/output/public/",
     "copy-upload": "cp -r upload persistent_data/uploads"
   },
   "keywords": [],
