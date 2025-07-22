@@ -21,7 +21,7 @@ import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { config } from "../config";
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 import * as fs from "node:fs";
 import * as path from "path";
 import { v4 as uuidv4 } from 'uuid';

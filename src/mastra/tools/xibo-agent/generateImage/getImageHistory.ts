@@ -20,7 +20,7 @@
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { getHistory, getAllHistory } from './imageHistory';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 
 /**
  * Schema for API response validation

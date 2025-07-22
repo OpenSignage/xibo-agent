@@ -26,7 +26,7 @@ export const logger = pino(
           file: resolve(config.logsDir, 'xibo-agent.log'),
           frequency: 'daily',
           pattern: '.yyyy-MM-dd',
-          maxFiles: 14,
+          maxFiles: 7,
           mkdir: true,
         },
       },

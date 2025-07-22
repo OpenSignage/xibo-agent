@@ -20,7 +20,7 @@
 
 import { createTool } from '@mastra/core';
 import { z } from 'zod';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';   
 import { getAuthHeaders } from '../auth';
 import { config } from '../config';
 import { librarySchema } from './schemas';

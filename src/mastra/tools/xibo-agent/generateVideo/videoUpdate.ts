@@ -20,7 +20,7 @@
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
 import { updateVideoHistory, videoHistorySchema } from './videoHistory';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 
 // Defines the schema for a successful response, containing the updated video entry.
 const successResponseSchema = z.object({

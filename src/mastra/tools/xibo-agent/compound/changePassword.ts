@@ -18,7 +18,7 @@
 
 import { z } from "zod";
 import { createTool } from "@mastra/core/tools";
-import { logger } from "../../../index";
+import { logger } from "../../../logger";     
 import { getUser } from "../user/getUser";
 import { editUser } from "../user/editUser";
 
@@ -60,7 +60,9 @@ export const changePassword = createTool({
 
       // Handle cases where the getUser tool fails or returns no data.
       if (!userResponse.success || !userResponse.data) {
-        const errorMessage = `Failed to get user data for ID ${userId}. Reason: ${userResponse.message || 'Unknown error'}`;
+        // Updated error message handling to check for existence of 'message'
+        const reason = 'message' in userResponse ? userResponse.message : 'Unknown error';
+        const errorMessage = `Failed to get user data for ID ${userId}. Reason: ${reason}`;
         logger.error(errorMessage, { response: userResponse });
         return { success: false as const, message: errorMessage, errorData: userResponse };
       }
@@ -80,13 +82,10 @@ export const changePassword = createTool({
       logger.info(`Calling editUser to update password for user ID: ${userId}`);
 
       // Construct the parameters for editUser based on required fields.
+      // Only include the required `userId` and the new password fields.
+      // `homePageId` is optional in editUser tool, so we can omit it if not essential for password change.
       const editUserParams = {
         userId: userData.userId,
-        userName: userData.userName,
-        userTypeId: userData.userTypeId,
-        homePageId: String(userData.homePageId),
-        newUserWizard: 0,
-        hideNavigation: 0,
         newPassword,
         retypeNewPassword,
       };

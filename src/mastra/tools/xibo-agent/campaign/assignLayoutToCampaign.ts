@@ -20,7 +20,7 @@ import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
 import { config } from '../config';
 import { getAuthHeaders } from '../auth';
-import { logger } from '../../../index';
+import { logger } from '../../../logger'; 
 import { URLSearchParams } from 'url';
 
 // Schema for the tool's input.

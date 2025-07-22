@@ -21,7 +21,7 @@
 import { z } from "zod";
 import * as fs from 'fs';
 import * as path from 'path';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 import { config } from '../config';
 
 // Schema definition for image history

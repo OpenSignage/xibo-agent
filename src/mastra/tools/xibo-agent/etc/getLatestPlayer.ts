@@ -18,7 +18,7 @@
  */
 import { z } from 'zod';
 import * as cheerio from 'cheerio';
-import { logger } from '../../../index';
+import { logger } from '../../../logger'; 
 import { createTool } from '@mastra/core';
 
 // Schema for the successful response data

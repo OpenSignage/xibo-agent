@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { createTool } from '@mastra/core';
 import { getAuthHeaders } from '../auth';
 import { config } from '../config';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 import { processError } from '../utility/error';
 import { moduleSchema } from './schemas';
 import { TreeNode, createTreeViewResponse } from '../utility/treeView';

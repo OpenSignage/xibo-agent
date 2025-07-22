@@ -10,7 +10,7 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 
 /**
  * オブジェクト内のJSON文字列を再帰的に検出してパースする

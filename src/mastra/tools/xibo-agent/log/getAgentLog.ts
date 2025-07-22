@@ -22,7 +22,7 @@ import { z } from 'zod';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { config } from '../config';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 
 // Schema for the tool's input
 const inputSchema = z.object({

@@ -15,7 +15,7 @@ import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
 import { decodeErrorMessage } from "../utility/error";
-import { logger } from "../../../index";
+import { logger } from "../../../logger";
 
 /**
  * Defines the schema for a successful response.
@@ -69,9 +69,10 @@ export const positionRegions = createTool({
       return { success: false, message: errorMessage };
     }
 
-    const headers = await getAuthHeaders();
-    // Remove 'Content-Type' so that fetch can set it with the correct boundary for FormData
-    delete headers["Content-Type"];
+    const authHeaders = await getAuthHeaders();
+    // Create a new headers object without 'Content-Type'
+    // so that fetch can set it with the correct boundary for FormData.
+    const { "Content-Type": _, ...headers } = authHeaders;
     
     const url = `${config.cmsUrl}/api/region/position/all/${context.layoutId}`;
     logger.info(

@@ -24,7 +24,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import * as fs from "node:fs";
 import * as path from "path";
 import { v4 as uuidv4 } from 'uuid';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 import { addVideoHistory, updateVideoHistory, videoHistorySchema } from './videoHistory';
 import { config } from '../config';
 

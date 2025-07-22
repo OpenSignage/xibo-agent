@@ -18,7 +18,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 
 /**
  * Schema for a single news item from the Xibo RSS feed.

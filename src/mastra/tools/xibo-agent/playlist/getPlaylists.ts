@@ -20,7 +20,7 @@ import { z } from "zod";
 import { createTool } from '@mastra/core/tools';
 import { config } from "../config";
 import { getAuthHeaders } from "../auth";
-import { logger } from '../../../index';
+import { logger } from '../../../logger';
 import { parseJsonStrings } from '../utility/jsonParser';
 import { TreeNode, treeResponseSchema, createTreeViewResponse } from '../utility/treeView';
 

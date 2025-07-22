@@ -18,7 +18,7 @@
  */
 
 import { config } from "./config";
-import { logger } from '../../index'; // ← 新しいパス
+import { logger } from '../../logger'; // ← 新しいパス
 
 /**
  * Requests an OAuth2 access token from the Xibo CMS API
