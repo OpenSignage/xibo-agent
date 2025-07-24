@@ -12,7 +12,7 @@ import { helloHandler } from '../handlers/hello';
 import { getImageHandler } from '../handlers/getImage';
 import { getVideoHandler } from '../handlers/getVideo';
 import { swaggerHandler } from '../handlers/swagger';
-import { getFontImage } from '../handlers/getFontImage';
+import { getFontImageHandler } from '../handlers/getFontImage';
 
 const router = new Hono();
 
@@ -29,6 +29,6 @@ router.get('/getImage/:filename', getImageHandler);
 router.get('/getVideo/:filename', getVideoHandler);
 
 // Get Font Image API
-router.get('/getFontImage/:filename', getFontImage);
+router.get('/getFontImage/:filename', getFontImageHandler);
 
 export default router; 
