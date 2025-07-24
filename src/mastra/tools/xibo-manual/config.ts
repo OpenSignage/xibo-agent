@@ -15,15 +15,19 @@
  *
  * This module defines configuration settings for the xiboManualTool,
  * including base URLs for the manual and images, and paths to local
- * manual content files. It dynamically locates the project root
- * to ensure path robustness.
+ * manual content files.
  */
 import path from 'path';
 
-// `find-up` は `mastra dev` の環境で予期せぬ動作をするため、
-// コマンド実行時のカレントディレクトリを直接使用します。
-// これにより、常にプロジェクトルートが正しく取得されます。
-const projectRoot = process.cwd();
+// Get the current working directory.
+const CWD = process.cwd();
+
+// In `run dev` mode, CWD points to `.mastra/output`, so we need to resolve
+// the project root by going up two directories. In other environments
+// (e.g., build, test), CWD is the project root itself.
+const projectRoot = CWD.includes('.mastra/output')
+  ? path.resolve(CWD, '..', '..')
+  : CWD;
 
 export const config = {
   // Base URL for the Xibo manual web pages.
@@ -33,8 +37,8 @@ export const config = {
   paths: {
     // The absolute path to the project root.
     root: projectRoot,
-    // The absolute path to the directory containing the local manual markdown files.
-    contents: path.join(projectRoot, 'src/mastra/tools/xibo-manual/contents'),
+    // The manual content is treated as persistent data, separate from source code.
+    contents: path.join(projectRoot, 'persistent_data/manual-contents'),
   },
 } as const;
 

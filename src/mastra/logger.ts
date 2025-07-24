@@ -17,6 +17,10 @@ export const logger = pino(
         target: 'pino-pretty',
         options: {
           colorize: true,
+          levelFirst: true,
+          translateTime: 'SYS:yyyy-mm-dd HH:MM:ss',
+          ignore: 'hostname',
+          singleLine: false,
         },
       },
       {
@@ -26,6 +30,7 @@ export const logger = pino(
           file: resolve(config.logsDir, 'xibo-agent.log'),
           frequency: 'daily',
           pattern: '.yyyy-MM-dd',
+          size: '100M',
           maxFiles: 7,
           mkdir: true,
         },
