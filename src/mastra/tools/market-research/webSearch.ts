@@ -13,6 +13,13 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { logger } from '../../logger';
 
+class BraveSearchApiError extends Error {
+  constructor(message: string, public status: number, public details?: any) {
+    super(message);
+    this.name = 'BraveSearchApiError';
+  }
+}
+
 /**
  * @module webSearchTool
  * @description A tool to perform web searches using the Brave Search API.
@@ -25,19 +32,38 @@ const outputSchema = z.object({
   })).describe('A list of search results.'),
 });
 
+// Structured error response schema, according to the coding rules.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+  errorData: z.any().optional(),
+});
+
+// Structured success response schema.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: outputSchema,
+});
+
 export const webSearchTool = createTool({
   id: 'web-search',
   description: 'Performs a web search for a given query and returns a list of relevant pages.',
   inputSchema: z.object({
     query: z.string().describe('The search query.'),
   }),
-  outputSchema,
+  outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
     const { query } = context;
-    const apiKey = process.env.BRAVE_SEARCH_API_KEY;
+    const apiKey = process.env.BRAVE_API_KEY;
 
     if (!apiKey) {
-      throw new Error('BRAVE_SEARCH_API_KEY environment variable is not set.');
+      const errorMessage = 'BRAVE_API_KEY environment variable is not set.';
+      logger.error(errorMessage);
+      return {
+        success: false,
+        message: errorMessage,
+      } as const;
     }
 
     const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}`;
@@ -51,22 +77,46 @@ export const webSearchTool = createTool({
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        logger.error(`Brave Search API error: ${response.status}`, { error: errorText });
-        throw new Error(`Brave Search API request failed with status ${response.status}`);
+        const errorDetails = await response.text().catch(() => 'Could not read error details.');
+        const message = `Brave Search API request failed with status ${response.status}`;
+        logger.error(message, { details: errorDetails });
+        return {
+          success: false,
+          message,
+          errorData: errorDetails,
+        } as const;
       }
 
       const data = await response.json();
-      const results = (data.web?.results || []).map((item: any) => ({
-        title: item.title,
-        url: item.url,
-        description: item.description,
-      }));
+      const validatedData = outputSchema.safeParse({
+          results: (data.web?.results || []).map((item: any) => ({
+            title: item.title,
+            url: item.url,
+            description: item.description,
+          }))
+      });
 
-      return { results };
+      if (!validatedData.success) {
+        const message = "Validation error occurred";
+        logger.error(message, { error: validatedData.error.format() });
+        return {
+          success: false,
+          message: message,
+          error: validatedData.error.format(),
+          errorData: data,
+        } as const;
+      }
+      
+      return { success: true, data: validatedData.data } as const;
+
     } catch (error) {
-      logger.error('Failed to execute web search', { error });
-      throw error;
+      const message = error instanceof Error ? error.message : "An unknown error occurred during web search.";
+      logger.error(message, { error });
+      return { 
+        success: false, 
+        message,
+        error: error
+      } as const;
     }
   },
 }); 

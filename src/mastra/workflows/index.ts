@@ -14,5 +14,6 @@
 
 import { weatherWorkflow } from './weather';
 import { svgWorkflow } from './svg-illustration';
+import { marketResearchWorkflow } from './market-research-workflow';
 
-export { weatherWorkflow, svgWorkflow }; 
+export { weatherWorkflow, svgWorkflow, marketResearchWorkflow }; 
