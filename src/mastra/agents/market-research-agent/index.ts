@@ -10,11 +10,12 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 import { Agent } from '@mastra/core/agent';
-import { openai } from '@ai-sdk/openai';
-import { marketResearchWorkflow } from '../../workflows/market-research-workflow';
+import { google } from '@ai-sdk/google';
+import { marketResearchWorkflow } from '../../workflows/market-research/marketResearch';
 import { webSearchTool } from '../../tools/market-research/webSearch';
 import { contentScrapeTool } from '../../tools/market-research/contentScrape';
 import { summarizeAndAnalyzeTool } from '../../tools/market-research/summarizeAndAnalyze';
+import { marketResearchAgentInstructions } from './instructions';
 
 /**
  * @module marketResearchAgent
@@ -24,12 +25,8 @@ export const marketResearchAgent = new Agent({
   id: 'market-research-agent',
   name: 'Market Research Agent',
   description: 'An AI agent that performs market research, analyzes trends, and gathers competitive intelligence.',
-  model: openai('gpt-4o-mini'), // Specify the language model to use
-  instructions: `You are a professional market research analyst. Your goal is to provide insightful and concise reports based on user requests.
-- When a user asks for a general market analysis, competitive overview, or trend report, utilize the 'marketResearch' workflow to conduct a comprehensive investigation.
-- Clearly state the research topic to the workflow.
-- Synthesize the final report from the workflow's output into a clear and easy-to-understand format for the user.
-- For simple, direct queries, you can use individual tools, but prefer the workflow for complex requests.`,
+  model: google('gemini-1.5-pro-latest'),
+  instructions: marketResearchAgentInstructions,
   workflows: {
     marketResearch: marketResearchWorkflow,
   },

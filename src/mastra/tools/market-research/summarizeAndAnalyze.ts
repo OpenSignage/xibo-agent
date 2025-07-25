@@ -16,48 +16,65 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 /**
  * @module summarizeAndAnalyzeTool
- * @description A tool to summarize and analyze text content using an LLM.
+ * @description A tool to summarize and analyze text using Google's Generative AI.
  */
 const outputSchema = z.object({
-  summary: z.string().describe('The generated summary or analysis.'),
+  summary: z.string().describe('The generated summary or analysis of the text.'),
+});
+
+// Structured error response schema.
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  error: z.any().optional(),
+});
+
+// Structured success response schema.
+const successResponseSchema = z.object({
+  success: z.literal(true),
+  data: outputSchema,
 });
 
 export const summarizeAndAnalyzeTool = createTool({
   id: 'summarize-and-analyze',
-  description: 'Summarizes or analyzes a given text based on a specific objective.',
+  description: 'Summarizes or analyzes a given block of text based on a specific objective.',
   inputSchema: z.object({
-    text: z.string().describe('The text content to be analyzed.'),
-    objective: z.string().describe('The objective of the analysis (e.g., "Summarize the key points", "Extract all mentions of competitors").'),
+    text: z.string().describe('The text to be processed.'),
+    objective: z.string().describe('The goal of the analysis (e.g., "Summarize the key findings").'),
   }),
-  outputSchema,
+  outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
     const { text, objective } = context;
-    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
-      throw new Error('GOOGLE_GENERATIVE_AI_API_KEY environment variable is not set.');
+      const message = 'GEMINI_API_KEY environment variable is not set.';
+      logger.error(message);
+      return { success: false, message } as const;
     }
 
     try {
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
-
-      const prompt = `Based on the following text, please perform this objective: "${objective}".
-
-Text:
----
-${text}
----
-
-Result:`;
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const prompt = `${objective}:\n\n---\n\n${text}\n\n---\n\n`;
 
       const result = await model.generateContent(prompt);
-      const summary = result.response.text();
+      const response = await result.response;
+      const summary = response.text();
 
-      return { summary };
+      return { 
+        success: true, 
+        data: { summary }
+      } as const;
+
     } catch (error) {
-      logger.error('Failed to generate summary with LLM', { error });
-      throw error;
+      const message = error instanceof Error ? error.message : "An unknown error occurred during text analysis.";
+      logger.error('Failed to analyze text', { error });
+      return { 
+        success: false, 
+        message,
+        error 
+      } as const;
     }
   },
 }); 

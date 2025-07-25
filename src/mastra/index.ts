@@ -26,6 +26,7 @@ import { config } from './tools/xibo-agent/config';
 //import { weatherWorkflow } from './workflows';
 import { xiboAgent } from './agents/xibo-agent';
 import { xiboManualAgent } from './agents/xibo-manual';
+import { marketResearchWorkflow } from './workflows/marketRresearch/marketResearch';
 //import { svgWorkflow } from './workflows/svg-illustration';
 //import { mcpAgent } from './agents/mcp-agent';
 
@@ -80,6 +81,7 @@ export const mastra = new Mastra({
   },
   // Register available workflows
   workflows: {
+    marketResearch: marketResearchWorkflow,
   //  weather: weatherWorkflow,      // Weather information processing workflow
   //  illustration: svgWorkflow,     // SVG illustration generation workflow
   },
