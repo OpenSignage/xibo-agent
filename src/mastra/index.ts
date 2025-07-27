@@ -22,13 +22,13 @@ import { LibSQLStore } from '@mastra/libsql';
 import { apiRoutes } from './api';
 import { config } from './tools/xibo-agent/config';
 
-// Import workflows and agents
-//import { weatherWorkflow } from './workflows';
+// Import agents
 import { xiboAgent } from './agents/xibo-agent';
 import { xiboManualAgent } from './agents/xibo-manual';
-import { marketResearchWorkflow } from './workflows/marketRresearch/marketResearch';
-//import { svgWorkflow } from './workflows/svg-illustration';
-//import { mcpAgent } from './agents/mcp-agent';
+import { marketResearchAgent } from './agents/market-research-agent';
+
+// Import workflows
+import { marketResearchWorkflow } from './workflows/market-research/marketResearch';
 
 // Load environment variables from .env.development
 const envPath = resolve(process.cwd(), '.env.development');
@@ -77,6 +77,7 @@ export const mastra = new Mastra({
   agents: {
     xibo: xiboAgent,         // Xibo system operation agent
     manual: xiboManualAgent, // Xibo manual operation agent
+    marketResearch: marketResearchAgent, // Market research agent
   //  mcp: mcpAgent            // MCP (Master Control Program) agent
   },
   // Register available workflows
@@ -99,5 +100,6 @@ export const mastra = new Mastra({
 
 // Export workflows list for external use
 export const workflows = [
+  
   // ... existing workflows ...
 ];
