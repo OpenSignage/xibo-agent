@@ -25,6 +25,14 @@ const successOutputSchema = z.object({
   success: z.literal(true),
   data: z.object({
     report: z.string().describe('The final, consolidated research report.'),
+    citations: z.array(z.object({
+        title: z.string(),
+        url: z.string().url(),
+    })).describe('List of source articles used for the report.'),
+    relatedCompanies: z.array(z.object({
+        companyName: z.string(),
+        url: z.string().url().optional(),
+    })).describe('List of companies mentioned in the report.'),
   }),
 });
 const errorOutputSchema = z.object({
@@ -49,7 +57,7 @@ export const marketResearchWorkflow = createWorkflow({
     id: 'prepare-search-query',
     inputSchema: z.object({ topic: z.string() }),
     outputSchema: z.object({ query: z.string(), topic: z.string() }),
-    execute: async ({ inputData }) => {
+    execute: async ({ inputData, runtimeContext }) => {
       logger.info({ topic: inputData.topic }, 'Step 1: Preparing search query...');
       const lang = process.env.LANG || '';
       const suffix = lang.startsWith('ja') ? '市場 分析' : 'market analysis';
@@ -60,7 +68,7 @@ export const marketResearchWorkflow = createWorkflow({
     id: 'execute-search',
     inputSchema: z.object({ query: z.string(), topic: z.string() }),
     outputSchema: z.object({
-        results: z.array(z.object({ url: z.string() })),
+        results: z.array(z.object({ url: z.string(), title: z.string() })),
         topic: z.string(),
         // Add a flag to indicate search success or failure
         searchSuccess: z.boolean(),
@@ -80,12 +88,16 @@ export const marketResearchWorkflow = createWorkflow({
 .then(createStep({
     id: 'scrape-and-summarize',
     inputSchema: z.object({
-        results: z.array(z.object({ url: z.string() })),
+        results: z.array(z.object({ url: z.string(), title: z.string() })),
         topic: z.string(),
         searchSuccess: z.boolean(),
     }),
     outputSchema: z.object({
-        summaries: z.array(z.string()),
+        summaries: z.array(z.object({
+            url: z.string().url(),
+            title: z.string(),
+            summary: z.string(),
+        })),
         topic: z.string(),
     }),
     execute: async ({ inputData, runtimeContext }) => {
@@ -97,16 +109,17 @@ export const marketResearchWorkflow = createWorkflow({
 
         const { results, topic } = inputData;
         logger.info(`Step 3: Scraping and summarizing up to 10 articles for topic "${topic}"...`);
-        const topUrls = results.slice(0, 10).map((r) => r.url);
-        const summaries: string[] = [];
+        const topResults = results.slice(0, 10);
+        const summaries: { url: string; title: string; summary: string; }[] = [];
 
         // Determine the summary language from the LANG environment variable.
         const lang = process.env.LANG || '';
         const summaryObjective = lang.startsWith('ja')
-            ? `この記事の要点を日本語で要約してください。`
-            : `Summarize the key findings of this article.`;
+            ? `この記事を可能な限り詳しく日本語でまとめてしてください。`
+            : `Summarize the key findings of this article in detail.`;
 
-        for (const url of topUrls) {
+        for (const result of topResults) {
+            const { url, title } = result;
             let scrapeResult;
             // Check if the URL is a PDF and call the appropriate tool
             if (url.toLowerCase().endsWith('.pdf')) {
@@ -122,7 +135,7 @@ export const marketResearchWorkflow = createWorkflow({
                     runtimeContext,
                 });
                  if(summaryResult.success) {
-                    summaries.push(`Source: ${url}\nSummary:\n${summaryResult.data.summary}\n---`);
+                    summaries.push({ url, title, summary: summaryResult.data.summary });
                  }
             } else if (!scrapeResult.success) {
                 logger.warn({ url, error: scrapeResult.message }, 'Skipping URL due to scraping failure.');
@@ -134,25 +147,63 @@ export const marketResearchWorkflow = createWorkflow({
 }))
 .then(createStep({
     id: 'generate-final-report',
-    inputSchema: z.object({ summaries: z.array(z.string()), topic: z.string() }),
+    inputSchema: z.object({
+        summaries: z.array(z.object({
+            url: z.string().url(),
+            title: z.string(),
+            summary: z.string(),
+        })),
+        topic: z.string(),
+    }),
     outputSchema: finalOutputSchema, // This step's output is the final output of the workflow
     execute: async (params) => {
         const { summaries, topic } = params.inputData;
+        
         if (summaries.length === 0) {
             const message = "Could not find enough information to generate a report.";
             logger.warn(message);
             return { success: false, message } as const;
         }
 
-        // Determine the output language from the LANG environment variable.
         const lang = process.env.LANG || '';
-        const languageInstruction = lang.startsWith('ja') 
-            ? '日本語で' 
-            : 'in English';
+        const languageInstruction = lang.startsWith('ja') ? '日本語' : 'English';
+
+        const textForReport = summaries
+            .map(s => `Source URL: ${s.url}\nTitle: ${s.title}\nContent Summary:\n${s.summary}`)
+            .join('\n\n---\n\n');
+
+        const finalObjective = `以下の情報に基づき、「${topic}」に関する詳細なレポートを${languageInstruction}で作成してください。
+レポート作成後、以下のタスクを実行してください。
+1. レポート内容から関連する企業を特定し、企業名とその公式サイトのURLをリストアップする。
+2. 情報源として使用した全ての記事のタイトルとURLをリストアップする。
+
+最終的な回答は、必ず以下のJSON形式で出力してください。他のテキストは含めないでください。
+
+\`\`\`json
+{
+  "report": "ここに生成されたレポート本文を記述します。",
+  "citations": [
+    {
+      "title": "記事タイトル1",
+      "url": "https://example.com/article1"
+    },
+    {
+      "title": "記事タイトル2",
+      "url": "https://example.com/article2"
+    }
+  ],
+  "relatedCompanies": [
+    {
+      "companyName": "企業名1",
+      "url": "https://example.com/company1"
+    }
+  ]
+}
+\`\`\``;
 
         const finalPrompt = {
-            text: `Summaries:\n\n${summaries.join('\n\n')}`,
-            objective: `Create a comprehensive final report on the topic: "${topic}". The report must be written ${languageInstruction}.`,
+            text: textForReport,
+            objective: finalObjective,
         };
         
         const finalReportResult = await summarizeStep.execute({ ...params, inputData: finalPrompt });
@@ -162,10 +213,39 @@ export const marketResearchWorkflow = createWorkflow({
             return { success: false, message, error: finalReportResult } as const;
         }
 
-        return { 
-            success: true, 
-            data: { report: finalReportResult.data.summary } 
-        } as const;
+        try {
+            // Find the JSON block using a regular expression to make parsing more robust.
+            const jsonMatch = finalReportResult.data.summary.match(/```json\s*([\s\S]*?)\s*```/);
+            // If a match is found, use the captured group; otherwise, assume the whole string is JSON.
+            const jsonString = jsonMatch ? jsonMatch[1] : finalReportResult.data.summary;
+
+            const parsedResult = JSON.parse(jsonString);
+
+            const report = parsedResult.report || '';
+            const citations = parsedResult.citations || [];
+            const relatedCompanies = parsedResult.relatedCompanies || [];
+
+            return {
+                success: true,
+                data: {
+                    report,
+                    citations,
+                    relatedCompanies,
+                }
+            } as const;
+        } catch (error) {
+            logger.error(`Failed to parse LLM response as JSON. Response was: ${finalReportResult.data.summary}`, { error });
+            // Fallback: If JSON parsing fails, return the raw report and construct citations manually.
+            const citations = summaries.map(s => ({ title: s.title, url: s.url }));
+            return {
+                success: true,
+                data: {
+                    report: finalReportResult.data.summary,
+                    citations,
+                    relatedCompanies: [],
+                }
+            } as const;
+        }
     },
 }))
 .commit(); 
