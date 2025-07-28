@@ -14,25 +14,21 @@ import { webSearchTool } from '../../tools/market-research/webSearch';
 import { contentScrapeTool } from '../../tools/market-research/contentScrape';
 import { summarizeAndAnalyzeTool } from '../../tools/market-research/summarizeAndAnalyze';
 import { logger } from '../../logger';
-import { pdfScrapeTool } from '../../tools/market-research/pdfScrape'; // Import the new tool
+import { pdfScrapeTool } from '../../tools/market-research/pdfScrape';
+import { saveReportTool } from '../../tools/util/saveReport';
+import { getReportGenerationInstructions } from './reportInstructions';
 
-// Create workflow steps from existing tools for reuse
+// Create reusable workflow steps from tools
 const searchStep = createStep(webSearchTool);
 const summarizeStep = createStep(summarizeAndAnalyzeTool);
+const saveReportStep = createStep(saveReportTool);
 
-// --- Define schemas for workflow output, aligned with tool standards ---
+// --- Define schemas for workflow output ---
 const successOutputSchema = z.object({
   success: z.literal(true),
   data: z.object({
-    report: z.string().describe('The final, consolidated research report.'),
-    citations: z.array(z.object({
-        title: z.string(),
-        url: z.string().url(),
-    })).describe('List of source articles used for the report.'),
-    relatedCompanies: z.array(z.object({
-        companyName: z.string(),
-        url: z.string().url().optional(),
-    })).describe('List of companies mentioned in the report.'),
+    reportText: z.string().describe('The final, generated report content.'),
+    filePath: z.string().describe('The absolute path to where the report was saved.'),
   }),
 });
 const errorOutputSchema = z.object({
@@ -49,15 +45,15 @@ const finalOutputSchema = z.union([successOutputSchema, errorOutputSchema]);
  */
 export const marketResearchWorkflow = createWorkflow({
   id: 'market-research-workflow',
-  description: 'A comprehensive workflow to search, scrape, and analyze information to produce a report.',
+  description: 'A comprehensive workflow to search, scrape, analyze, generate a report, and save it to a file.',
   inputSchema: z.object({ topic: z.string() }),
-  outputSchema: finalOutputSchema, // Use the new structured output schema
+  outputSchema: finalOutputSchema,
 })
 .then(createStep({
     id: 'prepare-search-query',
     inputSchema: z.object({ topic: z.string() }),
     outputSchema: z.object({ query: z.string(), topic: z.string() }),
-    execute: async ({ inputData, runtimeContext }) => {
+    execute: async ({ inputData }) => {
       logger.info({ topic: inputData.topic }, 'Step 1: Preparing search query...');
       const lang = process.env.LANG || '';
       const suffix = lang.startsWith('ja') ? '市場 分析' : 'market analysis';
@@ -70,7 +66,6 @@ export const marketResearchWorkflow = createWorkflow({
     outputSchema: z.object({
         results: z.array(z.object({ url: z.string(), title: z.string() })),
         topic: z.string(),
-        // Add a flag to indicate search success or failure
         searchSuccess: z.boolean(),
     }),
     execute: async (params) => {
@@ -78,7 +73,6 @@ export const marketResearchWorkflow = createWorkflow({
         const searchResults = await searchStep.execute({ ...params, inputData: { query: params.inputData.query } });
         if (!searchResults.success) {
             logger.error(`Web Search Tool Failed: ${searchResults.message}`);
-            // On failure, return empty results and a 'false' flag
             return { results: [], topic: params.inputData.topic, searchSuccess: false };
         }
         logger.info(`Step 2: Web search successful, found ${searchResults.data.results.length} results.`);
@@ -86,166 +80,117 @@ export const marketResearchWorkflow = createWorkflow({
     },
 }))
 .then(createStep({
-    id: 'scrape-and-summarize',
+    id: 'scrape-content',
     inputSchema: z.object({
         results: z.array(z.object({ url: z.string(), title: z.string() })),
         topic: z.string(),
         searchSuccess: z.boolean(),
     }),
     outputSchema: z.object({
-        summaries: z.array(z.object({
+        scrapedData: z.array(z.object({
             url: z.string().url(),
             title: z.string(),
-            summary: z.string(),
+            content: z.string(),
         })),
         topic: z.string(),
     }),
     execute: async ({ inputData, runtimeContext }) => {
-        // If the previous step failed, do nothing and return empty summaries.
         if (!inputData.searchSuccess) {
-            logger.warn('Skipping scrape and summarize due to search failure.');
-            return { summaries: [], topic: inputData.topic };
+            logger.warn('Skipping scrape due to search failure.');
+            return { scrapedData: [], topic: inputData.topic };
         }
-
         const { results, topic } = inputData;
-        logger.info(`Step 3: Scraping and summarizing up to 10 articles for topic "${topic}"...`);
-        const topResults = results.slice(0, 10);
-        const summaries: { url: string; title: string; summary: string; }[] = [];
-
-        // Determine the summary language from the LANG environment variable.
-        const lang = process.env.LANG || '';
-        const summaryObjective = lang.startsWith('ja')
-            ? `この記事を可能な限り詳しく日本語でまとめてしてください。`
-            : `Summarize the key findings of this article in detail.`;
+        logger.info(`Step 3: Scraping up to 20 articles for topic "${topic}"...`);
+        const topResults = results.slice(0, 20);
+        const scrapedData: { url: string; title: string; content: string; }[] = [];
 
         for (const result of topResults) {
             const { url, title } = result;
             let scrapeResult;
-            // Check if the URL is a PDF and call the appropriate tool
             if (url.toLowerCase().endsWith('.pdf')) {
                 scrapeResult = await pdfScrapeTool.execute({ context: { url }, runtimeContext });
             } else {
                 scrapeResult = await contentScrapeTool.execute({ context: { url }, runtimeContext });
             }
-
             if (scrapeResult.success && scrapeResult.data.content.length > 100) {
-                // Since summarize tool also returns structured response, handle it
-                const summaryResult = await summarizeAndAnalyzeTool.execute({
-                    context: { text: scrapeResult.data.content, objective: summaryObjective },
-                    runtimeContext,
-                });
-                 if(summaryResult.success) {
-                    summaries.push({ url, title, summary: summaryResult.data.summary });
-                 }
+                scrapedData.push({ url, title, content: scrapeResult.data.content });
             } else if (!scrapeResult.success) {
                 logger.warn({ url, error: scrapeResult.message }, 'Skipping URL due to scraping failure.');
             }
         }
-        logger.info(`Step 3: Finished scraping. Generated ${summaries.length} summaries.`);
-        return { summaries, topic };
+        logger.info(`Step 3: Finished scraping. Scraped ${scrapedData.length} articles.`);
+        return { scrapedData, topic };
     },
 }))
 .then(createStep({
     id: 'generate-final-report',
     inputSchema: z.object({
-        summaries: z.array(z.object({
+        scrapedData: z.array(z.object({
             url: z.string().url(),
             title: z.string(),
-            summary: z.string(),
+            content: z.string(),
         })),
         topic: z.string(),
     }),
-    outputSchema: finalOutputSchema, // This step's output is the final output of the workflow
+    outputSchema: z.object({
+        reportText: z.string(),
+        topic: z.string(),
+    }),
     execute: async (params) => {
-        const { summaries, topic } = params.inputData;
+        const { scrapedData, topic } = params.inputData;
         
-        if (summaries.length === 0) {
-            const message = "Could not find enough information to generate a report.";
-            logger.warn(message);
-            return { success: false, message } as const;
+        if (scrapedData.length === 0) {
+            logger.warn("No content to generate report from.");
+            return { reportText: '', topic };
         }
 
-        const lang = process.env.LANG || '';
-        const languageInstruction = lang.startsWith('ja') ? '日本語' : 'English';
-
-        const textForReport = summaries
-            .map(s => `Source URL: ${s.url}\nTitle: ${s.title}\nContent Summary:\n${s.summary}`)
+        const textForReport = scrapedData
+            .map(s => `Source URL: ${s.url}\nTitle: ${s.title}\nContent Summary:\n${s.content}`)
             .join('\n\n---\n\n');
 
-        const finalObjective = `以下の情報に基づき、「${topic}」に関する詳細なレポートを${languageInstruction}で作成してください。
-レポート作成後、以下のタスクを実行してください。
-1. レポート内容から関連する企業を特定し、企業名とその公式サイトのURLをリストアップする。
-2. 情報源として使用した全ての記事のタイトルとURLをリストアップする。
+        const finalObjective = getReportGenerationInstructions(topic);
 
-最終的な回答は、必ず以下のJSON形式で出力してください。他のテキストは含めないでください。
+        const finalReportResult = await summarizeStep.execute({ ...params, inputData: { text: textForReport, objective: finalObjective } });
 
-\`\`\`json
-{
-  "report": "ここに生成されたレポート本文を記述します。",
-  "citations": [
-    {
-      "title": "記事タイトル1",
-      "url": "https://example.com/article1"
-    },
-    {
-      "title": "記事タイトル2",
-      "url": "https://example.com/article2"
-    }
-  ],
-  "relatedCompanies": [
-    {
-      "companyName": "企業名1",
-      "url": "https://example.com/company1"
-    }
-  ]
-}
-\`\`\``;
-
-        const finalPrompt = {
-            text: textForReport,
-            objective: finalObjective,
-        };
-        
-        const finalReportResult = await summarizeStep.execute({ ...params, inputData: finalPrompt });
         if (!finalReportResult.success) {
             const message = `Failed to generate the final report. Reason: ${finalReportResult.message}`;
             logger.error(message, { error: finalReportResult });
-            return { success: false, message, error: finalReportResult } as const;
+            // Even on failure, return empty text to allow the workflow to proceed if needed
+            return { reportText: `レポート生成に失敗しました: ${message}`, topic };
+        }
+        
+        return { reportText: finalReportResult.data.summary, topic };
+    },
+}))
+.then(createStep({
+    id: 'save-report-to-file',
+    inputSchema: z.object({
+        reportText: z.string(),
+        topic: z.string(),
+    }),
+    outputSchema: finalOutputSchema,
+    execute: async (params) => {
+        const { reportText, topic } = params.inputData;
+
+        if (!reportText) {
+            return { success: false, message: "レポートが空のため、ファイルに保存できませんでした。" } as const;
         }
 
-        try {
-            // Find the JSON block using a regular expression to make parsing more robust.
-            const jsonMatch = finalReportResult.data.summary.match(/```json\s*([\s\S]*?)\s*```/);
-            // If a match is found, use the captured group; otherwise, assume the whole string is JSON.
-            const jsonString = jsonMatch ? jsonMatch[1] : finalReportResult.data.summary;
+        const saveResult = await saveReportStep.execute({ ...params, inputData: { title: topic, content: reportText } });
 
-            const parsedResult = JSON.parse(jsonString);
-
-            const report = parsedResult.report || '';
-            const citations = parsedResult.citations || [];
-            const relatedCompanies = parsedResult.relatedCompanies || [];
-
-            return {
-                success: true,
-                data: {
-                    report,
-                    citations,
-                    relatedCompanies,
-                }
-            } as const;
-        } catch (error) {
-            logger.error(`Failed to parse LLM response as JSON. Response was: ${finalReportResult.data.summary}`, { error });
-            // Fallback: If JSON parsing fails, return the raw report and construct citations manually.
-            const citations = summaries.map(s => ({ title: s.title, url: s.url }));
-            return {
-                success: true,
-                data: {
-                    report: finalReportResult.data.summary,
-                    citations,
-                    relatedCompanies: [],
-                }
-            } as const;
+        if (!saveResult.success) {
+            // If saving fails, still return the report text to the user.
+            logger.error('Failed to save the report to a file.', { error: saveResult.message });
+            return { success: false, message: `レポートのファイル保存に失敗しました: ${saveResult.message}` } as const;
         }
+
+        return {
+            success: true,
+            data: {
+                reportText,
+                filePath: saveResult.data.filePath,
+            },
+        } as const;
     },
 }))
 .commit(); 
