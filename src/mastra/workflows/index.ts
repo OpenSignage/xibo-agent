@@ -12,8 +12,7 @@
  * This file exports all available workflows for use in the application
  */
 
-import { weatherWorkflow } from './weather';
-import { svgWorkflow } from './svg-illustration';
-import { marketResearchWorkflow } from './market-research-workflow';
 
-export { weatherWorkflow, svgWorkflow, marketResearchWorkflow }; 
+export { marketResearchWorkflow } from './market-research/marketResearch';
+
+//export { marketResearchWorkflow }; 

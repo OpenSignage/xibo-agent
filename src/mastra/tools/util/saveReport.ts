@@ -52,7 +52,7 @@ export const saveReportTool = createTool({
       .replace(/[^a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .toLowerCase();
-    const dateStamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const dateStamp = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD in local time
     const fileName = `${sanitizedTitle}-${dateStamp}.md`;
 
     const safeFileName = path.basename(fileName); // Sanitize to prevent path traversal
