@@ -34,6 +34,7 @@ export const config = {
   previewFontImageDir: path.join(projectRoot, 'persistent_data', 'previewFontImage'),
   logsDir: path.join(projectRoot, 'logs'),
   publicDir: path.join(projectRoot, 'public'),
+  reportsDir: path.join(projectRoot, 'persistent_data', 'reports'),
 } as const;
 
 export type Config = typeof config;
