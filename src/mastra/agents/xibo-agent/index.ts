@@ -49,7 +49,8 @@ export const xiboAgent = new Agent({
   tools: getTools(),
   memory: new Memory({
     options: {
-      lastMessages: 40,
+      // Retain the last 20 messages for context.
+      lastMessages: 20,
       semanticRecall: {
         topK: 2,
         messageRange: {
@@ -59,7 +60,10 @@ export const xiboAgent = new Agent({
       },
       threads: {
         generateTitle: true
-      }
+      },
+      workingMemory: {
+        enabled: true,
+      },
     },
     storage: new LibSQLStore({
       url: 'file:../../memory.db'

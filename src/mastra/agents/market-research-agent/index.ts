@@ -40,7 +40,8 @@ export const marketResearchAgent = new Agent({
   },
   memory: new Memory({
     options: {
-      lastMessages: 40,
+      // Retain the last 20 messages for context.
+      lastMessages: 20,
       semanticRecall: {
         topK: 2,
         messageRange: {
@@ -50,7 +51,10 @@ export const marketResearchAgent = new Agent({
       },
       threads: {
         generateTitle: true
-      }
+      },
+      workingMemory: {
+        enabled: true,
+      },
     },
     storage: new LibSQLStore({
       url: 'file:../../memory.db'
