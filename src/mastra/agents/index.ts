@@ -12,6 +12,6 @@
  * This file exports all available agents for use in the application
  */
 
-export * from './xibo-agent';
+//export * from './xibo-agent';
 export * from './xibo-manual';
 export * from './mcp-agent';

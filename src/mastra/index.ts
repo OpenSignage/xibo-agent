@@ -26,9 +26,11 @@ import { config } from './tools/xibo-agent/config';
 import { xiboAgent } from './agents/xibo-agent';
 import { xiboManualAgent } from './agents/xibo-manual';
 import { marketResearchAgent } from './agents/market-research-agent';
+import { productAnalysisAgent } from './agents/product-analysis-agent';
 
 // Import workflows
 import { marketResearchWorkflow } from './workflows/market-research/marketResearch';
+import { productAnalysisWorkflow } from './workflows/product-analysis/productAnalysis';
 
 // Load environment variables from .env.development
 const envPath = resolve(process.cwd(), '.env.development');
@@ -78,11 +80,13 @@ export const mastra = new Mastra({
     xibo: xiboAgent,         // Xibo system operation agent
     manual: xiboManualAgent, // Xibo manual operation agent
     marketResearch: marketResearchAgent, // Market research agent
+    productAnalysis: productAnalysisAgent, // Product analysis agent
   //  mcp: mcpAgent            // MCP (Master Control Program) agent
   },
   // Register available workflows
   workflows: {
     marketResearch: marketResearchWorkflow,
+    productAnalysis: productAnalysisWorkflow,
   //  weather: weatherWorkflow,      // Weather information processing workflow
   //  illustration: svgWorkflow,     // SVG illustration generation workflow
   },
