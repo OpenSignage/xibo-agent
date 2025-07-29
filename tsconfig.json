@@ -16,14 +16,14 @@
       "@modelcontextprotocol/sdk": ["./node_modules/@modelcontextprotocol/sdk"]
     },
     "typeRoots": [
-      "./node_modules/@types",
-      "./node_modules/@modelcontextprotocol/sdk"
+      "./types",
+      "./node_modules/@types"
     ],
     "types": ["node"]
   },
   "include": [
-    "src/**/*",
-    ".mcp/**/*.json"
+    "src/**/*.ts",
+    "types/**/*.d.ts"
   ],
   "exclude": [
     "node_modules",

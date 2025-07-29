@@ -55,7 +55,9 @@ export const summarizeAndAnalyzeTool = createTool({
 
     try {
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+//      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
       const prompt = `${objective}:\n\n---\n\n${text}\n\n---\n\n`;
 
       const result = await model.generateContent(prompt);
