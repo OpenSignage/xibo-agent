@@ -9,11 +9,4 @@
  * You should have received a copy of the GElastic License 2.0 (ELv2).
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
-
-/**
- * @module market-research/index
- * @description Barrel file for exporting all market-research-related tools.
- */
-export { webSearchTool } from "./webSearch";
-export { contentScrapeTool } from "./contentScrape";
-export { summarizeAndAnalyzeTool } from "./summarizeAndAnalyze";
+export { intelligentPresenterWorkflow } from './intelligentPresenter';

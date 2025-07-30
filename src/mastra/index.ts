@@ -31,6 +31,7 @@ import { productAnalysisAgent } from './agents/product-analysis-agent';
 // Import workflows
 import { marketResearchWorkflow } from './workflows/market-research/marketResearch';
 import { productAnalysisWorkflow } from './workflows/product-analysis/productAnalysis';
+import { intelligentPresenterWorkflow } from './workflows/presenter/intelligentPresenter';
 
 // Load environment variables from .env.development
 const envPath = resolve(process.cwd(), '.env.development');
@@ -87,8 +88,7 @@ export const mastra = new Mastra({
   workflows: {
     marketResearch: marketResearchWorkflow,
     productAnalysis: productAnalysisWorkflow,
-  //  weather: weatherWorkflow,      // Weather information processing workflow
-  //  illustration: svgWorkflow,     // SVG illustration generation workflow
+    intelligentPresenter: intelligentPresenterWorkflow,
   },
   // Set shared logger
   logger: logger,

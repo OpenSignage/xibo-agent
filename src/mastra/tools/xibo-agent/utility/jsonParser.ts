@@ -38,10 +38,18 @@ export function parseJsonStrings(obj: any): any {
 
   // 文字列の場合、JSON文字列かどうかをチェック
   if (typeof obj === 'string') {
+    let jsonString = obj.trim();
+    
+    // Check for markdown code block and extract JSON
+    const jsonMatch = jsonString.match(/```(json)?\n([\s\S]*?)\n```/);
+    if (jsonMatch && jsonMatch[2]) {
+        jsonString = jsonMatch[2];
+    }
+
     // JSON文字列の特徴的なパターンをチェック
-    if (obj.trim().startsWith('[') || obj.trim().startsWith('{')) {
+    if (jsonString.trim().startsWith('[') || jsonString.trim().startsWith('{')) {
       try {
-        const parsed = JSON.parse(obj);
+        const parsed = JSON.parse(jsonString);
         // パース成功した場合、再帰的に処理
         return parseJsonStrings(parsed);
       } catch (e) {

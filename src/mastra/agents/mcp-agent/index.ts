@@ -61,10 +61,7 @@ export const mcpAgent = new Agent({
     5. 現在のディレクトリを確認するには、listDirectoryを使用してください
     6. Web検索は必ず適切なクエリを指定してください
   `,
-  model: google('gemini-1.5-pro-latest'),
-  async getTools() {
-    return await mcp.getTools();
-  }
+  model: google('gemini-1.5-pro-latest')
 });
 
 // エージェントの実行時にツールセットを取得
