@@ -36,6 +36,7 @@ export const config = {
   publicDir: path.join(projectRoot, 'public'),
   reportsDir: path.join(projectRoot, 'persistent_data', 'reports'),
   presentationsDir: path.join(projectRoot, 'persistent_data', 'presentations'),
+  tempDir: path.join(projectRoot, 'public', 'temp'),
 } as const;
 
 export type Config = typeof config;

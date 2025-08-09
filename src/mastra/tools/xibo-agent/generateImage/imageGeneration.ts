@@ -102,6 +102,10 @@ export const generateImage = createTool({
     aspectRatio: z
       .enum(['1:1', '3:4', '4:3', '16:9', '9:16'])
       .describe('Aspect ratio of the generated image'),
+    negativePrompt: z
+        .string()
+        .optional()
+        .describe('A list of concepts to exclude from the generated image.'),
     generatorId: z
       .string()
       .optional()
@@ -117,9 +121,13 @@ export const generateImage = createTool({
         throw new Error('GEMINI_API_KEY is not set in environment variables');
       }
 
-      // Enhance prompt with aspect ratio information
+      // Enhance prompt with aspect ratio and negative prompt information.
       const dimensions = aspectRatioOptions[context.aspectRatio];
-      const enhancedPrompt = `${context.prompt} (Aspect ratio: ${context.aspectRatio}, Dimensions: ${dimensions.width}x${dimensions.height})`;
+      let enhancedPrompt = `${context.prompt} (Aspect ratio: ${context.aspectRatio}, Dimensions: ${dimensions.width}x${dimensions.height})`;
+      if (context.negativePrompt) {
+        enhancedPrompt += ` --no ${context.negativePrompt}`;
+      }
+
       logger.info(`Enhanced prompt: ${enhancedPrompt}`);
 
       const ai = new GoogleGenAI({ apiKey: geminiApiKey });
@@ -140,6 +148,7 @@ export const generateImage = createTool({
       let width = 0;
       let height = 0;
       let savedFilename = '';
+      let fullPath = '';
 
       if (!response.candidates?.[0]?.content?.parts) {
         logger.error('Invalid response structure from Gemini API', { response });
@@ -195,7 +204,7 @@ export const generateImage = createTool({
           // Save the processed image
           const filename = `image-${uuidv4()}.png`;
           savedFilename = filename;
-          const fullPath = path.join(outputDir, filename);
+          fullPath = path.join(outputDir, filename);
           logger.info(`Saving image to: ${fullPath}`);
           fs.writeFileSync(fullPath, croppedBuffer);
 
@@ -234,7 +243,7 @@ export const generateImage = createTool({
       return {
         success: true,
         data: {
-          imagePath: `generated/${savedFilename}`,
+          imagePath: fullPath,
           imageUrl,
           prompt: enhancedPrompt,
           width,

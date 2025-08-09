@@ -17,6 +17,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 /**
  * @module summarizeAndAnalyzeTool
  * @description A tool to summarize and analyze text using Google's Generative AI.
+ * Supports temperature and topP parameters for controlling response creativity and focus.
  */
 const outputSchema = z.object({
   summary: z.string().describe('The generated summary or analysis of the text.'),
@@ -41,10 +42,12 @@ export const summarizeAndAnalyzeTool = createTool({
   inputSchema: z.object({
     text: z.string().describe('The text to be processed.'),
     objective: z.string().describe('The goal of the analysis (e.g., "Summarize the key findings").'),
+    temperature: z.number().optional().default(0.7).describe('Controls randomness in the response (0.0-1.0, default: 0.7). Lower values make responses more focused and deterministic.'),
+    topP: z.number().optional().default(0.9).describe('Controls diversity via nucleus sampling (0.0-1.0, default: 0.9). Lower values make responses more focused.'),
   }),
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
-    const { text, objective } = context;
+    const { text, objective, temperature = 0.7, topP = 0.9 } = context;
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
@@ -55,15 +58,20 @@ export const summarizeAndAnalyzeTool = createTool({
 
     try {
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
-//      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-2.5-pro",
+        generationConfig: {
+          temperature: temperature,
+          topP: topP,
+        }
+      });
 
       const prompt = `${objective}:\n\n---\n\n${text}\n\n---\n\n`;
 
       const result = await model.generateContent(prompt);
       const response = await result.response;
       const summary = response.text();
-
+      
       return { 
         success: true, 
         data: { summary }

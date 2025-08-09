@@ -46,37 +46,59 @@ const finalOutputSchema = z.union([successOutputSchema, errorOutputSchema]);
 export const marketResearchWorkflow = createWorkflow({
   id: 'market-research-workflow',
   description: 'A comprehensive workflow to search, scrape, analyze, generate a report, and save it to a file.',
-  inputSchema: z.object({ topic: z.string() }),
+  inputSchema: z.object({ 
+    topic: z.string(),
+    maxWebsites: z.number().optional().default(20).describe('Maximum number of websites to scrape (default: 20)')
+  }),
   outputSchema: finalOutputSchema,
 })
 .then(createStep({
     id: 'prepare-search-query',
-    inputSchema: z.object({ topic: z.string() }),
-    outputSchema: z.object({ query: z.string(), topic: z.string() }),
+    inputSchema: z.object({ 
+      topic: z.string(), 
+      maxWebsites: z.number().optional().default(20) 
+    }),
+    outputSchema: z.object({ 
+      query: z.string(), 
+      topic: z.string(), 
+      maxWebsites: z.number() 
+    }),
     execute: async ({ inputData }) => {
       logger.info({ topic: inputData.topic }, 'Step 1: Preparing search query...');
       const lang = process.env.LANG || '';
       const suffix = lang.startsWith('ja') ? '市場 分析' : 'market analysis';
-      return { query: `${inputData.topic} ${suffix}`, topic: inputData.topic };
+      const maxWebsites = inputData.maxWebsites ?? 20;
+      return { query: `${inputData.topic} ${suffix}`, topic: inputData.topic, maxWebsites };
     },
 }))
 .then(createStep({
     id: 'execute-search',
-    inputSchema: z.object({ query: z.string(), topic: z.string() }),
+    inputSchema: z.object({ 
+      query: z.string(), 
+      topic: z.string(), 
+      maxWebsites: z.number() 
+    }),
     outputSchema: z.object({
         results: z.array(z.object({ url: z.string(), title: z.string() })),
         topic: z.string(),
         searchSuccess: z.boolean(),
+        maxWebsites: z.number(),
     }),
     execute: async (params) => {
         logger.info({ query: params.inputData.query }, 'Step 2: Executing web search...');
-        const searchResults = await searchStep.execute({ ...params, inputData: { query: params.inputData.query } });
+        const searchResults = await searchStep.execute({ 
+          ...params, 
+          inputData: { 
+            query: params.inputData.query,
+            maxResults: params.inputData.maxWebsites
+          } 
+        });
         if (!searchResults.success) {
             logger.error(`Web Search Tool Failed: ${searchResults.message}`);
-            return { results: [], topic: params.inputData.topic, searchSuccess: false };
+            return { results: [], topic: params.inputData.topic, searchSuccess: false, maxWebsites: params.inputData.maxWebsites };
         }
         logger.info(`Step 2: Web search successful, found ${searchResults.data.results.length} results.`);
-        return { ...searchResults.data, topic: params.inputData.topic, searchSuccess: true };
+        return { ...searchResults.data, topic: params.inputData.topic, searchSuccess: true, maxWebsites: params.inputData.maxWebsites };
     },
 }))
 .then(createStep({
@@ -85,6 +107,7 @@ export const marketResearchWorkflow = createWorkflow({
         results: z.array(z.object({ url: z.string(), title: z.string() })),
         topic: z.string(),
         searchSuccess: z.boolean(),
+        maxWebsites: z.number(),
     }),
     outputSchema: z.object({
         scrapedData: z.array(z.object({
@@ -99,9 +122,9 @@ export const marketResearchWorkflow = createWorkflow({
             logger.warn('Skipping scrape due to search failure.');
             return { scrapedData: [], topic: inputData.topic };
         }
-        const { results, topic } = inputData;
-        logger.info(`Step 3: Scraping up to 20 articles for topic "${topic}"...`);
-        const topResults = results.slice(0, 20);
+        const { results, topic, maxWebsites } = inputData;
+        logger.info(`Step 3: Scraping up to ${maxWebsites} articles for topic "${topic}"...`);
+        const topResults = results.slice(0, maxWebsites);
         const scrapedData: { url: string; title: string; content: string; }[] = [];
 
         for (const result of topResults) {
@@ -150,7 +173,15 @@ export const marketResearchWorkflow = createWorkflow({
 
         const finalObjective = getReportGenerationInstructions(topic);
 
-        const finalReportResult = await summarizeStep.execute({ ...params, inputData: { text: textForReport, objective: finalObjective } });
+        const finalReportResult = await summarizeStep.execute({ 
+          ...params, 
+          inputData: { 
+            text: textForReport, 
+            objective: finalObjective,
+            temperature: 0.7, // Default temperature for consistent analysis
+            topP: 0.9 // Default topP for focused analysis
+          } 
+        });
 
         if (!finalReportResult.success) {
             const message = `Failed to generate the final report. Reason: ${finalReportResult.message}`;
