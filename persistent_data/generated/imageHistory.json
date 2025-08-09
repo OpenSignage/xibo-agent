@@ -3,12 +3,12 @@
     "images": [
       {
         "id": 1,
-        "filename": "image-13335a7d-86d3-4ef5-9a9e-3f413baf34b1.png",
-        "prompt": "ワインの宣伝のためのデジタルサイネージの背景 (Aspect ratio: 9:16, Dimensions: 576x1024)",
-        "aspectRatio": "9:16",
-        "width": 576,
-        "height": 1024,
-        "createdAt": "2025-06-12T15:23:34.572Z"
+        "filename": "image-dec97625-006d-4f09-a94d-78c2a40632a8.png",
+        "prompt": "An abstract, professional background image representing the following themes: 未来, 光の線, 成長, ネットワーク, データ, 青, サイバー. High resolution, clean, and visually appealing. (Aspect ratio: 16:9, Dimensions: 1024x576) --no text, words, letters, numbers, writing, typography, signatures, logos, people, faces",
+        "aspectRatio": "16:9",
+        "width": 1024,
+        "height": 576,
+        "createdAt": "2025-08-02T15:42:07.091Z"
       }
     ]
   },

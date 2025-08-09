@@ -53,7 +53,7 @@ export const generateChartTool = createTool({
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
     const { chartType, title, labels, data, fileName } = context;
-    const chartDir = path.join(config.generatedDir, 'charts');
+    const chartDir = path.join(config.tempDir, 'charts');
     const imagePath = path.join(chartDir, `${fileName}.png`);
 
     logger.info({ chartType, title, imagePath }, 'Generating chart image...');
