@@ -155,7 +155,15 @@ export const productAnalysisWorkflow = createWorkflow({
 - **ターゲット顧客層**: この製品はどのような顧客（企業、個人、特定の職種など）を対象としているか。
 - **総括**: 全体をまとめた結論。`;
 
-    const reportResult = await summarizeAndAnalyzeTool.execute({ context: { text: combinedText, objective }, runtimeContext });
+    const reportResult = await summarizeAndAnalyzeTool.execute({ 
+      context: { 
+        text: combinedText, 
+        objective,
+        temperature: 0.7, // Default temperature for balanced creativity
+        topP: 0.9,        // Default nucleus sampling for focused output
+      }, 
+      runtimeContext 
+    });
 
     if (!reportResult.success) {
       const message = `Failed to generate the final report. Reason: ${reportResult.message}`;
