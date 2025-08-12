@@ -26,28 +26,19 @@ import { logger } from '../../../logger';
 /**
  * Schema for the 'clock' response from the Xibo API.
  */
-const clockResponseSchema = z.object({
-  serverTime: z.string().optional().describe("Current server time in ISO 8601 format."),
-  timezone: z.string().optional().describe("Server's timezone setting (e.g., 'Asia/Tokyo')."),
-  offset: z.number().optional().describe("Timezone offset in minutes from UTC.")
+const rawClockResponseSchemaA = z.object({
+  time: z.string().describe("Current server time string as returned by CMS (e.g., '00:17 JST')."),
 }).passthrough();
 
-/**
- * Converts a UTC time string to a local time string using a given offset.
- * @param utcTime - The UTC time string in ISO 8601 format.
- * @param offset - The timezone offset in minutes.
- * @returns The calculated local time string in ISO 8601 format.
- */
-function convertToLocalTime(utcTime: string, offset: number): string {
-  try {
-    const date = new Date(utcTime);
-    const localDate = new Date(date.getTime() + (offset * 60 * 1000));
-    return localDate.toISOString();
-  } catch (error) {
-    logger.error({ error }, "Error converting UTC time to local time.");
-    return utcTime; // Return original time on error
-  }
-}
+const rawClockResponseSchemaB = z.object({
+  data: z.object({
+    time: z.string().describe("Current server time string as returned by CMS (e.g., '00:17 JST')."),
+  }).passthrough(),
+}).passthrough();
+
+const clockResponseUnion = z.union([rawClockResponseSchemaA, rawClockResponseSchemaB]);
+
+// No conversion helper is needed for the current CMS response format.
 
 /**
  * Schema for the tool's output.
@@ -56,10 +47,7 @@ const outputSchema = z.object({
   success: z.boolean().describe("Indicates whether the operation was successful."),
   message: z.string().describe("A message providing details about the operation outcome."),
   data: z.object({
-    currentTime: z.string().describe("The server's current time in UTC (ISO 8601)."),
-    timezone: z.string().describe("The server's configured timezone."),
-    offset: z.number().describe("The timezone offset in minutes from UTC."),
-    localTime: z.string().describe("The calculated local time (ISO 8601).")
+    time: z.string().describe("The current server time string as returned by CMS (e.g., '00:17 JST')."),
   }).optional().describe("The time information on success."),
   error: z.string().optional().describe("Error details if the operation failed."),
 });
@@ -96,25 +84,30 @@ export const getCmsTime = createTool({
         return { success: false, message, error };
       }
 
-      const data = await response.json();
-      logger.debug({ data }, "Received clock response from CMS API.");
-      const validatedData = clockResponseSchema.parse(data);
-      
-      const serverTime = validatedData.serverTime || new Date().toISOString();
-      const timezone = validatedData.timezone || 'UTC';
-      const offset = validatedData.offset || 0;
-      const localTime = convertToLocalTime(serverTime, offset);
+      const raw = await response.json();
+      logger.debug({ raw }, "Received clock response from CMS API.");
+      const parsed = clockResponseUnion.safeParse(raw);
+
+      if (!parsed.success) {
+        const message = "Unexpected CMS time response format.";
+        logger.error({ raw, error: parsed.error.format() }, message);
+        return { success: false, message, error: message };
+      }
+
+      const maybeTime = 'time' in parsed.data ? parsed.data.time : parsed.data.data.time;
+      const timeResult = z.string().safeParse(maybeTime);
+      if (!timeResult.success) {
+        const message = "CMS time is not a string.";
+        logger.error({ value: maybeTime, error: timeResult.error.format() }, message);
+        return { success: false, message, error: message };
+      }
+      const time = timeResult.data;
 
       logger.info("Successfully retrieved CMS time.");
       return {
         success: true,
-        data: {
-          currentTime: serverTime,
-          timezone,
-          offset,
-          localTime
-        },
-        message: "Successfully retrieved CMS time"
+        data: { time },
+        message: "Successfully retrieved CMS time",
       };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
