@@ -164,7 +164,12 @@ export const intelligentPresenterWorkflow = createWorkflow({
             --- レポート ---
             ${reportContent}`;
             
-            designResult = await summarizeAndAnalyzeTool.execute({ ...params, context: { text: reportContent, objective: prompt } });
+            designResult = await summarizeAndAnalyzeTool.execute({ ...params, context: { 
+                text: reportContent, 
+                objective: prompt,
+                temperature: 0.3, // Lower temperature for more deterministic structure
+                topP: 0.9,
+            } });
             if (!designResult.success) {
                 const message = `Designer AI failed: ${designResult.message}`;
                 logger.error({ error: designResult.message }, message);
@@ -273,6 +278,8 @@ export const intelligentPresenterWorkflow = createWorkflow({
                 context: {
                     text: titleSlide.title,
                     objective: keywordExtractionPrompt,
+                    temperature: 0.2, // Low temperature for precise keyword extraction
+                    topP: 0.9,
                 }
             });
 
@@ -355,6 +362,8 @@ export const intelligentPresenterWorkflow = createWorkflow({
             const speechPromise = summarizeAndAnalyzeTool.execute({ ...params, context: {
                 text: `- タイトル: ${design.title}\n- 要点: ${design.bullets.join(', ')}`,
                 objective: `あなたはこのスライドのプレゼンターです。上記のタイトルと要点に基づき、約150字程度の自然で聞きやすいスピーチ原稿を作成してください。`,
+                temperature: 0.7, // Default temperature for creative speech
+                topP: 0.9,
             }});
 
             let chartDataPromise: Promise<ChartData | null> = Promise.resolve(null);
@@ -379,7 +388,12 @@ export const intelligentPresenterWorkflow = createWorkflow({
 ${reportContent}
 ---
 `;
-                    const analystResult = await summarizeAndAnalyzeTool.execute({ ...params, context: { text: reportContent, objective: analystPrompt }});
+                    const analystResult = await summarizeAndAnalyzeTool.execute({ ...params, context: { 
+                        text: reportContent, 
+                        objective: analystPrompt,
+                        temperature: 0.1, // Very low temperature for precise data extraction
+                        topP: 0.9,
+                    }});
                     if (!analystResult.success) return null;
                     const parsed = parseJsonStrings(analystResult.data.summary);
                     if (parsed && parsed.chart_type === 'error') return null; // Handle explicit error from AI
