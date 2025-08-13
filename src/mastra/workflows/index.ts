@@ -12,7 +12,7 @@
  * This file exports all available workflows for use in the application
  */
 
-
 export { marketResearchWorkflow } from './market-research/marketResearch';
-
-//export { marketResearchWorkflow }; 
+export { strategyPlannerWorkflow } from './strategy-planner/strategyPlanner';
+export { productAnalysisWorkflow } from './product-analysis/productAnalysis';
+export { intelligentPresenterWorkflow } from './presenter/intelligentPresenter';

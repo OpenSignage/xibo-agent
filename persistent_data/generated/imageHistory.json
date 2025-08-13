@@ -3,12 +3,12 @@
     "images": [
       {
         "id": 1,
-        "filename": "image-b2f1ed54-c79d-4c67-8004-5060cd7b9e68.png",
-        "prompt": "An abstract, professional background image representing the following themes: Digital, Glowing, Data Visualization, Network, Futuristic, Blue, Abstract. High resolution, clean, and visually appealing. (Aspect ratio: 16:9, Dimensions: 1024x576) --no text, words, letters, numbers, writing, typography, signatures, logos, people, faces",
+        "filename": "image-f469b737-f7b7-491e-b0d6-c51bc72a8f13.png",
+        "prompt": "An abstract, professional background image representing the following themes: 未来, 光, 繋がり, 青, デジタル, 成長, 輝き. High resolution, clean, and visually appealing. (Aspect ratio: 16:9, Dimensions: 1024x576) --no text, words, letters, numbers, writing, typography, signatures, logos, people, faces",
         "aspectRatio": "16:9",
         "width": 1024,
         "height": 576,
-        "createdAt": "2025-08-09T14:36:18.299Z"
+        "createdAt": "2025-08-13T13:13:38.610Z"
       }
     ]
   },
