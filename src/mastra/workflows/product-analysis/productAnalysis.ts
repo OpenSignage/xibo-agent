@@ -121,7 +121,7 @@ export const productAnalysisWorkflow = createWorkflow({
     items: z.array(z.object({ kind: z.enum(['pdf', 'pptx', 'url', 'md', 'comp_pdf', 'comp_pptx', 'comp_url', 'comp_md']), value: z.string() })),
     productName: z.string(),
   }),
-  execute: async ({ inputData }) => {
+  execute: async ({ inputData, runtimeContext }) => {
     const { pdfFiles, pptxFiles, textFiles, mdFiles, urlFiles, compPdfFiles, compPptxFiles, compTextFiles, compMdFiles, compUrlFiles, productName } = inputData;
     const items: { kind: 'pdf'|'pptx'|'url'|'md'|'comp_pdf'|'comp_pptx'|'comp_url'|'comp_md'; value: string }[] = [];
 
@@ -129,13 +129,64 @@ export const productAnalysisWorkflow = createWorkflow({
     for (const filePath of pptxFiles) items.push({ kind: 'pptx', value: filePath });
     for (const filePath of mdFiles) items.push({ kind: 'md', value: filePath });
 
+    // Helper: try to expand wildcard via web search; fallback to sitemap.xml
+    const expandWildcard = async (pattern: string): Promise<string[]> => {
+      const results: string[] = [];
+      try {
+        const withoutStar = pattern.replace(/\*+$/, '');
+        const u = new URL(withoutStar);
+        const host = u.host;
+        const pathPrefix = u.pathname.endsWith('/') ? u.pathname.slice(0, -1) : u.pathname;
+        const query = pathPrefix && pathPrefix !== '' && pathPrefix !== '/'
+          ? `site:${host} inurl:${pathPrefix}`
+          : `site:${host}`;
+        const search = await webSearchTool.execute({ context: { query, maxResults: 50 } as any, runtimeContext });
+        if (search.success) {
+          for (const r of search.data.results) results.push(r.url);
+        }
+        if (results.length === 0) {
+          // Try sitemap.xml
+          const base = `${u.protocol}//${u.host}`;
+          const sitemapUrls = [
+            `${base}/sitemap.xml`,
+            `${base}/sitemap_index.xml`,
+          ];
+          for (const sm of sitemapUrls) {
+            try {
+              const resp = await fetch(sm);
+              if (resp.ok) {
+                const xml = await resp.text();
+                const locs = Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g)).map(m => m[1]);
+                for (const loc of locs) {
+                  try {
+                    const lu = new URL(loc);
+                    if (lu.host === host && (!pathPrefix || lu.pathname.startsWith(pathPrefix))) {
+                      results.push(loc);
+                    }
+                  } catch {}
+                }
+              }
+            } catch {}
+            if (results.length > 0) break;
+          }
+          // As a last resort, include the base path itself
+          const basePath = `${u.protocol}//${u.host}${pathPrefix || ''}`;
+          results.push(basePath);
+        }
+      } catch {}
+      return Array.from(new Set(results));
+    };
+
     // Read URL lists from text files
     const urlSet = new Set<string>();
+    const patternSet = new Set<string>();
     for (const filePath of textFiles) {
       try {
         const fileContent = await fs.readFile(filePath, 'utf-8');
-        const urls = fileContent.split(/\r?\n/).filter(line => line.startsWith('http'));
-        for (const url of urls) urlSet.add(url);
+        const urls = fileContent.split(/\r?\n/).map(l => l.trim()).filter(line => line.startsWith('http'));
+        for (const url of urls) {
+          if (url.includes('*')) patternSet.add(url); else urlSet.add(url);
+        }
       } catch (error) {
         logger.info({ filePath }, 'Skipping unreadable text file.');
       }
@@ -144,10 +195,22 @@ export const productAnalysisWorkflow = createWorkflow({
     for (const filePath of urlFiles) {
       try {
         const fileContent = await fs.readFile(filePath, 'utf-8');
-        const urls = fileContent.split(/\r?\n/).filter(line => line.startsWith('http'));
-        for (const url of urls) urlSet.add(url);
+        const urls = fileContent.split(/\r?\n/).map(l => l.trim()).filter(line => line.startsWith('http'));
+        for (const url of urls) {
+          if (url.includes('*')) patternSet.add(url); else urlSet.add(url);
+        }
       } catch (error) {
         logger.info({ filePath }, 'Skipping unreadable url file.');
+      }
+    }
+
+    // Expand wildcard patterns using web search (site: and inurl:), with sitemap fallback
+    if (patternSet.size > 0) {
+      for (const pattern of patternSet) {
+        try {
+          const expanded = await expandWildcard(pattern);
+          for (const u of expanded) urlSet.add(u);
+        } catch {}
       }
     }
 
@@ -159,11 +222,12 @@ export const productAnalysisWorkflow = createWorkflow({
     for (const filePath of compMdFiles) items.push({ kind: 'comp_md', value: filePath });
 
     const compUrlSet = new Set<string>();
+    const compPatternSet = new Set<string>();
     for (const filePath of compTextFiles) {
       try {
         const fileContent = await fs.readFile(filePath, 'utf-8');
-        const urls = fileContent.split(/\r?\n/).filter(line => line.startsWith('http'));
-        for (const url of urls) compUrlSet.add(url);
+        const urls = fileContent.split(/\r?\n/).map(l => l.trim()).filter(line => line.startsWith('http'));
+        for (const url of urls) { if (url.includes('*')) compPatternSet.add(url); else compUrlSet.add(url); }
       } catch (error) {
         logger.info({ filePath }, 'Skipping unreadable competitor text file.');
       }
@@ -171,15 +235,22 @@ export const productAnalysisWorkflow = createWorkflow({
     for (const filePath of compUrlFiles) {
       try {
         const fileContent = await fs.readFile(filePath, 'utf-8');
-        const urls = fileContent.split(/\r?\n/).filter(line => line.startsWith('http'));
-        for (const url of urls) compUrlSet.add(url);
+        const urls = fileContent.split(/\r?\n/).map(l => l.trim()).filter(line => line.startsWith('http'));
+        for (const url of urls) { if (url.includes('*')) compPatternSet.add(url); else compUrlSet.add(url); }
       } catch (error) {
         logger.info({ filePath }, 'Skipping unreadable competitor url file.');
       }
     }
-    for (const u of compUrlSet) items.push({ kind: 'comp_url', value: u });
+    if (compPatternSet.size > 0) {
+      for (const pattern of compPatternSet) {
+        try {
+          const expanded = await expandWildcard(pattern);
+          for (const u of expanded) compUrlSet.add(u);
+        } catch {}
+      }
+    }
 
-    logger.info({ items: items.length, urls: urlSet.size, compUrls: compUrlSet.size }, 'Built extraction items.');
+    logger.info({ items: items.length, urls: urlSet.size, urlPatterns: patternSet.size, compUrls: compUrlSet.size, compUrlPatterns: compPatternSet.size }, 'Built extraction items.');
     return { items, productName };
   }
 }))

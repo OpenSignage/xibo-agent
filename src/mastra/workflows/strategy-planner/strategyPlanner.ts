@@ -18,6 +18,10 @@ import { logger } from '../../logger';
 import { summarizeAndAnalyzeTool } from '../../tools/market-research/summarizeAndAnalyze';
 import { saveReportTool } from '../../tools/util/saveReport';
 import { config } from '../../tools/xibo-agent/config';
+import { contentScrapeTool } from '../../tools/market-research/contentScrape';
+import { pdfScrapeTool } from '../../tools/market-research/pdfScrape';
+import { powerpointExtractTool } from '../../tools/product-analysis';
+import { webSearchTool } from '../../tools/market-research/webSearch';
 
 /**
  * @module strategyPlannerWorkflow
@@ -42,6 +46,7 @@ export const strategyPlannerWorkflow = createWorkflow({
 	inputSchema: z.object({
 		marketResearchReportFile: z.string().describe('File name of the market research report located in persistent_data/reports'),
 		productAnalysisReportFile: z.string().describe('File name of the product analysis report located in persistent_data/reports'),
+		companyName: z.string().optional().describe('Optional company directory name under persistent_data/company_info/<companyName> to load reference materials.'),
 		outputTitle: z.string().optional().describe('Optional title to use for the strategy file name. Defaults to "Strategy-Plan"'),
 	}),
 	outputSchema: finalOutputSchema,
@@ -51,8 +56,8 @@ export const strategyPlannerWorkflow = createWorkflow({
 	 * Reads both input reports from persistent storage. If one is missing, returns an error.
 	 */
 	id: 'read-source-reports',
-	inputSchema: z.object({ marketResearchReportFile: z.string(), productAnalysisReportFile: z.string(), outputTitle: z.string().optional() }),
-	outputSchema: z.object({ marketResearch: z.string(), productAnalysis: z.string(), outputTitle: z.string() }),
+	inputSchema: z.object({ marketResearchReportFile: z.string(), productAnalysisReportFile: z.string(), companyName: z.string().optional(), outputTitle: z.string().optional() }),
+	outputSchema: z.object({ marketResearch: z.string(), productAnalysis: z.string(), companyName: z.string().optional(), outputTitle: z.string() }),
 	execute: async ({ inputData }) => {
 		const reportsDir = config.reportsDir;
 		const mrPath = path.join(reportsDir, inputData.marketResearchReportFile);
@@ -66,12 +71,131 @@ export const strategyPlannerWorkflow = createWorkflow({
 				fs.readFile(paPath, 'utf-8'),
 			]);
 			const outputTitle = inputData.outputTitle || 'Strategy-Plan';
-			return { marketResearch, productAnalysis, outputTitle };
+			return { marketResearch, productAnalysis, companyName: inputData.companyName, outputTitle };
 		} catch (error) {
 			const message = 'Failed to read one or both reports.';
 			logger.error({ error }, message);
-			return { marketResearch: '', productAnalysis: '', outputTitle: 'Strategy-Plan' };
+			return { marketResearch: '', productAnalysis: '', companyName: inputData.companyName, outputTitle: 'Strategy-Plan' };
 		}
+	},
+}))
+.then(createStep({
+	/**
+	 * Collects reference materials under persistent_data/<companyName>.
+	 * Supports .md/.txt/.url direct reads, .pdf/.pptx via tools, and URLs via web scraping tool.
+	 */
+	id: 'collect-reference-materials',
+	inputSchema: z.object({ marketResearch: z.string(), productAnalysis: z.string(), companyName: z.string().optional(), outputTitle: z.string() }),
+	outputSchema: z.object({ marketResearch: z.string(), productAnalysis: z.string(), references: z.string(), outputTitle: z.string() }),
+	execute: async ({ inputData, runtimeContext }) => {
+		const { marketResearch, productAnalysis, companyName, outputTitle } = inputData;
+		if (!companyName) {
+			logger.info('No companyName provided. Skipping reference material collection.');
+			return { marketResearch, productAnalysis, references: '', outputTitle };
+		}
+		const baseDir = path.join(config.projectRoot, 'persistent_data', 'company_info', companyName);
+		logger.info({ baseDir }, 'Collecting company reference materials...');
+		let refs: string[] = [];
+		try {
+			const entries = await fs.readdir(baseDir, { recursive: true, withFileTypes: true } as any);
+			const files = (entries as Array<any>).filter(e => e.isFile());
+			// Process files by extension
+			for (const f of files) {
+				const filePath = path.join((f as any).path, f.name);
+				if (f.name.endsWith('.md')) {
+					try {
+						const content = await fs.readFile(filePath, 'utf-8');
+						refs.push(`Company Ref: ${filePath}\n${content}`);
+					} catch {}
+				} else if (f.name.endsWith('.txt') || f.name.endsWith('.url')) {
+					try {
+						const content = await fs.readFile(filePath, 'utf-8');
+						const lines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+						const urlLines = lines.filter(l => l.startsWith('http'));
+						const nonUrlText = lines.filter(l => !l.startsWith('http')).join('\n');
+						if (nonUrlText) refs.push(`Company Notes: ${filePath}\n${nonUrlText}`);
+						// Split wildcard patterns and plain URLs
+						const patternSet = new Set<string>();
+						const plainUrls: string[] = [];
+						for (const u of urlLines) {
+							if (u.includes('*')) patternSet.add(u); else plainUrls.push(u);
+						}
+						// Helper: expand wildcard with search + sitemap + base fallback
+						const expandPattern = async (pattern: string): Promise<string[]> => {
+							const acc: string[] = [];
+							try {
+								const withoutStar = pattern.replace(/\*+$/, '');
+								const pu = new URL(withoutStar);
+								const host = pu.host;
+								const pathPrefix = pu.pathname.endsWith('/') ? pu.pathname.slice(0, -1) : pu.pathname;
+								const query = pathPrefix && pathPrefix !== '' && pathPrefix !== '/'
+									? `site:${host} inurl:${pathPrefix}`
+									: `site:${host}`;
+								const search = await webSearchTool.execute({ context: { query, maxResults: 50 } as any, runtimeContext });
+								if (search.success) {
+									for (const r of search.data.results) acc.push(r.url);
+								}
+								if (acc.length === 0) {
+									// Try sitemap(s)
+									const base = `${pu.protocol}//${pu.host}`;
+									const sitemapCandidates = [ `${base}/sitemap.xml`, `${base}/sitemap_index.xml` ];
+									for (const sm of sitemapCandidates) {
+										try {
+											const resp = await fetch(sm);
+											if (resp.ok) {
+												const xml = await resp.text();
+												const locs = Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g)).map(m => m[1]);
+												for (const loc of locs) {
+													try {
+														const lu = new URL(loc);
+														if (lu.host === host && (!pathPrefix || lu.pathname.startsWith(pathPrefix))) {
+															acc.push(loc);
+														}
+													} catch {}
+												}
+											}
+										} catch {}
+										if (acc.length > 0) break;
+									}
+									// Ensure at least base URL is included
+									const basePath = `${pu.protocol}//${pu.host}${pathPrefix || ''}`;
+									acc.push(basePath);
+								}
+							} catch {}
+							return Array.from(new Set(acc));
+						};
+						// Expand wildcard patterns via web search (site: + inurl:)
+						const expandedUrls: string[] = [];
+						for (const pattern of patternSet) {
+							const urls = await expandPattern(pattern);
+							for (const u of urls) expandedUrls.push(u);
+						}
+						const toFetch = Array.from(new Set<string>([...plainUrls, ...expandedUrls]));
+						for (const url of toFetch as string[]) {
+							const res = await contentScrapeTool.execute({ context: { url: url as string }, runtimeContext });
+							if (res.success && res.data.content.length > 100) {
+								refs.push(`Company URL: ${url}\n${res.data.content}`);
+							}
+						}
+					} catch {}
+				} else if (f.name.endsWith('.pdf')) {
+					try {
+						const res = await pdfScrapeTool.execute({ context: { url: `file://${filePath}` }, runtimeContext });
+						if (res.success && res.data.content.length > 100) refs.push(`Company PDF: ${filePath}\n${res.data.content}`);
+					} catch {}
+				} else if (f.name.endsWith('.pptx')) {
+					try {
+						const res = await powerpointExtractTool.execute({ context: { filePath }, runtimeContext });
+						if (res.success && res.data.content.length > 100) refs.push(`Company PPTX: ${filePath}\n${res.data.content}`);
+					} catch {}
+				}
+			}
+		} catch (error) {
+			logger.info({ baseDir, error }, 'No reference materials found or directory unreadable.');
+		}
+		const references = refs.join('\n\n---\n\n');
+		logger.info({ sections: refs.length }, 'Reference materials collected.');
+		return { marketResearch, productAnalysis, references, outputTitle };
 	},
 }))
 .then(createStep({
@@ -79,10 +203,10 @@ export const strategyPlannerWorkflow = createWorkflow({
 	 * Uses the LLM to synthesize a detailed, flexible strategy plan in Markdown.
 	 */
 	id: 'draft-strategy',
-	inputSchema: z.object({ marketResearch: z.string(), productAnalysis: z.string(), outputTitle: z.string() }),
+	inputSchema: z.object({ marketResearch: z.string(), productAnalysis: z.string(), references: z.string(), outputTitle: z.string() }),
 	outputSchema: z.object({ strategyMarkdown: z.string(), outputTitle: z.string() }),
 	execute: async (params) => {
-		const { marketResearch, productAnalysis, outputTitle } = params.inputData;
+		const { marketResearch, productAnalysis, references, outputTitle } = params.inputData;
 		if (!marketResearch || !productAnalysis) {
 			const fallback = '# Strategy Plan\n\nOne or both reports could not be read.';
 			return { strategyMarkdown: fallback, outputTitle };
@@ -115,7 +239,7 @@ export const strategyPlannerWorkflow = createWorkflow({
 
 出力形式はMarkdownで、見出し（#, ##, ###）と箇条書きを活用してください。`;
 
-		const combined = `# Market Research Report\n\n${marketResearch}\n\n---\n\n# Product Analysis Report\n\n${productAnalysis}`;
+		const combined = `# Market Research Report\n\n${marketResearch}\n\n---\n\n# Product Analysis Report\n\n${productAnalysis}\n\n---\n\n# Company References\n\n${references || '(none)'}`;
 		const result = await summarizeAndAnalyzeTool.execute({ context: { text: combined, objective, temperature: 0.6, topP: 0.9 }, runtimeContext: params.runtimeContext });
 		if (!result.success) {
 			const fallback = `# Strategy Plan\n\nFailed to draft strategy: ${result.message}`;
