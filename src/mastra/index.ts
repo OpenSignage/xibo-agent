@@ -33,6 +33,7 @@ import { marketResearchWorkflow } from './workflows/market-research/marketResear
 import { productAnalysisWorkflow } from './workflows/product-analysis/productAnalysis';
 import { intelligentPresenterWorkflow } from './workflows/presenter/intelligentPresenter';  
 import { strategyPlannerWorkflow } from './workflows/strategy-planner/strategyPlanner';
+import { podcastPlannerWorkflow } from './workflows/podcast/podcastPlanner';
 
 // Load environment variables from .env.development
 const envPath = resolve(process.cwd(), '.env.development');
@@ -91,6 +92,7 @@ export const mastra = new Mastra({
     productAnalysis: productAnalysisWorkflow,
     intelligentPresenter: intelligentPresenterWorkflow,
     strategyPlanner: strategyPlannerWorkflow,
+    podcastPlanner: podcastPlannerWorkflow,
   },
   // Set shared logger
   logger: logger,

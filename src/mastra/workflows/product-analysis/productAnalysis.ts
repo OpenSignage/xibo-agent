@@ -169,9 +169,42 @@ export const productAnalysisWorkflow = createWorkflow({
             } catch {}
             if (results.length > 0) break;
           }
-          // As a last resort, include the base path itself
-          const basePath = `${u.protocol}//${u.host}${pathPrefix || ''}`;
-          results.push(basePath);
+          // If still empty, perform a shallow crawl starting from base path
+          if (results.length === 0) {
+            const basePath = `${u.protocol}//${u.host}${pathPrefix || ''}`;
+            const toVisit: string[] = [basePath];
+            const visited = new Set<string>();
+            const addLink = (link: string) => {
+              try {
+                const abs = new URL(link, basePath).toString();
+                const au = new URL(abs);
+                if (au.host === host && (!pathPrefix || au.pathname.startsWith(pathPrefix))) {
+                  if (!visited.has(abs)) toVisit.push(abs);
+                }
+              } catch {}
+            };
+            const hrefRegex = /href=["']([^"']+)["']/gi;
+            const MAX_PAGES = 10;
+            while (toVisit.length > 0 && visited.size < MAX_PAGES) {
+              const current = toVisit.shift() as string;
+              if (visited.has(current)) continue;
+              visited.add(current);
+              try {
+                const resp = await fetch(current);
+                if (resp.ok) {
+                  const html = await resp.text();
+                  results.push(current);
+                  let m: RegExpExecArray | null;
+                  hrefRegex.lastIndex = 0;
+                  while ((m = hrefRegex.exec(html)) !== null) {
+                    addLink(m[1]);
+                  }
+                }
+              } catch {}
+            }
+            // Ensure basePath present
+            results.push(basePath);
+          }
         }
       } catch {}
       return Array.from(new Set(results));

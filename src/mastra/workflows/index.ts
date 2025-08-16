@@ -16,3 +16,4 @@ export { marketResearchWorkflow } from './market-research/marketResearch';
 export { strategyPlannerWorkflow } from './strategy-planner/strategyPlanner';
 export { productAnalysisWorkflow } from './product-analysis/productAnalysis';
 export { intelligentPresenterWorkflow } from './presenter/intelligentPresenter';
+export { podcastPlannerWorkflow } from './podcast/podcastPlanner';

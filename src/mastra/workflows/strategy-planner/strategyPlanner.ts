@@ -157,6 +157,42 @@ export const strategyPlannerWorkflow = createWorkflow({
 										} catch {}
 										if (acc.length > 0) break;
 									}
+									// If still empty, perform shallow crawl starting from base path
+									if (acc.length === 0) {
+										const basePath = `${pu.protocol}//${pu.host}${pathPrefix || ''}`;
+										const toVisit: string[] = [basePath];
+										const visited = new Set<string>();
+										const addLink = (link: string) => {
+											try {
+												const abs = new URL(link, basePath).toString();
+												const au = new URL(abs);
+												if (au.host === host && (!pathPrefix || au.pathname.startsWith(pathPrefix))) {
+													if (!visited.has(abs)) toVisit.push(abs);
+												}
+											} catch {}
+										};
+										const hrefRegex = /href=["']([^"']+)["']/gi;
+										const MAX_PAGES = 10;
+										while (toVisit.length > 0 && visited.size < MAX_PAGES) {
+											const current = toVisit.shift() as string;
+											if (visited.has(current)) continue;
+											visited.add(current);
+											try {
+												const resp = await fetch(current);
+												if (resp.ok) {
+													const html = await resp.text();
+													acc.push(current);
+													let m: RegExpExecArray | null;
+													hrefRegex.lastIndex = 0;
+													while ((m = hrefRegex.exec(html)) !== null) {
+														addLink(m[1]);
+													}
+												}
+											} catch {}
+										}
+										// Ensure basePath present
+										acc.push(basePath);
+									}
 									// Ensure at least base URL is included
 									const basePath = `${pu.protocol}//${pu.host}${pathPrefix || ''}`;
 									acc.push(basePath);
