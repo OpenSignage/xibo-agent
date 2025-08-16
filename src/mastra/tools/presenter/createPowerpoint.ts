@@ -24,6 +24,124 @@ const JPN_FONT = 'Yu Gothic';
 const MASTER_SLIDE = 'MASTER_SLIDE';
 
 /**
+ * Wraps text at word or punctuation boundaries up to a max character length per line.
+ * Works for both spaced (EN) and unspaced (JA) texts by using breakable characters.
+ */
+function wrapTextAtWordBoundaries(text: string, maxCharsPerLine: number): string {
+  const normalized = (text ?? '').replace(/[\t\r\f\v]+/g, ' ').replace(/ +/g, ' ').trim();
+  if (normalized.length <= maxCharsPerLine || maxCharsPerLine <= 0) return normalized;
+  const breakable = /[\s、。，．,\.;:：;・／\/()（）「」『』\-–—]/; // include punctuation and spaces
+  const lines: string[] = [];
+  let line = '';
+  let lastBreakPos = -1; // index in current line where we can break
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i];
+    line += ch;
+    if (breakable.test(ch)) {
+      lastBreakPos = line.length; // break after this char
+    }
+    if (line.length >= maxCharsPerLine) {
+      if (lastBreakPos > 0) {
+        lines.push(line.slice(0, lastBreakPos));
+        line = line.slice(lastBreakPos);
+      } else {
+        lines.push(line);
+        line = '';
+      }
+      lastBreakPos = -1;
+    }
+  }
+  if (line.length > 0) lines.push(line);
+  return lines.join('\n');
+}
+
+/**
+ * Formats a single bullet that may contain a title and content separated by '：' or ':'.
+ * The content is wrapped and subsequent lines are indented to align after the colon.
+ */
+function formatColonSeparatedBullet(bullet: string, maxContentLineChars: number, indentCols: number = 4): string {
+  const idx = (() => {
+    const z = bullet.indexOf('：');
+    if (z >= 0) return z;
+    const a = bullet.indexOf(':');
+    return a;
+  })();
+  if (idx <= 0) {
+    // No colon pattern found; fallback to a gentle wrap of the whole bullet
+    return wrapTextAtWordBoundaries(bullet, maxContentLineChars);
+  }
+  const title = bullet.slice(0, idx).trim();
+  let content = bullet.slice(idx + 1).trim();
+  if (!content) return bullet.trim();
+  // Wrap content only
+  const wrapped = wrapTextAtWordBoundaries(content, maxContentLineChars);
+  const contentLines = wrapped.split('\n');
+  const first = `${title}：${contentLines[0]}`;
+  // Use full-width spaces to create a visual hanging indent for subsequent lines
+  const clamped = Math.max(2, Math.min(indentCols, 8));
+  const indent = '　'.repeat(clamped);
+  const rest = contentLines.slice(1).map(l => `${indent}${l}`);
+  return [first, ...rest].join('\n');
+}
+
+/**
+ * Formats an array of bullets using colon-separated alignment.
+ */
+function formatBulletsForColonSeparation(bullets: string[], maxContentLineChars: number, indentCols: number = 4): string {
+  return bullets.map(b => formatColonSeparatedBullet(b, maxContentLineChars, indentCols)).join('\n');
+}
+
+/**
+ * Prevents lines from starting with forbidden leading punctuation (simple kinsoku shori).
+ * Moves leading punctuation to the previous line when detected.
+ */
+function preventLeadingPunctuation(text: string): string {
+  const forbid = /[、。，．,，。・;；:：)/）】』〉》”’]/;
+  const lines = text.split('\n');
+  for (let i = 1; i < lines.length; i++) {
+    // Preserve existing indent (half/full width spaces)
+    const match = lines[i].match(/^([ \t　]*)/);
+    const indent = match ? match[1] : '';
+    let rest = lines[i].slice(indent.length);
+    if (rest.length === 0) continue;
+    // If first visible character is forbidden punctuation, move it to previous line end
+    while (rest.length > 0 && forbid.test(rest[0])) {
+      lines[i - 1] = (lines[i - 1] || '').replace(/\s+$/, '') + rest[0];
+      rest = rest.slice(1);
+    }
+    lines[i] = indent + rest;
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Dynamically fits bullets to a target number of lines per bullet by
+ * adjusting wrap width in proportion to font size, and reducing font size if needed.
+ */
+function fitBulletsToLines(
+  bullets: string[],
+  initialFontSize: number,
+  minFontSize: number,
+  baseWrapCharsAtInitial: number,
+  indentCols: number,
+  targetMaxLinesPerBullet: number
+): { text: string; fontSize: number; wrapChars: number } {
+  let fontSize = initialFontSize;
+  while (fontSize >= minFontSize) {
+    const wrapChars = Math.max(8, Math.round(baseWrapCharsAtInitial * (fontSize / initialFontSize)));
+    const formattedBullets = bullets.map(b => preventLeadingPunctuation(formatColonSeparatedBullet(b, wrapChars, indentCols)));
+    const maxLines = formattedBullets.reduce((m, t) => Math.max(m, t.split('\n').length), 0);
+    if (maxLines <= targetMaxLinesPerBullet) {
+      return { text: formattedBullets.join('\n'), fontSize, wrapChars };
+    }
+    fontSize -= 1;
+  }
+  // Fallback at minimum font size
+  const wrapChars = Math.max(8, Math.round(baseWrapCharsAtInitial * (minFontSize / initialFontSize)));
+  return { text: bullets.map(b => preventLeadingPunctuation(formatColonSeparatedBullet(b, wrapChars, indentCols))).join('\n'), fontSize: minFontSize, wrapChars };
+}
+
+/**
  * @module createPowerpointTool
  * @description A tool to create a PowerPoint presentation from structured slide data.
  */
@@ -127,7 +245,9 @@ export const createPowerpointTool = createTool({
 
             switch (slideData.layout) {
                 case 'title_slide':
-                    slide.addText(slideData.title, { 
+                    // Wrap long titles to avoid awkward auto-wrap
+                    const wrappedTitle = wrapTextAtWordBoundaries(slideData.title, 22);
+                    slide.addText(wrappedTitle, { 
                         x: 0, y: 0, w: '100%', h: '55%', // Move title up by adjusting the bounding box height
                         align: 'center', valign: 'middle', 
                         fontSize: 44, bold: true, fontFace: JPN_FONT,
@@ -135,7 +255,10 @@ export const createPowerpointTool = createTool({
                         outline: { size: 1.5, color: 'FFFFFF' }, // Add a white outline
                     });
                     if (slideData.bullets.length > 0) {
-                        slide.addText(slideData.bullets.join(', '), {
+                        // Format multiple colon-separated entries across lines for readability
+                        const subtitle = preventLeadingPunctuation(formatBulletsForColonSeparation(slideData.bullets, 24, 4));
+                        const wrappedSubtitle = subtitle;
+                        slide.addText(wrappedSubtitle, {
                             x: 0, y: '70%', w: '100%', // Move subtitle down
                             align: 'center', valign: 'top', 
                             fontSize: 18, fontFace: JPN_FONT,
@@ -145,7 +268,7 @@ export const createPowerpointTool = createTool({
                     }
                     break;
                 case 'section_header':
-                    slide.addText(slideData.title, {
+                    slide.addText(wrapTextAtWordBoundaries(slideData.title, 28), {
                         x: 0, y: 0, w: '100%', h: '100%',
                         align: 'center', valign: 'middle',
                         fontSize: 36, bold: true, fontFace: JPN_FONT
@@ -159,16 +282,18 @@ export const createPowerpointTool = createTool({
                             fontSize: 32, italic: true, fontFace: JPN_FONT
                         });
                     }
-                    slide.addText(slideData.title, { 
+                    slide.addText(wrapTextAtWordBoundaries(slideData.title, 30), { 
                         x: 0, y: '80%', w: '100%', 
                         align: 'center', fontSize: 18, fontFace: JPN_FONT
                     });
                     break;
                 case 'content_with_visual':
-                    slide.addText(slideData.title, { x: 0.5, y: 0.25, w: '90%', h: 0.75, fontSize: 32, bold: true, fontFace: JPN_FONT });
-                    slide.addText(slideData.bullets.join('\n'), { 
+                    slide.addText(wrapTextAtWordBoundaries(slideData.title, 36), { x: 0.5, y: 0.25, w: '90%', h: 0.75, fontSize: 32, bold: true, fontFace: JPN_FONT });
+                    // Dynamically fit bullets to max 3 lines per bullet, reducing font size if needed
+                    const fittedCv = fitBulletsToLines(slideData.bullets, /*initial*/18, /*min*/16, /*baseWrap*/22, /*indent*/4, /*targetLines*/3);
+                    slide.addText(fittedCv.text, { 
                         x: 0.5, y: 1.5, w: '45%', h: '75%', 
-                        fontSize: 18, bullet: { type: 'bullet' }, fontFace: JPN_FONT,
+                        fontSize: fittedCv.fontSize, bullet: { type: 'bullet' }, fontFace: JPN_FONT,
                         valign: 'top', paraSpaceAfter: 12,
                     });
                     if (slideData.imagePath) {
@@ -177,10 +302,12 @@ export const createPowerpointTool = createTool({
                     break;
                 case 'content_only':
                 default:
-                    slide.addText(slideData.title, { x: 0.5, y: 0.25, w: '90%', h: 0.75, fontSize: 32, bold: true, fontFace: JPN_FONT });
-                    slide.addText(slideData.bullets.join('\n'), { 
-                        x: 1.0, y: 1.5, w: '80%', h: '75%', 
-                        fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT,
+                    slide.addText(wrapTextAtWordBoundaries(slideData.title, 40), { x: 0.5, y: 0.25, w: '90%', h: 0.75, fontSize: 32, bold: true, fontFace: JPN_FONT });
+                    // Allow a bit more content on content-only slides: target 4 lines per bullet
+                    const fittedCo = fitBulletsToLines(slideData.bullets, /*initial*/20, /*min*/19, /*baseWrap*/30, /*indent*/3, /*targetLines*/4);
+                    slide.addText(fittedCo.text, { 
+                        x: 0.8, y: 1.5, w: '88%', h: '75%', 
+                        fontSize: fittedCo.fontSize, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT,
                         valign: 'top', paraSpaceAfter: 12,
                     });
                     break;
