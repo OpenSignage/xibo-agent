@@ -18,6 +18,8 @@ import { summarizeAndAnalyzeTool } from '../../tools/market-research/summarizeAn
 import { googleTextToSpeechTool } from '../../tools/audio/googleTextToSpeech';
 import { config } from '../../tools/xibo-agent/config';
 import { podcastConfig } from './config';
+// @ts-ignore - lamejs has no official types by default
+import lamejs from 'lamejs';
 
 /**
  * @module podcastPlannerWorkflow
@@ -608,28 +610,20 @@ ${baseRules}`;
           }
         } catch {}
       }
-      // Write a canonical PCM WAV header
-      totalDataLen = outChunks.reduce((acc, b) => acc + b.length, 0);
-      const header = Buffer.alloc(44);
-      header.write('RIFF', 0);
-      header.writeUInt32LE(36 + totalDataLen, 4);
-      header.write('WAVE', 8);
-      header.write('fmt ', 12);
-      header.writeUInt32LE(16, 16);
-      header.writeUInt16LE(1, 20);
-      header.writeUInt16LE(targetNumChannels, 22);
-      header.writeUInt32LE(targetSampleRate, 24);
-      const byteRate = targetSampleRate * targetNumChannels * (bitsPerSample/8);
-      header.writeUInt32LE(byteRate, 28);
-      const blockAlign = targetNumChannels * (bitsPerSample/8);
-      header.writeUInt16LE(blockAlign, 32);
-      header.writeUInt16LE(bitsPerSample, 34);
-      header.write('data', 36);
-      header.writeUInt32LE(totalDataLen, 40);
-      await fs.writeFile(combinedFileWav, Buffer.concat([header, ...outChunks]));
-      // Note: Real MP3 encoding requires an encoder (e.g., ffmpeg or lame). This placeholder copies WAV bytes.
-      const wavBuf = await fs.readFile(combinedFileWav);
-      await fs.writeFile(combinedFile, wavBuf);
+      // Encode to MP3 using lamejs (44.1kHz mono 16-bit PCM expected)
+      const pcmAll = Buffer.concat(outChunks);
+      const pcm16 = new Int16Array(pcmAll.buffer, pcmAll.byteOffset, pcmAll.byteLength / 2);
+      const mp3Encoder = new lamejs.Mp3Encoder(targetNumChannels, targetSampleRate, 128); // 128 kbps
+      const CHUNK = 1152;
+      const mp3Data: Uint8Array[] = [];
+      for (let i = 0; i < pcm16.length; i += CHUNK) {
+        const sampleChunk = pcm16.subarray(i, Math.min(i + CHUNK, pcm16.length));
+        const mp3buf = mp3Encoder.encodeBuffer(sampleChunk);
+        if (mp3buf.length > 0) mp3Data.push(mp3buf);
+      }
+      const mp3End = mp3Encoder.flush();
+      if (mp3End.length > 0) mp3Data.push(mp3End);
+      await fs.writeFile(combinedFile, Buffer.concat(mp3Data.map(b => Buffer.from(b))));
     } else {
       // WAV LINEAR16 concatenation normalized to target format, then pure-JS continuous BGM mixing
       const normalizedChunks: Buffer[] = [];
