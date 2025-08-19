@@ -37,10 +37,11 @@ export const googleTextToSpeechTool = createTool({
 		format: z.enum(['mp3','wav']).optional().default('mp3').describe('Output audio format.'),
 		fileNameBase: z.string().optional().describe('Optional base filename.'),
 		outDir: z.string().optional().describe('Optional output directory for the audio file.'),
+		pronunciationDictPath: z.string().optional().describe('Optional path to a JSON dictionary (word -> reading) applied before TTS.'),
 	}),
 	outputSchema: z.union([successWrap, errorSchema]),
 	execute: async ({ context }) => {
-		const { text, voiceName, languageCode = 'ja-JP', speakingRate = 1.0, pitch = 0.0, format = 'mp3', fileNameBase, outDir } = context;
+		const { text, voiceName, languageCode = 'ja-JP', speakingRate = 1.0, pitch = 0.0, format = 'mp3', fileNameBase, outDir, pronunciationDictPath } = context;
 		const apiKey = process.env.GOOGLE_TTS_API_KEY;
 		if (!apiKey) {
 			const message = 'GOOGLE_TTS_API_KEY is not set.';
@@ -48,12 +49,45 @@ export const googleTextToSpeechTool = createTool({
 			return { success: false, message } as const;
 		}
 		try {
+			// Apply full-width/half-width normalization and pronunciation dictionary if provided
+			const normalizeForMatching = (s: string) => {
+				// NFKC covers most width variants (e.g., half-width Katakana → full-width)
+				let n = s.normalize('NFKC');
+				// Normalize prolonged sound mark variants to standard "ー"
+				n = n.replace(/[ｰ‐―–—]/g, 'ー');
+				// Normalize middle dot variants to "・"
+				n = n.replace(/[･·∙•]/g, '・');
+				// Convert full-width spaces to regular space and collapse multiples
+				n = n.replace(/\u3000/g, ' ').replace(/\s{2,}/g, ' ');
+				return n;
+			};
+			let processedText = normalizeForMatching(text);
+			if (pronunciationDictPath) {
+				try {
+					const abs = path.isAbsolute(pronunciationDictPath) ? pronunciationDictPath : path.join(config.projectRoot, pronunciationDictPath);
+					await fs.access(abs);
+					const raw = await fs.readFile(abs, 'utf-8');
+					const dict = JSON.parse(raw) as Record<string, string>;
+					const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+					for (const [from, to] of Object.entries(dict)) {
+						if (typeof from !== 'string' || typeof to !== 'string' || from.length === 0) continue;
+						const fromNorm = normalizeForMatching(from);
+						processedText = processedText.replace(new RegExp(escapeRegExp(fromNorm), 'gi'), to);
+					}
+					logger.info({ entries: Object.keys(dict).length, path: abs }, 'Applied normalization and pronunciation dictionary.');
+				} catch (e) {
+					// Non-fatal: log and continue with original text
+					logger.warn({ pronunciationDictPath, message: (e as any)?.message }, 'Failed to apply pronunciation dictionary.');
+				}
+			}
 			const endpoint = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(apiKey)}`;
 			const audioEncoding = format === 'wav' ? 'LINEAR16' : 'MP3';
+			// Force a standard sample rate to avoid speed/pitch issues when concatenating with external assets
+			const targetSampleRate = 44100;
 			const body = {
-				input: { text },
+				input: { text: processedText },
 				voice: voiceName ? { name: voiceName, languageCode } : { languageCode },
-				audioConfig: { audioEncoding, speakingRate, pitch },
+				audioConfig: { audioEncoding, speakingRate, pitch, sampleRateHertz: targetSampleRate },
 			};
 			const resp = await fetch(endpoint, {
 				method: 'POST',
