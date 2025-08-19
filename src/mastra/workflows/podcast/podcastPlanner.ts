@@ -805,8 +805,19 @@ ${baseRules}`;
       for (const f of segmentFiles) {
         try { await fs.unlink(f); } catch {}
       }
-      // Attempt to remove tempDir if empty
-      try { await fs.rmdir(tempDir); } catch {}
+      // Best-effort: remove any leftover temp files created by this run pattern and then remove dir if empty
+      try {
+        const names = await fs.readdir(tempDir);
+        for (const name of names) {
+          if (name.startsWith('seg-') || name.startsWith('ext-')) {
+            try { await fs.unlink(path.join(tempDir, name)); } catch {}
+          }
+        }
+        const remain = await fs.readdir(tempDir);
+        if (remain.length === 0) {
+          try { await fs.rmdir(tempDir); } catch {}
+        }
+      } catch {}
     }
     logger.info({ combinedFile }, 'Combined podcast audio created.');
     return { success: true, scriptMarkdown, filePath: combinedFile } as const;
