@@ -74,7 +74,7 @@ export const googleTextToSpeechTool = createTool({
 						const fromNorm = normalizeForMatching(from);
 						processedText = processedText.replace(new RegExp(escapeRegExp(fromNorm), 'gi'), to);
 					}
-					logger.info({ entries: Object.keys(dict).length, path: abs }, 'Applied normalization and pronunciation dictionary.');
+					logger.debug({ entries: Object.keys(dict).length, path: abs }, 'Applied normalization and pronunciation dictionary.');
 				} catch (e) {
 					// Non-fatal: log and continue with original text
 					logger.warn({ pronunciationDictPath, message: (e as any)?.message }, 'Failed to apply pronunciation dictionary.');
@@ -114,7 +114,7 @@ export const googleTextToSpeechTool = createTool({
 			const base = (fileNameBase || 'segment') + '-' + stamp + `.${format}`;
 			const filePath = path.join(outDirFinal, base);
 			await fs.writeFile(filePath, buf);
-			logger.info({ filePath, bytes: buf.length }, 'Saved Google TTS audio.');
+			logger.debug({ filePath, bytes: buf.length }, 'Saved Google TTS audio.');
 			return { success: true, data: { filePath } } as const;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown Google TTS error';
