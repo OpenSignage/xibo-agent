@@ -67,9 +67,11 @@ export interface AudioAssetSet {
   jingle: string;
   /** Optional continuous BGM (same resolution rules as 'opening'). */
   continuous?: string;
+  /** Optional countdown SFX for Q&A thinking time (WAV recommended). */
+  countdown?: string;
 }
 
-export const podcastConfig: { defaults: PodcastDefaultsConfig; assets: { podcast: AudioAssetSet; presentation: AudioAssetSet } } = {
+export const podcastConfig: { defaults: PodcastDefaultsConfig; assets: { podcast: AudioAssetSet; presentation: AudioAssetSet; quiz: AudioAssetSet } } = {
   defaults: {
     voiceNameA: 'ja-JP-Neural2-B',
     voiceNameB: 'ja-JP-Neural2-C',
@@ -95,6 +97,13 @@ export const podcastConfig: { defaults: PodcastDefaultsConfig; assets: { podcast
       ending: 'presentation_long.wav',
       jingle: 'jingle.wav',
       continuous: 'bgm002.wav',
+    },
+    quiz: {
+      opening: 'Quiz opening.wav',
+      ending: 'Quiz ending.wav',
+      jingle: 'Electro Beep Accent 03.wav',
+      continuous: 'bgm001.wav',
+      countdown: 'countdown.wav',
     },
   },
 };
