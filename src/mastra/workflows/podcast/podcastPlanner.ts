@@ -72,7 +72,7 @@ export const podcastPlannerWorkflow = createWorkflow({
     casterA: z.object({ name: z.string() }).describe('Caster A name (host).'),
     casterB: z.object({ name: z.string() }).describe('Caster B name (co-host/presenter).'),
     format: z.enum(['mp3', 'wav']).optional().default('wav'),
-    programType: z.enum(['podcast','presentation']).optional().default('podcast'),
+    programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
     pronunciationDictFileName: z.string().optional().default('pronunciation-ja.json'),
     // Script persistence options
     saveScriptJson: z.boolean().optional().default(false).describe('If true, save drafted script to JSON.'),
@@ -91,7 +91,7 @@ export const podcastPlannerWorkflow = createWorkflow({
     casterA: z.object({ name: z.string() }),
     casterB: z.object({ name: z.string() }),
     format: z.enum(['mp3','wav']).optional().default('wav'),
-    programType: z.enum(['podcast','presentation']).optional().default('podcast'),
+    programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
     pronunciationDictFileName: z.string().optional().default('pronunciation-ja.json'),
     saveScriptJson: z.boolean().optional().default(false),
     loadScriptJson: z.boolean().optional().default(false),
@@ -112,7 +112,7 @@ export const podcastPlannerWorkflow = createWorkflow({
     insertJingles: z.boolean().optional().default(false),
     insertContinuousBgm: z.boolean().optional().default(false),
     laughterMode: z.enum(['replace', 'mute', 'audio']).optional().default('replace'),
-    programType: z.enum(['podcast','presentation']).optional().default('podcast'),
+    programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
     pronunciationDictPath: z.string(),
     saveScriptJson: z.boolean().optional().default(false),
     loadScriptJson: z.boolean().optional().default(false),
@@ -200,7 +200,7 @@ export const podcastPlannerWorkflow = createWorkflow({
     insertJingles: z.boolean().optional().default(false),
     insertContinuousBgm: z.boolean().optional().default(false),
     laughterMode: z.enum(['replace', 'mute', 'audio']).optional().default('replace'),
-    programType: z.enum(['podcast','presentation']).optional().default('podcast'),
+    programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
     pronunciationDictPath: z.string(),
     saveScriptJson: z.boolean().optional().default(false),
     loadScriptJson: z.boolean().optional().default(false),
@@ -222,7 +222,7 @@ export const podcastPlannerWorkflow = createWorkflow({
     insertJingles: z.boolean().optional().default(false),
     insertContinuousBgm: z.boolean().optional().default(false),
     laughterMode: z.enum(['replace', 'mute', 'audio']).optional().default('replace'),
-    programType: z.enum(['podcast','presentation']).optional().default('podcast'),
+    programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
     pronunciationDictPath: z.string(),
     saveScriptJson: z.boolean().optional().default(false),
     loadScriptJson: z.boolean().optional().default(false),
@@ -271,13 +271,18 @@ export const podcastPlannerWorkflow = createWorkflow({
         logger.warn({ jsonPath, e }, 'Failed to load script JSON. Falling back to drafting.');
       }
     }
-    const baseRules = `台本中のBGM/ジングルについては、以下のルールでステージ指示を明示してください（発話としては読み上げません）。必ず1行単独で、次の正確なトークンのみを使用してください。
+    const baseRules = `台本中のBGM/ジングル/効果音については、以下のルールでステージ指示を明示してください（発話としては読み上げません）。必ず1行単独で、次の正確なトークンのみを使用してください。
 - [OPENING_JINGLE] または [OPENING_BGM] を台本の冒頭に1回
 - 必要に応じて途中で [JINGLE] を挿入（多用しない。概ね5〜7発話ごとを上限）
 - 終了時に [ENDING_BGM] を1回
+- クイズ形式の場合、司会の出題直後に [COUNTDOWN] を1行で挿入
 括弧や記号での表現（例： （♪ ジングル））は使わず、上記の角括弧トークンのみを使ってください。`;
     const objective = programType === 'presentation'
       ? `以下のレポート内容を基に、${casterA.name}（司会者） と ${casterB.name}（プレゼンター） による「プレゼンテーション番組」台本をMarkdownで作成してください。冒頭で司会者がプレゼンターの紹介とプレゼンタイトル（${title || reportBaseName}）を紹介し、その後プレゼンターがレポート内容を分かりやすく構造的に説明、最後に司会者がまとめと締めを行います。5〜8分程度を想定し、必要に応じてセクション見出しや小休止を含めてください。各発話は「${casterA.name}: 〜」「${casterB.name}: 〜」の形式で、1発話は80〜160字程度。発話の行頭は必ず「話者名: 」で開始してください。
+
+${baseRules}`
+      : programType === 'quiz'
+      ? `以下のレポート内容を基に、${casterA.name}（司会）と${casterB.name}（解答者）が進行するクイズ番組形式の台本をMarkdownで作成してください。司会はレポートの要点に基づく設問を順番に出題し、解答者が回答・解説します。必要に応じてヒントや追加説明も交え、5〜8分程度を想定してください。各発話は「${casterA.name}: 〜」「${casterB.name}: 〜」の形式で、1発話は80〜160字程度。司会の出題は疑問文で明確にし、解答者は根拠を含めて簡潔に回答してください。構成は「オープニング→設問と回答を複数回→まとめ→エンディング」を基本とします。クイズ形式では [JINGLE] は使用しないでください。出題直後に [COUNTDOWN] を1行で挿入してください。発話の行頭は必ず「話者名: 」で開始してください。
 
 ${baseRules}`
       : `以下のレポート内容を基に、${casterA.name} と ${casterB.name} の2人が掛け合いで解説するポッドキャスト風の台本をMarkdownで作成してください。楽しく、わかりやすく、具体例を交えつつ、5〜8分程度を想定し、セクション見出しと小休止も含めてください。各発話は「${casterA.name}: 〜」「${casterB.name}: 〜」の形式で、1発話は80〜160字程度で。見出しや箇条書きは自由に使って構いませんが、発話の行頭は必ず「話者名: 」で開始してください。
@@ -295,7 +300,7 @@ ${baseRules}`;
     const headingRegex = /^\s{0,3}#{1,6}\s/;
     const fenceRegex = /^\s*```/;
     // Stage token lines should be ignored for speech text, they are used only as insertion markers.
-    const stageTokenRegex = /^\s*\[(OPENING_JINGLE|OPENING_BGM|JINGLE|ENDING_BGM)\]\s*$/i;
+    const stageTokenRegex = /^\s*\[(OPENING_JINGLE|OPENING_BGM|JINGLE|ENDING_BGM|COUNTDOWN)\]\s*$/i;
     let inFence = false;
     let current: { speaker: string; text: string } | null = null;
     for (const raw of scriptMarkdown.split(/\n/)) {
@@ -303,7 +308,11 @@ ${baseRules}`;
       if (fenceRegex.test(line)) { inFence = !inFence; continue; }
       if (inFence) continue;
       if (headingRegex.test(line)) { continue; }
-      if (stageTokenRegex.test(line)) { continue; }
+      if (stageTokenRegex.test(line)) {
+        if (current) { lines.push(current); current = null; }
+        lines.push({ speaker: '__STAGE__', text: line.trim() });
+        continue;
+      }
       const m = line.match(speakerRegex);
       if (m) {
         if (current) { lines.push(current); }
@@ -314,7 +323,12 @@ ${baseRules}`;
       if (current) {
         const trimmed = line.trim();
         if (trimmed.length > 0 && !speakerRegex.test(trimmed)) {
-          if (stageTokenRegex.test(trimmed)) { continue; }
+          if (stageTokenRegex.test(trimmed)) {
+            lines.push(current);
+            current = null;
+            lines.push({ speaker: '__STAGE__', text: trimmed });
+            continue;
+          }
           // Avoid adding lone bullet markers as content
           if (!/^[-*+]\s*$/.test(trimmed)) {
             current.text += (trimmed.startsWith('・') ? '' : ' ') + trimmed;
@@ -358,8 +372,80 @@ ${baseRules}`;
   },
 }))
 .then(createStep({
-  id: 'synthesize-audio',
-  // Synthesizes per-line TTS, inserts optional SFX/BGM, normalizes audio, and concatenates to a single output.
+  id: 'resolve-audio-assets',
+  // Merge resolved asset paths into the full state coming from the previous step
+  inputSchema: z.object({
+    scriptMarkdown: z.string(),
+    lines: z.array(z.object({ speaker: z.string(), text: z.string() })),
+    reportBaseName: z.string(),
+    title: z.string(),
+    casterA: z.object({ name: z.string(), voiceName: z.string().optional().default('ja-JP-Neural2-B') }),
+    casterB: z.object({ name: z.string(), voiceName: z.string().optional().default('ja-JP-Neural2-C') }),
+    languageCode: z.string().optional().default('ja-JP'),
+    speakingRate: z.number().optional().default(1.05),
+    pitch: z.number().optional().default(0.0),
+    format: z.enum(['mp3','wav']).optional().default('mp3'),
+    insertOpeningBgm: z.boolean().optional().default(false),
+    insertEndingBgm: z.boolean().optional().default(false),
+    insertJingles: z.boolean().optional().default(false),
+    insertContinuousBgm: z.boolean().optional().default(false),
+    laughterMode: z.enum(['replace', 'mute', 'audio']).optional().default('replace'),
+    programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
+    pronunciationDictPath: z.string(),
+    saveScriptJson: z.boolean().optional().default(false),
+    loadScriptJson: z.boolean().optional().default(false),
+    scriptJsonFileName: z.string().optional(),
+  }),
+  outputSchema: z.object({
+    scriptMarkdown: z.string(),
+    lines: z.array(z.object({ speaker: z.string(), text: z.string() })),
+    reportBaseName: z.string(),
+    title: z.string(),
+    casterA: z.object({ name: z.string(), voiceName: z.string().optional().default('ja-JP-Neural2-B') }),
+    casterB: z.object({ name: z.string(), voiceName: z.string().optional().default('ja-JP-Neural2-C') }),
+    languageCode: z.string().optional().default('ja-JP'),
+    speakingRate: z.number().optional().default(1.05),
+    pitch: z.number().optional().default(0.0),
+    format: z.enum(['mp3','wav']).optional().default('mp3'),
+    insertOpeningBgm: z.boolean().optional().default(false),
+    insertEndingBgm: z.boolean().optional().default(false),
+    insertJingles: z.boolean().optional().default(false),
+    insertContinuousBgm: z.boolean().optional().default(false),
+    laughterMode: z.enum(['replace', 'mute', 'audio']).optional().default('replace'),
+    programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
+    pronunciationDictPath: z.string(),
+    saveScriptJson: z.boolean().optional().default(false),
+    loadScriptJson: z.boolean().optional().default(false),
+    scriptJsonFileName: z.string().optional(),
+    // Resolved paths
+    openingBgmPathResolved: z.string(),
+    endingBgmPathResolved: z.string(),
+    jinglePathResolved: z.string(),
+    continuousBgmPathResolved: z.string().optional(),
+    countdownPathResolved: z.string().optional(),
+    laughSfxPathResolved: z.string(),
+  }),
+  execute: async ({ inputData }) => {
+    const assets = podcastConfig.assets[(inputData.programType === 'presentation') ? 'presentation' : (inputData.programType === 'quiz' ? 'quiz' : 'podcast')];
+    const resolveAudioAssetPath = (candidate?: string): string => {
+      if (!candidate) return '';
+      const normalized = candidate.trim();
+      const hasDirSep = normalized.includes('/') || normalized.includes('\\');
+      const rel = hasDirSep ? normalized : path.join('persistent_data', 'assets', 'audios', normalized);
+      return path.isAbsolute(rel) ? rel : path.join(config.projectRoot, rel);
+    };
+    const openingBgmPathResolved = resolveAudioAssetPath(assets.opening);
+    const endingBgmPathResolved = resolveAudioAssetPath(assets.ending);
+    const jinglePathResolved = resolveAudioAssetPath(assets.jingle);
+    const countdownPathResolved = assets.countdown ? resolveAudioAssetPath(assets.countdown) : undefined;
+    const laughSfxPathResolved = resolveAudioAssetPath(path.join('persistent_data','assets','sfx','laugh.mp3'));
+    const continuousBgmPathResolved = assets.continuous ? resolveAudioAssetPath(assets.continuous) : undefined;
+    return { ...inputData, openingBgmPathResolved, endingBgmPathResolved, jinglePathResolved, laughSfxPathResolved, continuousBgmPathResolved, countdownPathResolved };
+  },
+}))
+.then(createStep({
+  id: 'render-wav-master',
+  // TTS合成、SFX/BGM挿入、WAVマスター生成（常にWAVを作成）
   inputSchema: z.object({
     scriptMarkdown: z.string(),
     lines: z.array(z.object({ speaker: z.string(), text: z.string() })),
@@ -372,9 +458,11 @@ ${baseRules}`;
     pitch: z.number().optional().default(0.0),
     format: z.enum(['mp3','wav']).optional().default('mp3'),
     cleanupSegments: z.boolean().optional().default(true),
-    openingBgmPath: z.string().optional().default(path.join(config.projectRoot, 'persistent_data', 'assets', 'bgm', 'opening.mp3')),
-    endingBgmPath: z.string().optional().default(path.join(config.projectRoot, 'persistent_data', 'assets', 'bgm', 'ending.mp3')),
-    jinglePath: z.string().optional().default(path.join(config.projectRoot, 'persistent_data', 'assets', 'jingles', 'attention.mp3')),
+    openingBgmPathResolved: z.string(),
+    endingBgmPathResolved: z.string(),
+    jinglePathResolved: z.string(),
+    continuousBgmPathResolved: z.string().optional(),
+    countdownPathResolved: z.string().optional(),
     bgmPreviewSeconds: z.number().optional().default(4),
     jingleInterval: z.number().optional().default(6),
     insertOpeningBgm: z.boolean().optional().default(false),
@@ -382,439 +470,270 @@ ${baseRules}`;
     insertJingles: z.boolean().optional().default(false),
     insertContinuousBgm: z.boolean().optional().default(false),
     laughterMode: z.enum(['replace', 'mute', 'audio']).optional().default('replace'),
-    laughSfxPath: z.string().optional().default(path.join(config.projectRoot, 'persistent_data', 'assets', 'sfx', 'laugh.mp3')),
-    programType: z.enum(['podcast','presentation']).optional().default('podcast'),
+    laughSfxPathResolved: z.string(),
+    programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
     pronunciationDictPath: z.string(),
     saveScriptJson: z.boolean().optional().default(false),
     loadScriptJson: z.boolean().optional().default(false),
     scriptJsonFileName: z.string().optional(),
   }),
-  outputSchema: successOutput.extend({ success: z.literal(true) }),
+  outputSchema: z.object({
+    scriptMarkdown: z.string(),
+    reportBaseName: z.string(),
+    format: z.enum(['mp3','wav']).optional().default('mp3'),
+    combinedFileWav: z.string(),
+    tempDir: z.string(),
+    countdownPathResolved: z.string().optional(),
+  }),
   execute: async ({ inputData, runtimeContext }) => {
-    const { scriptMarkdown, lines, reportBaseName, title, casterA, casterB, languageCode, speakingRate, pitch, format, cleanupSegments } = inputData;
-    // Resolve BGM/Jingle paths with local defaults (avoid relying solely on Zod defaults)
-    // Choose BGM set by program type (podcast vs presentation)
-    const assets = podcastConfig.assets[(inputData as any).programType === 'presentation' ? 'presentation' : 'podcast'];
-    // Allow specifying only a filename in config (default directory: persistent_data/assets/audios)
-    const resolveAudioAssetPath = (candidate: string): string => {
-      if (!candidate) return '';
-      const normalized = candidate.trim();
-      const hasDirSep = normalized.includes('/') || normalized.includes('\\');
-      const rel = hasDirSep ? normalized : path.join('persistent_data', 'assets', 'audios', normalized);
-      return path.isAbsolute(rel) ? rel : path.join(config.projectRoot, rel);
-    };
-    const openingBgm = (inputData as any).openingBgmPath || resolveAudioAssetPath(assets.opening);
-    const endingBgm = (inputData as any).endingBgmPath || resolveAudioAssetPath(assets.ending);
-    const jingle = (inputData as any).jinglePath || resolveAudioAssetPath(assets.jingle);
-    const laughSfx = (inputData as any).laughSfxPath || path.join(config.projectRoot, 'persistent_data', 'assets', 'sfx', 'laugh.mp3');
-    const bgmPreviewSeconds = (inputData as any).bgmPreviewSeconds ?? 4;
+    const { scriptMarkdown, lines, reportBaseName, casterA, casterB, languageCode, speakingRate, pitch } = inputData;
+    const format = (inputData as any).format;
+    const openingBgm = (inputData as any).openingBgmPathResolved;
+    const endingBgm = (inputData as any).endingBgmPathResolved;
+    const jingle = (inputData as any).jinglePathResolved;
+    const laughSfx = (inputData as any).laughSfxPathResolved || path.join(config.projectRoot, 'persistent_data', 'assets', 'sfx', 'laugh.mp3');
     const jingleInterval = (inputData as any).jingleInterval ?? 6;
-    const tempDir = path.join(config.publicDir, 'temp', 'podcast');
+    const runStamp = Date.now();
+    const tempDir = path.join(config.publicDir, 'temp', 'podcast', `${reportBaseName}-${runStamp}`);
     const outDir = path.join(config.generatedDir, 'podcast');
     await fs.mkdir(tempDir, { recursive: true });
+    logger.debug({ tempDir }, 'Using per-run podcast temp directory');
     await fs.mkdir(outDir, { recursive: true });
     const segmentFiles: string[] = [];
-    // Default Japanese neural voices if not provided
     const defaultA = 'ja-JP-Neural2-B';
     const defaultB = 'ja-JP-Neural2-C';
-    // Helper to push an external audio as a segment (WAV recommended). Non-matching formats are still copied,
-    // but may be skipped from WAV concat. Existence is validated; missing assets are warned and ignored.
     const pushExternal = async (srcPath: string) => {
       try {
-        if (typeof srcPath !== 'string' || srcPath.trim().length === 0) {
-          logger.warn({ srcPath }, 'Invalid external audio path. Skipping.');
-          return;
-        }
+        if (typeof srcPath !== 'string' || srcPath.trim().length === 0) return;
         const absPath = path.isAbsolute(srcPath) ? srcPath : path.join(config.projectRoot, srcPath);
-        try {
-          await fs.access(absPath);
-        } catch (e) {
-          logger.warn({ absPath, e }, 'External audio not found. Skipping.');
-          return;
-        }
+        try { await fs.access(absPath); } catch { return; }
         const data = await fs.readFile(absPath);
-        const ext = path.extname(absPath).toLowerCase();
-        if (format === 'wav' && ext !== '.wav') {
-          logger.warn({ srcPath: absPath, format }, 'External asset format does not match output WAV; asset will be skipped at concat. Provide a WAV version to include.');
-        }
-        // For WAV and mp3 we just copy now; trimming handled later for WAV only at concat
         const dest = path.join(tempDir, `ext-${path.basename(absPath)}`);
         await fs.writeFile(dest, data);
         segmentFiles.push(dest);
-        logger.info({ added: dest }, 'Added external audio segment.');
-      } catch (e) {
-        logger.warn({ srcPath, message: (e as any)?.message }, 'Failed to add external audio segment.');
-      }
+      } catch {}
     };
-    // Opening BGM (optional)
     if ((inputData as any).insertOpeningBgm) {
       await pushExternal(openingBgm);
     }
-    // Synthesize each line in order, inserting jingles and laughter SFX as requested
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
+      // STAGE: handle [COUNTDOWN]
+      if (l.speaker === '__STAGE__' && /^\s*\[COUNTDOWN\]\s*$/i.test(l.text || '')) {
+        const countdown = (inputData as any).countdownPathResolved as string | undefined;
+        if (countdown) { await pushExternal(countdown); }
+        continue;
+      }
       const hadLaugh = /[（(]\s*笑\s*[）)]/g.test(l.text);
       const cleaned = sanitizeSpokenText(l.text, { laughterMode: (inputData as any).laughterMode });
       if (!cleaned) continue;
       const voiceName = l.speaker === casterA.name ? (casterA.voiceName || defaultA) : (casterB.voiceName || defaultB);
       const tts = await googleTextToSpeechTool.execute({ context: { text: cleaned, voiceName, languageCode, speakingRate, pitch, format, fileNameBase: `seg-${String(i).padStart(3,'0')}`, outDir: tempDir, pronunciationDictPath: (inputData as any).pronunciationDictPath }, runtimeContext });
       if (tts.success) segmentFiles.push(tts.data.filePath);
-      // Periodic jingle insertion
-      if ((inputData as any).insertJingles && jingleInterval > 0 && (i + 1) % jingleInterval === 0) {
-        await pushExternal(jingle);
+      // Quiz: ヒューリスティック挿入は廃止（[COUNTDOWN] トークンのみで制御）
+      // QuizではJINGLE自動挿入を無効化
+      if ((inputData as any).programType !== 'quiz') {
+        if ((inputData as any).insertJingles && jingleInterval > 0 && (i + 1) % jingleInterval === 0) {
+          await pushExternal(jingle);
+        }
       }
-      // Laughter SFX insertion when requested
       if ((inputData as any).laughterMode === 'audio' && hadLaugh) {
         await pushExternal(laughSfx);
       }
     }
-    // Ending BGM (optional)
     if ((inputData as any).insertEndingBgm) {
       await pushExternal(endingBgm);
     }
-    logger.info({ count: segmentFiles.length, tempDir }, 'Synthesized podcast segments including BGM/jingles.');
-
-    // Concatenate segments into a single file named after the report.
-    // Always build a normalized WAV master (44.1kHz, mono, 16-bit) and produce MP3 if requested.
     const safeBase = reportBaseName;
     const combinedFileWav = path.join(outDir, `${safeBase}.wav`);
-    const combinedFile = format === 'mp3' ? path.join(outDir, `${safeBase}.mp3`) : combinedFileWav;
-    if (format === 'mp3') {
-      // Build a WAV master normalized to target format, then (pure JS) mix optional continuous BGM,
-      // finally encode to MP3 (encoder integration not included; placeholder copy).
-      const normalizedChunks: Buffer[] = [];
-      const muteFlags: boolean[] = [];
-      const targetSampleRate = 44100;
-      const targetNumChannels = 1; // downmix to mono for consistency
-      const bitsPerSample = 16;
-      let totalDataLen = 0;
-      const readUInt32LE = (buf: Buffer, off: number) => buf.readUInt32LE(off);
-      const readUInt16LE = (buf: Buffer, off: number) => buf.readUInt16LE(off);
-      // Convert any PCM16 WAV buffer to target PCM16, with optional downmix and linear resampling
-      const convertToTargetPcm16 = (srcBuf: Buffer, srcRate: number, srcCh: number): Buffer => {
-        // Decode Int16LE
-        const srcSamples = new Int16Array(srcBuf.buffer, srcBuf.byteOffset, srcBuf.byteLength / 2);
-        // Optional downmix to mono
-        const mono: Float32Array = new Float32Array(Math.ceil(srcSamples.length / srcCh));
-        let mIdx = 0;
-        if (srcCh === 1) {
-          for (let i = 0; i < srcSamples.length; i++) mono[mIdx++] = srcSamples[i];
-        } else {
-          for (let i = 0; i < srcSamples.length; i += srcCh) {
-            let sum = 0;
-            for (let c = 0; c < srcCh; c++) sum += srcSamples[i + c];
-            mono[mIdx++] = sum / srcCh;
-          }
+    // WAV正規化＆連結
+    const normalizedChunks: Buffer[] = [];
+    const muteFlags: boolean[] = [];
+    const targetSampleRate = 44100;
+    const targetNumChannels = 1;
+    const bitsPerSample = 16;
+    let totalDataLen = 0;
+    const readUInt32LE = (buf: Buffer, off: number) => buf.readUInt32LE(off);
+    const readUInt16LE = (buf: Buffer, off: number) => buf.readUInt16LE(off);
+    const convertToTargetPcm16 = (srcBuf: Buffer, srcRate: number, srcCh: number): Buffer => {
+      const srcSamples = new Int16Array(srcBuf.buffer, srcBuf.byteOffset, srcBuf.byteLength / 2);
+      const mono: Float32Array = new Float32Array(Math.ceil(srcSamples.length / srcCh));
+      let mIdx = 0;
+      if (srcCh === 1) {
+        for (let i = 0; i < srcSamples.length; i++) mono[mIdx++] = srcSamples[i];
+      } else {
+        for (let i = 0; i < srcSamples.length; i += srcCh) {
+          let sum = 0; for (let c = 0; c < srcCh; c++) sum += srcSamples[i + c]; mono[mIdx++] = sum / srcCh;
         }
-        // Resample (linear interpolation)
-        if (srcRate === targetSampleRate) {
-          const out = new Int16Array(mono.length);
-          for (let i = 0; i < mono.length; i++) {
-            let v = Math.max(-32768, Math.min(32767, Math.round(mono[i])));
-            out[i] = v;
-          }
-          return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
-        }
-        const ratio = targetSampleRate / srcRate;
-        const dstLen = Math.max(1, Math.floor(mono.length * ratio));
-        const out = new Int16Array(dstLen);
-        for (let i = 0; i < dstLen; i++) {
-          const srcPos = i / ratio;
-          const i0 = Math.floor(srcPos);
-          const i1 = Math.min(mono.length - 1, i0 + 1);
-          const frac = srcPos - i0;
-          const v = mono[i0] * (1 - frac) + mono[i1] * frac;
-          out[i] = Math.max(-32768, Math.min(32767, Math.round(v)));
-        }
+      }
+      if (srcRate === targetSampleRate) {
+        const out = new Int16Array(mono.length);
+        for (let i = 0; i < mono.length; i++) out[i] = Math.max(-32768, Math.min(32767, Math.round(mono[i])));
         return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
-      };
-      for (const idx in segmentFiles) {
-        const f = segmentFiles[idx as any];
-        let buf = await fs.readFile(f);
-        if (buf.slice(0,4).toString() !== 'RIFF' || buf.slice(8,12).toString() !== 'WAVE') {
-          continue;
-        }
-        let pos = 12;
-        let fmtFound = false;
-        let dataFound = false;
-        let localSampleRate = 0;
-        let localNumChannels = 0;
-        let localBitsPerSample = 16;
-        let dataStartPos = -1;
-        let dataSize = 0;
-        while (pos + 8 <= buf.length) {
-          const chunkId = buf.slice(pos, pos+4).toString();
-          const chunkSize = readUInt32LE(buf, pos+4);
-          if (chunkId === 'fmt ') {
-            fmtFound = true;
-            localNumChannels = readUInt16LE(buf, pos + 10);
-            localSampleRate = readUInt32LE(buf, pos + 12);
-            localBitsPerSample = readUInt16LE(buf, pos + 22);
-          } else if (chunkId === 'data') {
-            dataFound = true;
-            dataStartPos = pos + 8;
-            dataSize = chunkSize;
-          }
-          pos += 8 + chunkSize + (chunkSize % 2);
-        }
-        if (!fmtFound || !dataFound) continue;
-        let dataBuf = buf.slice(dataStartPos, dataStartPos + dataSize);
-        let normalized = convertToTargetPcm16(dataBuf, localSampleRate || 44100, localNumChannels || 1);
-        const baseName = path.basename(f);
-        const isOpening = baseName.includes(path.basename(openingBgm));
-        const isEnding = baseName.includes(path.basename(endingBgm));
-        normalizedChunks.push(normalized);
-        muteFlags.push(isOpening || isEnding);
-        totalDataLen += normalized.length;
       }
-      // Optional continuous BGM mixing (pure JS)
-      let outChunks = normalizedChunks;
-      const bgmSrc = podcastConfig.assets[(inputData as any).programType === 'presentation' ? 'presentation' : 'podcast'].continuous || '';
-      if ((inputData as any).insertContinuousBgm && bgmSrc) {
-        try {
-          const absBgm = resolveAudioAssetPath(bgmSrc);
-          const bgmBuf = await fs.readFile(absBgm);
-          if (bgmBuf.slice(0,4).toString() === 'RIFF' && bgmBuf.slice(8,12).toString() === 'WAVE') {
-            // parse and convert bgm to target format
-            const r32 = (off: number) => bgmBuf.readUInt32LE(off);
-            const r16 = (off: number) => bgmBuf.readUInt16LE(off);
-            let pos = 12; let dataStartPos=-1; let dataSize=0; let sr=44100; let ch=1;
-            while (pos + 8 <= bgmBuf.length) {
-              const chunkId = bgmBuf.slice(pos, pos+4).toString();
-              const chunkSize = r32(pos+4);
-              if (chunkId === 'fmt ') { ch = r16(pos + 10); sr = r32(pos + 12); }
-              else if (chunkId === 'data') { dataStartPos = pos + 8; dataSize = chunkSize; }
-              pos += 8 + chunkSize + (chunkSize % 2);
-            }
-            if (dataStartPos >= 0 && dataSize > 0) {
-              const bgmPcm = convertToTargetPcm16(bgmBuf.slice(dataStartPos, dataStartPos + dataSize), sr, ch);
-              const bgmSamples = new Int16Array(bgmPcm.buffer, bgmPcm.byteOffset, bgmPcm.byteLength/2);
-              const gain = Math.pow(10, (podcastConfig.defaults.continuousBgmVolumeDb ?? -20) / 20);
-              let bgmIdx = 0;
-              const mixed: Buffer[] = [];
-              for (let i = 0; i < outChunks.length; i++) {
-                const buf = outChunks[i];
-                if (muteFlags[i]) { mixed.push(buf); continue; }
-                const src = new Int16Array(buf.buffer, buf.byteOffset, buf.byteLength/2);
-                const dst = new Int16Array(src.length);
-                for (let s = 0; s < src.length; s++) {
-                  const b = bgmSamples.length > 0 ? bgmSamples[bgmIdx % bgmSamples.length] : 0;
-                  bgmIdx++;
-                  const v = src[s] + Math.round(b * gain);
-                  dst[s] = v < -32768 ? -32768 : (v > 32767 ? 32767 : v);
-                }
-                mixed.push(Buffer.from(dst.buffer, dst.byteOffset, dst.byteLength));
-              }
-              outChunks = mixed;
-            }
-          }
-        } catch {}
+      const ratio = targetSampleRate / srcRate;
+      const dstLen = Math.max(1, Math.floor(mono.length * ratio));
+      const out = new Int16Array(dstLen);
+      for (let i = 0; i < dstLen; i++) {
+        const srcPos = i / ratio; const i0 = Math.floor(srcPos); const i1 = Math.min(mono.length - 1, i0 + 1);
+        const frac = srcPos - i0; const v = mono[i0] * (1 - frac) + mono[i1] * frac; out[i] = Math.max(-32768, Math.min(32767, Math.round(v)));
       }
-      // Encode to MP3 using lamejs (44.1kHz mono 16-bit PCM expected)
-      const pcmAll = Buffer.concat(outChunks);
-      const pcm16 = new Int16Array(pcmAll.buffer, pcmAll.byteOffset, pcmAll.byteLength / 2);
-      const mp3Encoder = new lamejs.Mp3Encoder(targetNumChannels, targetSampleRate, 128); // 128 kbps
-      const CHUNK = 1152;
-      const mp3Data: Uint8Array[] = [];
-      for (let i = 0; i < pcm16.length; i += CHUNK) {
-        const sampleChunk = pcm16.subarray(i, Math.min(i + CHUNK, pcm16.length));
-        const mp3buf = mp3Encoder.encodeBuffer(sampleChunk);
-        if (mp3buf.length > 0) mp3Data.push(mp3buf);
+      return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
+    };
+    for (const idx in segmentFiles) {
+      const f = segmentFiles[idx as any];
+      let buf = await fs.readFile(f);
+      if (buf.slice(0,4).toString() !== 'RIFF' || buf.slice(8,12).toString() !== 'WAVE') { continue; }
+      let pos = 12; let fmtFound = false; let dataFound = false; let localSampleRate = 0; let localNumChannels = 0; let dataStartPos = -1; let dataSize = 0;
+      while (pos + 8 <= buf.length) {
+        const chunkId = buf.slice(pos, pos+4).toString(); const chunkSize = readUInt32LE(buf, pos+4);
+        if (chunkId === 'fmt ') { fmtFound = true; localNumChannels = readUInt16LE(buf, pos + 10); localSampleRate = readUInt32LE(buf, pos + 12); }
+        else if (chunkId === 'data') { dataFound = true; dataStartPos = pos + 8; dataSize = chunkSize; }
+        pos += 8 + chunkSize + (chunkSize % 2);
       }
-      const mp3End = mp3Encoder.flush();
-      if (mp3End.length > 0) mp3Data.push(mp3End);
-      await fs.writeFile(combinedFile, Buffer.concat(mp3Data.map(b => Buffer.from(b))));
-    } else {
-      // WAV LINEAR16 concatenation normalized to target format, then pure-JS continuous BGM mixing
-      const normalizedChunks: Buffer[] = [];
-      const muteFlags: boolean[] = [];
-      const targetSampleRate = 44100;
-      const targetNumChannels = 1;
-      const bitsPerSample = 16;
-      let totalDataLen = 0;
-      const readUInt32LE = (buf: Buffer, off: number) => buf.readUInt32LE(off);
-      const readUInt16LE = (buf: Buffer, off: number) => buf.readUInt16LE(off);
-      // Convert any PCM16 WAV buffer to target PCM16, with optional downmix and linear resampling
-      const convertToTargetPcm16 = (srcBuf: Buffer, srcRate: number, srcCh: number): Buffer => {
-        const srcSamples = new Int16Array(srcBuf.buffer, srcBuf.byteOffset, srcBuf.byteLength / 2);
-        const mono: Float32Array = new Float32Array(Math.ceil(srcSamples.length / srcCh));
-        let mIdx = 0;
-        if (srcCh === 1) {
-          for (let i = 0; i < srcSamples.length; i++) mono[mIdx++] = srcSamples[i];
-        } else {
-          for (let i = 0; i < srcSamples.length; i += srcCh) {
-            let sum = 0;
-            for (let c = 0; c < srcCh; c++) sum += srcSamples[i + c];
-            mono[mIdx++] = sum / srcCh;
-          }
-        }
-        if (srcRate === targetSampleRate) {
-          const out = new Int16Array(mono.length);
-          for (let i = 0; i < mono.length; i++) out[i] = Math.max(-32768, Math.min(32767, Math.round(mono[i])));
-          return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
-        }
-        const ratio = targetSampleRate / srcRate;
-        const dstLen = Math.max(1, Math.floor(mono.length * ratio));
-        const out = new Int16Array(dstLen);
-        for (let i = 0; i < dstLen; i++) {
-          const srcPos = i / ratio;
-          const i0 = Math.floor(srcPos);
-          const i1 = Math.min(mono.length - 1, i0 + 1);
-          const frac = srcPos - i0;
-          out[i] = Math.max(-32768, Math.min(32767, Math.round(mono[i0] * (1 - frac) + mono[i1] * frac)));
-        }
-        return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
-      };
-      for (const idx in segmentFiles) {
-        const f = segmentFiles[idx as any];
-        let buf = await fs.readFile(f);
-        if (buf.slice(0,4).toString() !== 'RIFF' || buf.slice(8,12).toString() !== 'WAVE') {
-          continue;
-        }
-        // Find 'fmt ' and 'data' chunks
-        let pos = 12;
-        let fmtFound = false;
-        let dataFound = false;
-        let localSampleRate = 0;
-        let localNumChannels = 0;
-        let localBitsPerSample = 16;
-        let dataStartPos = -1;
-        let dataSize = 0;
-        while (pos + 8 <= buf.length) {
-          const chunkId = buf.slice(pos, pos+4).toString();
-          const chunkSize = readUInt32LE(buf, pos+4);
-          if (chunkId === 'fmt ') {
-            fmtFound = true;
-            localNumChannels = readUInt16LE(buf, pos + 10);
-            localSampleRate = readUInt32LE(buf, pos + 12);
-            localBitsPerSample = readUInt16LE(buf, pos + 22);
-          } else if (chunkId === 'data') {
-            dataFound = true;
-            dataStartPos = pos + 8;
-            dataSize = chunkSize;
-          }
-          pos += 8 + chunkSize + (chunkSize % 2); // word align
-        }
-        if (!fmtFound || !dataFound) {
-          logger.warn({ file: f }, 'WAV missing fmt or data chunk; skipping.');
-          continue;
-        }
-        const baseName = path.basename(f);
-        let dataBuf = buf.slice(dataStartPos, dataStartPos + dataSize);
-        let normalized = convertToTargetPcm16(dataBuf, localSampleRate || 44100, localNumChannels || 1);
-        const isOpening = baseName.includes(path.basename(openingBgm));
-        const isEnding = baseName.includes(path.basename(endingBgm));
-        normalizedChunks.push(normalized);
-        muteFlags.push(isOpening || isEnding);
-        totalDataLen += normalized.length;
-      }
-      // Optional continuous BGM mixing (pure JS)
-      let outChunks = normalizedChunks;
-      const bgmSrc = podcastConfig.assets[(inputData as any).programType === 'presentation' ? 'presentation' : 'podcast'].continuous || '';
-      if ((inputData as any).insertContinuousBgm && bgmSrc) {
-        try {
-          const absBgm = resolveAudioAssetPath(bgmSrc);
-          const bgmBuf = await fs.readFile(absBgm);
-          if (bgmBuf.slice(0,4).toString() === 'RIFF' && bgmBuf.slice(8,12).toString() === 'WAVE') {
-            // parse and convert bgm to target format
-            const r32 = (off: number) => bgmBuf.readUInt32LE(off);
-            const r16 = (off: number) => bgmBuf.readUInt16LE(off);
-            let pos = 12; let dataStartPos=-1; let dataSize=0; let sr=44100; let ch=1;
-            while (pos + 8 <= bgmBuf.length) {
-              const chunkId = bgmBuf.slice(pos, pos+4).toString();
-              const chunkSize = r32(pos+4);
-              if (chunkId === 'fmt ') { ch = r16(pos + 10); sr = r32(pos + 12); }
-              else if (chunkId === 'data') { dataStartPos = pos + 8; dataSize = chunkSize; }
-              pos += 8 + chunkSize + (chunkSize % 2);
-            }
-            if (dataStartPos >= 0 && dataSize > 0) {
-              const bgmPcm = convertToTargetPcm16(bgmBuf.slice(dataStartPos, dataStartPos + dataSize), sr, ch);
-              const bgmSamples = new Int16Array(bgmPcm.buffer, bgmPcm.byteOffset, bgmPcm.byteLength/2);
-              const gain = Math.pow(10, (podcastConfig.defaults.continuousBgmVolumeDb ?? -20) / 20);
-              let bgmIdx = 0;
-              const mixed: Buffer[] = [];
-              for (let i = 0; i < outChunks.length; i++) {
-                const buf = outChunks[i];
-                if (muteFlags[i]) { mixed.push(buf); continue; }
-                const src = new Int16Array(buf.buffer, buf.byteOffset, buf.byteLength/2);
-                const dst = new Int16Array(src.length);
-                for (let s = 0; s < src.length; s++) {
-                  const b = bgmSamples.length > 0 ? bgmSamples[bgmIdx % bgmSamples.length] : 0;
-                  bgmIdx++;
-                  const v = src[s] + Math.round(b * gain);
-                  dst[s] = v < -32768 ? -32768 : (v > 32767 ? 32767 : v);
-                }
-                mixed.push(Buffer.from(dst.buffer, dst.byteOffset, dst.byteLength));
-              }
-              outChunks = mixed;
-            }
-          }
-        } catch {}
-      }
-      // Write a canonical PCM WAV header
-      const header = Buffer.alloc(44);
-      header.write('RIFF', 0);
-      totalDataLen = outChunks.reduce((acc, b) => acc + b.length, 0);
-      header.writeUInt32LE(36 + totalDataLen, 4);
-      header.write('WAVE', 8);
-      header.write('fmt ', 12);
-      header.writeUInt32LE(16, 16); // PCM fmt chunk size
-      header.writeUInt16LE(1, 20); // PCM
-      header.writeUInt16LE(targetNumChannels, 22);
-      header.writeUInt32LE(targetSampleRate, 24);
-      const byteRate = targetSampleRate * targetNumChannels * (bitsPerSample/8);
-      header.writeUInt32LE(byteRate, 28);
-      const blockAlign = targetNumChannels * (bitsPerSample/8);
-      header.writeUInt16LE(blockAlign, 32);
-      header.writeUInt16LE(bitsPerSample, 34);
-      header.write('data', 36);
-      header.writeUInt32LE(totalDataLen, 40);
-      await fs.writeFile(combinedFile, Buffer.concat([header, ...outChunks]));
+      if (!fmtFound || !dataFound) continue;
+      let dataBuf = buf.slice(dataStartPos, dataStartPos + dataSize);
+      let normalized = convertToTargetPcm16(dataBuf, localSampleRate || 44100, localNumChannels || 1);
+      const baseName = path.basename(f);
+      const isOpening = baseName.includes(path.basename(openingBgm));
+      const isEnding = baseName.includes(path.basename(endingBgm));
+      normalizedChunks.push(normalized); muteFlags.push(isOpening || isEnding); totalDataLen += normalized.length;
     }
-
-    // Optional continuous background music (ffmpeg mix):
-    // Mix a quiet continuous BGM across the whole track except the explicit opening/ending BGM ranges.
-    try {
-      const continuousSrc = (podcastConfig.assets[(inputData as any).programType === 'presentation' ? 'presentation' : 'podcast'].continuous) || '';
-      if (continuousSrc && (inputData as any).insertOpeningBgm !== undefined) {
-        const absContinuous = path.isAbsolute(continuousSrc) ? continuousSrc : path.join(config.projectRoot, continuousSrc);
-        const volDb = podcastConfig.defaults.continuousBgmVolumeDb ?? -20;
-        // Build ffmpeg command: duck/skip opening & ending by splitting and concatenating segments without BGM underlay
-        // For simplicity: we apply BGM to entire track at low volume, then overwrite opening/ending spans with original (no BGM)
-        // This keeps the logic simple without computing precise timestamps here.
-        const ffmpeg = 'ffmpeg';
-        const mixedOut = combinedFileWav.replace(/\.wav$/, '.mixed.wav');
-        // Step 1: base mix (speech + low-volume bgm loop)
-        // -stream_loop -1 will loop bgm as needed; -shortest ends with speech length
-        const cmd1 = `${ffmpeg} -y -stream_loop -1 -i "${absContinuous}" -i "${combinedFileWav}" -filter_complex "[0:a]volume=${Math.pow(10, volDb/20).toFixed(4)}[bgm];[bgm][1:a]amix=inputs=2:normalize=0:dropout_transition=0,aresample=44100,pan=mono|c0=0.5*c0+0.5*c1" -ar 44100 -ac 1 -c:a pcm_s16le "${mixedOut}"`;
-        await fs.writeFile(path.join(outDir, '.ffmpeg_cmd.txt'), Buffer.from(cmd1));
-        // We do not execute external commands in this environment; user can run cmd1 locally if desired.
-        // TODO: If allowed, integrate a non-interactive ffmpeg run via a task runner.
-      }
-    } catch (e) {
-      logger.warn({ e }, 'Continuous BGM mix step skipped.');
-    }
-
-    if (cleanupSegments) {
-      for (const f of segmentFiles) {
-        try { await fs.unlink(f); } catch {}
-      }
-      // Best-effort: remove any leftover temp files created by this run pattern and then remove dir if empty
+    // 連続BGM（純JSミックス）
+    let outChunks = normalizedChunks;
+    const bgmAbsResolved = (inputData as any).continuousBgmPathResolved || '';
+    if ((inputData as any).insertContinuousBgm && bgmAbsResolved) {
       try {
-        const names = await fs.readdir(tempDir);
-        for (const name of names) {
-          if (name.startsWith('seg-') || name.startsWith('ext-')) {
-            try { await fs.unlink(path.join(tempDir, name)); } catch {}
+        const bgmBuf = await fs.readFile(bgmAbsResolved);
+        if (bgmBuf.slice(0,4).toString() === 'RIFF' && bgmBuf.slice(8,12).toString() === 'WAVE') {
+          const r32 = (off: number) => bgmBuf.readUInt32LE(off); const r16 = (off: number) => bgmBuf.readUInt16LE(off);
+          let pos = 12; let dataStartPos=-1; let dataSize=0; let sr=44100; let ch=1;
+          while (pos + 8 <= bgmBuf.length) {
+            const chunkId = bgmBuf.slice(pos, pos+4).toString(); const chunkSize = r32(pos+4);
+            if (chunkId === 'fmt ') { ch = r16(pos + 10); sr = r32(pos + 12); }
+            else if (chunkId === 'data') { dataStartPos = pos + 8; dataSize = chunkSize; }
+            pos += 8 + chunkSize + (chunkSize % 2);
           }
-        }
-        const remain = await fs.readdir(tempDir);
-        if (remain.length === 0) {
-          try { await fs.rmdir(tempDir); } catch {}
+          if (dataStartPos >= 0 && dataSize > 0) {
+            const bgmPcm = convertToTargetPcm16(bgmBuf.slice(dataStartPos, dataStartPos + dataSize), sr, ch);
+            const bgmSamples = new Int16Array(bgmPcm.buffer, bgmPcm.byteOffset, bgmPcm.byteLength/2);
+            const gain = Math.pow(10, (podcastConfig.defaults.continuousBgmVolumeDb ?? -20) / 20);
+            let bgmIdx = 0; const mixed: Buffer[] = [];
+            for (let i = 0; i < outChunks.length; i++) {
+              const buf = outChunks[i]; if (muteFlags[i]) { mixed.push(buf); continue; }
+              const src = new Int16Array(buf.buffer, buf.byteOffset, buf.byteLength/2); const dst = new Int16Array(src.length);
+              for (let s = 0; s < src.length; s++) { const b = bgmSamples.length > 0 ? bgmSamples[bgmIdx % bgmSamples.length] : 0; bgmIdx++; const v = src[s] + Math.round(b * gain); dst[s] = v < -32768 ? -32768 : (v > 32767 ? 32767 : v); }
+              mixed.push(Buffer.from(dst.buffer, dst.byteOffset, dst.byteLength));
+            }
+            outChunks = mixed;
+          }
         }
       } catch {}
     }
-    logger.info({ combinedFile }, 'Combined podcast audio created.');
-    return { success: true, scriptMarkdown, filePath: combinedFile } as const;
+    // WAVヘッダ書き出し
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0);
+    totalDataLen = outChunks.reduce((acc, b) => acc + b.length, 0);
+    header.writeUInt32LE(36 + totalDataLen, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(targetNumChannels, 22);
+    header.writeUInt32LE(targetSampleRate, 24);
+    const byteRate = targetSampleRate * targetNumChannels * (bitsPerSample/8);
+    header.writeUInt32LE(byteRate, 28);
+    const blockAlign = targetNumChannels * (bitsPerSample/8);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(totalDataLen, 40);
+    await fs.writeFile(combinedFileWav, Buffer.concat([header, ...outChunks]));
+
+    // ffmpegミックスのコマンド出力（任意）
+    try {
+      const continuousSrc = (podcastConfig.assets[(inputData as any).programType === 'presentation' ? 'presentation' : ((inputData as any).programType === 'quiz' ? 'quiz' : 'podcast')].continuous) || '';
+      if (continuousSrc && (inputData as any).insertOpeningBgm !== undefined) {
+        const absContinuous = path.isAbsolute(continuousSrc) ? continuousSrc : path.join(config.projectRoot, continuousSrc);
+        const volDb = podcastConfig.defaults.continuousBgmVolumeDb ?? -20;
+        const ffmpeg = 'ffmpeg';
+        const mixedOut = combinedFileWav.replace(/\.wav$/, '.mixed.wav');
+        const cmd1 = `${ffmpeg} -y -stream_loop -1 -i "${absContinuous}" -i "${combinedFileWav}" -filter_complex "[0:a]volume=${Math.pow(10, volDb/20).toFixed(4)}[bgm];[bgm][1:a]amix=inputs=2:normalize=0:dropout_transition=0,aresample=44100,pan=mono|c0=0.5*c0+0.5*c1" -ar 44100 -ac 1 -c:a pcm_s16le "${mixedOut}"`;
+        await fs.writeFile(path.join(outDir, '.ffmpeg_cmd.txt'), Buffer.from(cmd1));
+      }
+    } catch {}
+
+    if ((inputData as any).cleanupSegments) {
+      for (const f of segmentFiles) { try { await fs.unlink(f); } catch {} }
+      try {
+        const names = await fs.readdir(tempDir);
+        for (const name of names) { if (name.startsWith('seg-') || name.startsWith('ext-')) { try { await fs.unlink(path.join(tempDir, name)); } catch {} } }
+        const remain = await fs.readdir(tempDir); if (remain.length === 0) { try { await fs.rmdir(tempDir); } catch {} }
+      } catch {}
+    }
+    logger.info({ combinedFileWav }, 'WAV master rendered.');
+    return { scriptMarkdown, reportBaseName, format, combinedFileWav, tempDir } as const;
   },
 }))
+.branch([
+  [
+    async (ctx: any) => Promise.resolve((ctx?.inputData?.format) === 'mp3'),
+    createStep({
+      id: 'encode-mp3',
+      inputSchema: z.object({
+        scriptMarkdown: z.string(),
+        reportBaseName: z.string(),
+        format: z.enum(['mp3','wav']).optional().default('mp3'),
+        combinedFileWav: z.string(),
+        tempDir: z.string(),
+        countdownPathResolved: z.string().optional(),
+      }),
+      outputSchema: successOutput.extend({ success: z.literal(true), tempDir: z.string() }),
+      execute: async ({ inputData }) => {
+        const { combinedFileWav, reportBaseName, scriptMarkdown, tempDir } = inputData;
+        const outDir = path.dirname(combinedFileWav);
+        const combinedFile = path.join(outDir, `${reportBaseName}.mp3`);
+        const targetSampleRate = 44100; const targetNumChannels = 1;
+        const buf = await fs.readFile(combinedFileWav);
+        const pcmAll = buf.slice(44);
+        const pcm16 = new Int16Array(pcmAll.buffer, pcmAll.byteOffset, pcmAll.byteLength / 2);
+        const mp3Encoder = new lamejs.Mp3Encoder(targetNumChannels, targetSampleRate, 128);
+        const CHUNK = 1152; const mp3Data: Uint8Array[] = [];
+        for (let i = 0; i < pcm16.length; i += CHUNK) {
+          const sampleChunk = pcm16.subarray(i, Math.min(i + CHUNK, pcm16.length));
+          const mp3buf = mp3Encoder.encodeBuffer(sampleChunk);
+          if (mp3buf.length > 0) mp3Data.push(mp3buf);
+        }
+        const mp3End = mp3Encoder.flush(); if (mp3End.length > 0) mp3Data.push(mp3End);
+        await fs.writeFile(combinedFile, Buffer.concat(mp3Data.map(b => Buffer.from(b))));
+        logger.info({ combinedFile }, 'Encoded MP3 created.');
+        // Cleanup per-run temp directory
+        try { await fs.rm(tempDir, { recursive: true, force: true }); } catch (e) { logger.warn({ tempDir, e }, 'Failed to cleanup podcast temp dir'); }
+        return { success: true, scriptMarkdown, filePath: combinedFile, tempDir } as const;
+      },
+    })
+  ],
+  [
+    async () => Promise.resolve(true),
+    createStep({
+      id: 'finalize-wav',
+      inputSchema: z.object({
+        scriptMarkdown: z.string(),
+        reportBaseName: z.string(),
+        format: z.enum(['mp3','wav']).optional().default('mp3'),
+        combinedFileWav: z.string(),
+        tempDir: z.string(),
+        countdownPathResolved: z.string().optional(),
+      }),
+      outputSchema: successOutput.extend({ success: z.literal(true), tempDir: z.string() }),
+      execute: async ({ inputData }) => {
+        const { combinedFileWav, scriptMarkdown, tempDir } = inputData;
+        logger.info({ combinedFile: combinedFileWav }, 'WAV finalized.');
+        // Cleanup per-run temp directory
+        try { await fs.rm(tempDir, { recursive: true, force: true }); } catch (e) { logger.warn({ tempDir, e }, 'Failed to cleanup podcast temp dir'); }
+        return { success: true, scriptMarkdown, filePath: combinedFileWav, tempDir } as const;
+      },
+    })
+  ]
+])
 .commit();
