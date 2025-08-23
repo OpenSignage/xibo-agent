@@ -559,9 +559,12 @@ ${planMarkdown}
             const strokeCol = strokePalette[colorIndex % strokePalette.length];
             colorIndex++;
 
-            // Region background & border
+            // Region background (semi-transparent) & border
+            ctx.save();
+            ctx.globalAlpha = 0.5;
             ctx.fillStyle = fillCol;
             ctx.fillRect(rx, ry, rw, rh);
+            ctx.restore();
             ctx.strokeStyle = strokeCol;
             ctx.lineWidth = 2;
             ctx.strokeRect(rx, ry, rw, rh);
@@ -1162,24 +1165,35 @@ dynamicSections + '\n\n' +
             ctx.fillRect(x0, topPad, w, chartAreaH);
           }
 
-          // Scheduled windows per active day
+          // Scheduled windows per active day (split bar: left=landscape, right=portrait)
           const activeDay = new Set<string>(targetDays.map((s: string) => String(s)));
-          const barColor = 'rgba(76,175,80,0.6)';
+          const colorLand = 'rgba(33,150,243,0.65)'; // blue
+          const colorPort = 'rgba(255,152,0,0.65)';  // orange
+          // Determine which orientations exist in this run
+          const hasLandscape = xiboLayoutPaths.some((p: string) => /\.landscape\.xibo-layout\.json$/i.test(p));
+          const hasPortrait  = xiboLayoutPaths.some((p: string) => /\.portrait\.xibo-layout\.json$/i.test(p));
           for (let i = 0; i < days.length; i++) {
             const day = days[i];
             if (!activeDay.has(day)) continue;
             const x0 = leftPad + i * colWidth + 14;
             const w = colWidth - 28;
+            const half = Math.max(2, Math.floor(w / 2) - 1);
+            const xLand = x0;
+            const xPort = x0 + w - half;
             for (const t of times) {
               const [sh, sm] = String(t.start || '00:00').split(':').map((n: string) => parseInt(n, 10) || 0);
               const [eh, em] = String(t.end || '00:00').split(':').map((n: string) => parseInt(n, 10) || 0);
               const y0 = hourToY(sh, sm);
               const y1 = hourToY(eh, em);
               const h = Math.max(2, y1 - y0);
-              ctx.fillStyle = barColor;
-              ctx.fillRect(x0, y0, w, h);
-              ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1;
-              ctx.strokeRect(x0, y0, w, h);
+              if (hasLandscape) {
+                ctx.fillStyle = colorLand; ctx.fillRect(xLand, y0, half, h);
+                ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1; ctx.strokeRect(xLand, y0, half, h);
+              }
+              if (hasPortrait) {
+                ctx.fillStyle = colorPort; ctx.fillRect(xPort, y0, half, h);
+                ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1; ctx.strokeRect(xPort, y0, half, h);
+              }
             }
           }
 
