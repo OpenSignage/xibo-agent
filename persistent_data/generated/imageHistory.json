@@ -3,12 +3,12 @@
     "images": [
       {
         "id": 1,
-        "filename": "image-71f2c46a-6a1d-46db-bc7b-eb92fd7cd33b.png",
-        "prompt": "Hand-drawn watercolor illustration mock of a digital signage image for: 被写体: 雨に濡れてインクが滲んでいるカフェの手書き看板と、壁から少し剥がれかけている古いイベントポスター。構図: 看板とポスターが並んでいる様子を少し斜めから捉える。距離感: ミディアムショット。視点: アイレベル。背景/小物: 古びたレンガの壁。配色・テーマカラー: 全体的に彩度を落としたモノクロに近い寒色系、セピア調。雰囲気: 寂れた、時代遅れな感じ。質感: 濡れた紙、ざらついた壁。季節/時間帯: 雨の日の昼下がり。ブランド要素: なし。不要要素: 人物、ロゴ、現代的なもの、文字。. Soft pastel colors, paper texture, sketchy outlines, non-photorealistic, clearly a mockup. No text. (Aspect ratio: 9:16, Dimensions: 576x1024) --no photorealistic, realistic, glossy, 3d render, text, words, letters, typography, characters, subtitles, captions, numbers, numerals, UI, watermark, signature, logo, Japanese characters, 文字, テキスト, ロゴ, 透かし, 字幕, キャプション, 数字, 数字列, 英字, 記号",
-        "aspectRatio": "9:16",
-        "width": 576,
-        "height": 1024,
-        "createdAt": "2025-08-23T03:00:39.555Z"
+        "filename": "image-1e2cdbfc-c2c1-422a-aea8-f5ff114d8d3f.png",
+        "prompt": "Hand-drawn watercolor illustration mock of a digital signage image for: 背景透過のPNG画像。画面下部の中央にAXLEADの公式ロゴのみを配置。横型と同様、シャープな公式ロゴデータを使用。. Soft pastel colors, paper texture, sketchy outlines, non-photorealistic, clearly a mockup. No text. (Aspect ratio: 16:9, Dimensions: 1024x576) --no photorealistic, realistic, glossy, 3d render, text, words, letters, typography, characters, subtitles, captions, numbers, numerals, UI, watermark, signature, logo, Japanese characters, 文字, テキスト, ロゴ, 透かし, 字幕, キャプション, 数字, 数字列, 英字, 記号",
+        "aspectRatio": "16:9",
+        "width": 1024,
+        "height": 576,
+        "createdAt": "2025-08-23T03:34:28.227Z"
       }
     ]
   },
