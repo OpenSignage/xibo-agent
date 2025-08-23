@@ -185,7 +185,7 @@ export const marketResearchWorkflow = createWorkflow({
 
         if (!finalReportResult.success) {
             const message = `Failed to generate the final report. Reason: ${finalReportResult.message}`;
-            logger.error(message, { error: finalReportResult });
+            logger.error({ error: finalReportResult }, message);
             // Even on failure, return empty text to allow the workflow to proceed if needed
             return { reportText: `レポート生成に失敗しました: ${message}`, topic };
         }
@@ -211,7 +211,7 @@ export const marketResearchWorkflow = createWorkflow({
 
         if (!saveResult.success) {
             // If saving fails, still return the report text to the user.
-            logger.error('Failed to save the report to a file.', { error: saveResult.message });
+            logger.error({ error: saveResult.message }, 'Failed to save the report to a file.');
             return { success: false, message: `レポートのファイル保存に失敗しました: ${saveResult.message}` } as const;
         }
 

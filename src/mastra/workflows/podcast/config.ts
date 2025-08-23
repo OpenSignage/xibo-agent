@@ -67,7 +67,7 @@ export interface AudioAssetSet {
   jingle: string;
   /** Optional continuous BGM (same resolution rules as 'opening'). */
   continuous?: string;
-  /** Optional countdown SFX for Q&A thinking time (WAV recommended). */
+  /** Optional countdown SFX for quiz thinking time (WAV recommended). */
   countdown?: string;
 }
 

@@ -309,7 +309,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
                 const fullImagePath = imageResult.data.imagePath;
                 return { ...params.inputData, titleSlideImagePath: fullImagePath };
             } else {
-                logger.warn("Failed to generate title slide image.", { error: imageResult.message });
+                logger.warn(`Failed to generate title slide image. error=${imageResult.message ?? ''}`);
                 return { ...params.inputData, titleSlideImagePath: undefined };
             }
         } catch (error) {
