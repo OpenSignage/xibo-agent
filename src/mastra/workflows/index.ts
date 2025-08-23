@@ -17,3 +17,4 @@ export { strategyPlannerWorkflow } from './strategy-planner/strategyPlanner';
 export { productAnalysisWorkflow } from './product-analysis/productAnalysis';
 export { intelligentPresenterWorkflow } from './presenter/intelligentPresenter';
 export { podcastPlannerWorkflow } from './podcast/podcastPlanner';
+export { signageAdsPlannerWorkflow } from './signage-ads/signageAdsPlanner';

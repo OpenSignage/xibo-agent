@@ -83,8 +83,11 @@ export const podcastPlannerWorkflow = createWorkflow({
 })
 .then(createStep({
   id: 'read-report',
-  // Reads the source report file, derives title when omitted, and enriches the flowing state
-  // with centralized defaults (voices, language, BGM toggles, etc.).
+  // Overview: Read the report markdown from disk, derive title when omitted, and enrich
+  // the flowing state with centralized defaults (voices, language, BGM toggles, etc.).
+  // It also resolves the pronunciation dictionary path and supports graceful fallback
+  // when the report file is missing. The enriched state is the canonical base for
+  // downstream drafting and rendering steps.
   inputSchema: z.object({
     reportFileName: z.string(),
     title: z.string().optional(),
@@ -183,8 +186,12 @@ export const podcastPlannerWorkflow = createWorkflow({
 }))
 .then(createStep({
   id: 'draft-dialogue-script',
-  // Drafts a dialogue script from the report content, following programType rules
-  // and injecting stage tokens as guidance for non-spoken BGM/jingles.
+  // Overview: Draft a dialogue script from the report content according to programType rules.
+  // For 'quiz', casterA asks questions and casterB answers them; for 'presentation', casterB
+  // explains while casterA hosts; otherwise it is a casual podcast dialogue. This step also
+  // instructs the LLM to inject stage tokens (e.g., [OPENING_BGM], [ENDING_BGM], and [COUNTDOWN])
+  // as non-spoken cues. Optional persistence is supported: it can load a prior script from JSON
+  // (to skip re-drafting) and save the drafted script to JSON for reproducibility.
   inputSchema: z.object({
     reportText: z.string(),
     reportBaseName: z.string(),
@@ -373,7 +380,10 @@ ${baseRules}`;
 }))
 .then(createStep({
   id: 'resolve-audio-assets',
-  // Merge resolved asset paths into the full state coming from the previous step
+  // Overview: Resolve audio asset file names into absolute on-disk paths and merge them into state.
+  // Assets include opening/ending BGM, jingle, optional continuous BGM, laughter SFX, and quiz
+  // countdown SFX. Relative names are resolved under persistent_data/assets, while absolute paths
+  // are preserved. No files are read here; only path resolution occurs.
   inputSchema: z.object({
     scriptMarkdown: z.string(),
     lines: z.array(z.object({ speaker: z.string(), text: z.string() })),
@@ -445,7 +455,12 @@ ${baseRules}`;
 }))
 .then(createStep({
   id: 'render-wav-master',
-  // TTS合成、SFX/BGM挿入、WAVマスター生成（常にWAVを作成）
+  // Overview: Perform per-line TTS synthesis, handle stage tokens (e.g., [COUNTDOWN]),
+  // optionally insert opening/ending BGM and periodic jingles (disabled for 'quiz'),
+  // optionally mix continuous BGM, normalize/convert all audio to 44.1kHz mono PCM16, and
+  // concatenate them into a single WAV master. It writes the final WAV header, emits an
+  // optional ffmpeg mixing command, cleans up intermediate segment files, and returns the
+  // WAV master path along with the per-run temp directory used for segments.
   inputSchema: z.object({
     scriptMarkdown: z.string(),
     lines: z.array(z.object({ speaker: z.string(), text: z.string() })),
@@ -546,7 +561,7 @@ ${baseRules}`;
     }
     const safeBase = reportBaseName;
     const combinedFileWav = path.join(outDir, `${safeBase}.wav`);
-    // WAV正規化＆連結
+    // WAV normalization and concatenation
     const normalizedChunks: Buffer[] = [];
     const muteFlags: boolean[] = [];
     const targetSampleRate = 44100;
@@ -599,7 +614,7 @@ ${baseRules}`;
       const isEnding = baseName.includes(path.basename(endingBgm));
       normalizedChunks.push(normalized); muteFlags.push(isOpening || isEnding); totalDataLen += normalized.length;
     }
-    // 連続BGM（純JSミックス）
+    // Continuous BGM (pure JS mixing)
     let outChunks = normalizedChunks;
     const bgmAbsResolved = (inputData as any).continuousBgmPathResolved || '';
     if ((inputData as any).insertContinuousBgm && bgmAbsResolved) {
@@ -630,7 +645,7 @@ ${baseRules}`;
         }
       } catch {}
     }
-    // WAVヘッダ書き出し
+    // Write WAV header
     const header = Buffer.alloc(44);
     header.write('RIFF', 0);
     totalDataLen = outChunks.reduce((acc, b) => acc + b.length, 0);
@@ -650,7 +665,7 @@ ${baseRules}`;
     header.writeUInt32LE(totalDataLen, 40);
     await fs.writeFile(combinedFileWav, Buffer.concat([header, ...outChunks]));
 
-    // ffmpegミックスのコマンド出力（任意）
+    // Optional: emit ffmpeg mixing command
     try {
       const continuousSrc = (podcastConfig.assets[(inputData as any).programType === 'presentation' ? 'presentation' : ((inputData as any).programType === 'quiz' ? 'quiz' : 'podcast')].continuous) || '';
       if (continuousSrc && (inputData as any).insertOpeningBgm !== undefined) {
@@ -675,11 +690,16 @@ ${baseRules}`;
     return { scriptMarkdown, reportBaseName, format, combinedFileWav, tempDir } as const;
   },
 }))
+// Overview: Branch by desired output format. If the user requests 'mp3', encode the
+// WAV master to MP3; otherwise keep the WAV master as the final output.
 .branch([
   [
     async (ctx: any) => Promise.resolve((ctx?.inputData?.format) === 'mp3'),
     createStep({
       id: 'encode-mp3',
+      // Overview: Convert the normalized 44.1kHz mono WAV master to MP3 (CBR 128 kbps)
+      // using lamejs, then remove the per-run temp directory. Returns a success payload
+      // with the final MP3 file path.
       inputSchema: z.object({
         scriptMarkdown: z.string(),
         reportBaseName: z.string(),
@@ -717,6 +737,8 @@ ${baseRules}`;
     async () => Promise.resolve(true),
     createStep({
       id: 'finalize-wav',
+      // Overview: Confirm the WAV master as the final output and remove the per-run
+      // temp directory. Returns a success payload with the final WAV file path.
       inputSchema: z.object({
         scriptMarkdown: z.string(),
         reportBaseName: z.string(),

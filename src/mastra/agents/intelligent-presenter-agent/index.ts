@@ -11,7 +11,7 @@
  */
 import { Agent } from '@mastra/core/agent';
 import { google } from '@ai-sdk/google';
-import { intelligentPresenterWorkflow } from '../../workflows/presenter';
+import { intelligentPresenterWorkflow } from '../../workflows/presenter/intelligentPresenter';
 import { intelligentPresenterAgentInstructions } from './instructions';
 
 /**

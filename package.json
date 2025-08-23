@@ -33,7 +33,7 @@
     "@types/qrcode": "^1.5.5",
     "@wonderwhy-er/desktop-commander": "^0.1.38",
     "axios": "^1.11.0",
-    "canvas": "^3.1.2",
+    "canvas": "^3.2.0",
     "chart.js": "^4.5.0",
     "chartjs-node-canvas": "^5.0.0",
     "cheerio": "^1.1.2",
@@ -51,6 +51,7 @@
     "pino-roll": "^3.1.0",
     "pptxgenjs": "^4.0.1",
     "qrcode": "^1.5.4",
+    "sharp": "^0.34.3",
     "tesseract.js": "^6.0.1",
     "uuid": "^11.1.0",
     "zod": "^3.24.3"
