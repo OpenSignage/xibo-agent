@@ -3,12 +3,12 @@
     "images": [
       {
         "id": 1,
-        "filename": "image-1e2cdbfc-c2c1-422a-aea8-f5ff114d8d3f.png",
-        "prompt": "Hand-drawn watercolor illustration mock of a digital signage image for: 背景透過のPNG画像。画面下部の中央にAXLEADの公式ロゴのみを配置。横型と同様、シャープな公式ロゴデータを使用。. Soft pastel colors, paper texture, sketchy outlines, non-photorealistic, clearly a mockup. No text. (Aspect ratio: 16:9, Dimensions: 1024x576) --no photorealistic, realistic, glossy, 3d render, text, words, letters, typography, characters, subtitles, captions, numbers, numerals, UI, watermark, signature, logo, Japanese characters, 文字, テキスト, ロゴ, 透かし, 字幕, キャプション, 数字, 数字列, 英字, 記号",
+        "filename": "image-39456787-3887-4b01-bbee-232697ab4fef.png",
+        "prompt": "Hand-drawn watercolor illustration mock of a digital signage image for: 透明な1x1ピクセルのPNG画像。タイムラインの長さを調整するためのスペーサーとして使用。. Soft pastel colors, paper texture, sketchy outlines, non-photorealistic, clearly a mockup. No text. (Aspect ratio: 16:9, Dimensions: 1024x576) --no photorealistic, realistic, glossy, 3d render, text, words, letters, typography, characters, subtitles, captions, numbers, numerals, UI, watermark, signature, logo, Japanese characters, 文字, テキスト, ロゴ, 透かし, 字幕, キャプション, 数字, 数字列, 英字, 記号",
         "aspectRatio": "16:9",
         "width": 1024,
         "height": 576,
-        "createdAt": "2025-08-23T03:34:28.227Z"
+        "createdAt": "2025-08-23T09:41:37.634Z"
       }
     ]
   },
