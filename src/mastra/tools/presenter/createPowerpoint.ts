@@ -149,6 +149,7 @@ const slideSchema = z.object({
   title: z.string().describe('The title of the slide.'),
   bullets: z.array(z.string()).describe('An array of bullet points for the slide content.'),
   imagePath: z.string().optional().describe('An optional path to an image to include on the slide.'),
+  imageBuffer: z.any().optional().describe('Optional PNG image buffer or data URL to include on the slide (in-memory).'),
   notes: z.string().optional().describe('Speaker notes for the slide.'),
   layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote']).optional().describe('The layout type for the slide.'),
   special_content: z.string().optional().describe('Special content for layouts like \'quote\'.'),
@@ -160,6 +161,7 @@ const inputSchema = z.object({
   themeColor1: z.string().optional().describe('The primary hex color for the background gradient.'),
   themeColor2: z.string().optional().describe('The secondary hex color for the background gradient.'),
   titleSlideImagePath: z.string().optional().describe('An optional path to a background image for the title slide.'),
+  titleSlideImageBuffer: z.any().optional().describe('Optional PNG buffer or data URL for the title slide background.'),
 });
 
 const outputSchema = z.object({
@@ -222,18 +224,28 @@ export const createPowerpointTool = createTool({
             const slide = pres.addSlide({ masterName: MASTER_SLIDE });
 
             // Set a fixed light blue background as a temporary solution, as gradient logic is unstable.
-            if (index === 0 && titleSlideImagePath) {
-                try {
-                    // Check if the file exists before trying to use it
-                    await fs.access(titleSlideImagePath);
-                    slide.background = { path: titleSlideImagePath };
-                    logger.info({ path: titleSlideImagePath }, "Set title slide background image.");
-                } catch (error) {
-                    logger.warn({ path: titleSlideImagePath, error }, "Could not access title slide image file. Using default background.");
-                    slide.background = { color: 'E6F7FF' }; // Fallback
+            if (index === 0) {
+                if ((context as any).titleSlideImageBuffer) {
+                    const rawBg = (context as any).titleSlideImageBuffer as Buffer | string;
+                    const dataBg = typeof rawBg === 'string' && rawBg.startsWith('data:')
+                      ? rawBg
+                      : `data:image/png;base64,${(rawBg as Buffer).toString('base64')}`;
+                    slide.background = { data: dataBg } as any;
+                    logger.info('Set title slide background image from buffer.');
+                } else if (titleSlideImagePath) {
+                    try {
+                        await fs.access(titleSlideImagePath);
+                        slide.background = { path: titleSlideImagePath };
+                        logger.info({ path: titleSlideImagePath }, 'Set title slide background image.');
+                    } catch (error) {
+                        logger.warn({ path: titleSlideImagePath, error }, 'Could not access title slide image file. Using default background.');
+                        slide.background = { color: 'E6F7FF' };
+                    }
+                } else {
+                    slide.background = { color: 'E6F7FF' };
                 }
             } else {
-                slide.background = { color: 'E6F7FF' }; // Light Blue for other slides
+                slide.background = { color: 'E6F7FF' };
             }
 
 
@@ -296,7 +308,14 @@ export const createPowerpointTool = createTool({
                         fontSize: fittedCv.fontSize, bullet: { type: 'bullet' }, fontFace: JPN_FONT,
                         valign: 'top', paraSpaceAfter: 12,
                     });
-                    if (slideData.imagePath) {
+                    // Prefer in-memory buffer if provided; fallback to file path
+                    if ((slideData as any).imageBuffer) {
+                        const raw = (slideData as any).imageBuffer as Buffer | string;
+                        const dataUrl = typeof raw === 'string' && raw.startsWith('data:')
+                          ? raw
+                          : `data:image/png;base64,${(raw as Buffer).toString('base64')}`;
+                        slide.addImage({ data: dataUrl, x: 5.25, y: 1.5, w: 4.5, h: 4.5 * (9 / 16) });
+                    } else if (slideData.imagePath) {
                         slide.addImage({ path: slideData.imagePath, x: 5.25, y: 1.5, w: 4.5, h: 4.5 * (9 / 16) });
                     }
                     break;

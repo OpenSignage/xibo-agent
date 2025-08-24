@@ -35,11 +35,16 @@ const apiResponseSchema = z.object({
   success: z.boolean(),
   data: z
     .object({
-      imagePath: z.string(),
-      imageUrl: z.string(),
-      prompt: z.string(),
-      width: z.number(),
-      height: z.number(),
+      // On-memory buffer mode
+      buffer: z.any().optional(),
+      bufferSize: z.number().optional(),
+      // Legacy file mode
+      imagePath: z.string().optional(),
+      imageUrl: z.string().optional(),
+      // Common metadata
+      prompt: z.string().optional(),
+      width: z.number().optional(),
+      height: z.number().optional(),
       textResponse: z.string().optional(),
     })
     .optional(),
@@ -110,6 +115,10 @@ export const generateImage = createTool({
       .string()
       .optional()
       .describe("Generator ID for image history (default: '1')"),
+    returnBuffer: z
+      .boolean()
+      .optional()
+      .describe('If true, return PNG Buffer (on-memory) instead of saving to disk.'),
   }),
   outputSchema: apiResponseSchema,
   execute: async ({ context }) => {
@@ -186,40 +195,48 @@ export const generateImage = createTool({
             `Image cropped and resized to ${croppedWidth}x${croppedHeight}`,
           );
 
-          // 画像生成が成功したら、新しい生成プロセスを開始
+          // Start history only when saving to disk (legacy mode)
           generatorId = context.generatorId || '1';
           logger.info(`Starting new generation with generatorId: ${generatorId}`);
           startNewGeneration(generatorId);
 
-          // Determine output directory
+          // On-memory buffer mode
+          if (context.returnBuffer) {
+            width = croppedWidth;
+            height = croppedHeight;
+            logger.info('Returning on-memory PNG buffer for generated image.');
+            return {
+              success: true,
+              data: {
+                buffer: croppedBuffer,
+                bufferSize: croppedBuffer.length,
+                prompt: enhancedPrompt,
+                width,
+                height,
+                textResponse,
+              },
+            };
+          }
+
+          // Legacy: save the processed image to disk
           const outputDir = config.generatedDir;
           logger.info(`Output directory: ${outputDir}`);
-
-          // Create output directory if it doesn't exist
           if (!fs.existsSync(outputDir)) {
             logger.info('Creating output directory');
             fs.mkdirSync(outputDir, { recursive: true });
           }
-
-          // Save the processed image
           const filename = `image-${uuidv4()}.png`;
           savedFilename = filename;
           fullPath = path.join(outputDir, filename);
           logger.info(`Saving image to: ${fullPath}`);
           fs.writeFileSync(fullPath, croppedBuffer);
-
-          // Create image URL for ext-api
           imageUrl = `http://localhost:4111/ext-api/getImage/${filename}`;
-
           width = croppedWidth;
           height = croppedHeight;
-
           logger.info(
             `Image generated and saved to: ${fullPath} (${width}x${height})`,
           );
           logger.debug(`Image URL: ${imageUrl}`);
-
-          // 画像を履歴に追加
           logger.info(
             `Adding image to history for generatorId: ${generatorId}`,
           );
@@ -235,22 +252,12 @@ export const generateImage = createTool({
         }
       }
 
+      // If we are here, we used legacy file mode
       if (!savedFilename) {
         logger.error('No image was generated from the response');
         throw new Error('No image was generated');
       }
-
-      return {
-        success: true,
-        data: {
-          imagePath: fullPath,
-          imageUrl,
-          prompt: enhancedPrompt,
-          width,
-          height,
-          textResponse,
-        },
-      };
+      return { success: true, data: { imagePath: fullPath, imageUrl, prompt: enhancedPrompt, width, height, textResponse } };
     } catch (error) {
       logger.error(
         `generateImage: An error occurred: ${

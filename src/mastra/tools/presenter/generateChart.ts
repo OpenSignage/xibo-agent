@@ -15,25 +15,23 @@ import { logger } from '../../logger';
 import { ChartJSNodeCanvas } from 'chartjs-node-canvas';
 import { ChartConfiguration } from 'chart.js';
 import { promises as fs } from 'fs';
-import path from 'path';
-import { config } from '../xibo-agent/config';
 
 /**
  * @module generateChartTool
- * @description A tool to generate a chart image from data and save it.
+ * @description Generates a PNG chart image from data. Supports on-memory buffer return.
  */
 const chartTypeSchema = z.enum(['bar', 'pie', 'line']);
 const inputSchema = z.object({
-    chartType: chartTypeSchema,
-    title: z.string().describe('The title of the chart.'),
-    labels: z.array(z.string()).describe('The labels for the chart data.'),
-    data: z.array(z.number()).describe('The numerical data for the chart.'),
-    fileName: z.string().describe('The base name for the output image file (e.g., "chart_1").')
+  chartType: chartTypeSchema,
+  title: z.string().describe('The title of the chart.'),
+  labels: z.array(z.string()).describe('The labels for the chart data.'),
+  data: z.array(z.number()).describe('The numerical data for the chart.'),
+  fileName: z.string().optional().describe('Optional base name for the image. Ignored in buffer mode.'),
+  returnBuffer: z.boolean().optional().describe('If true, returns PNG buffer instead of writing a file.'),
 });
 
-const outputSchema = z.object({
-  imagePath: z.string().describe('The absolute path to the generated chart image.'),
-});
+const outputFileSchema = z.object({ imagePath: z.string() });
+const outputBufferSchema = z.object({ buffer: z.any(), bufferSize: z.number() });
 
 const errorResponseSchema = z.object({
   success: z.literal(false),
@@ -41,26 +39,18 @@ const errorResponseSchema = z.object({
   error: z.any().optional(),
 });
 
-const successResponseSchema = z.object({
-  success: z.literal(true),
-  data: outputSchema,
-});
+const successResponseSchema = z.object({ success: z.literal(true), data: z.union([outputBufferSchema, outputFileSchema]) });
 
 export const generateChartTool = createTool({
   id: 'generate-chart',
-  description: 'Generates a chart image (bar, pie, or line) from the provided data and saves it as a PNG file.',
+  description: 'Generates a chart image (bar, pie, or line) as PNG. Supports on-memory buffer return.',
   inputSchema,
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
-    const { chartType, title, labels, data, fileName } = context;
-    const chartDir = path.join(config.tempDir, 'charts');
-    const imagePath = path.join(chartDir, `${fileName}.png`);
-
-    logger.info({ chartType, title, imagePath }, 'Generating chart image...');
+    const { chartType, title, labels, data, fileName, returnBuffer } = context as any;
+    logger.info({ chartType, title }, 'Generating chart image (PNG)...');
 
     try {
-      await fs.mkdir(chartDir, { recursive: true });
-
       const chartConfig: ChartConfiguration = {
         type: chartType,
         data: {
@@ -89,18 +79,27 @@ export const generateChartTool = createTool({
       }
 
       const chartJSNodeCanvas = new ChartJSNodeCanvas({ width: 800, height: 450, backgroundColour: 'white' });
-      const buffer = await chartJSNodeCanvas.renderToBuffer(chartConfig);
+      const buffer = await chartJSNodeCanvas.renderToBuffer(chartConfig, 'image/png');
+
+      // Prefer buffer mode by default
+      if (returnBuffer !== false) {
+        logger.info({ bytes: buffer.length }, 'Generated chart PNG in-memory.');
+        return { success: true, data: { buffer, bufferSize: buffer.length } } as const;
+      }
+
+      // Legacy fallback: write to disk only if explicitly requested (returnBuffer === false)
+      const { config } = await import('../xibo-agent/config');
+      const path = await import('path');
+      const chartDir = path.join(config.tempDir, 'charts');
+      const imagePath = path.join(chartDir, `${fileName || 'chart'}.png`);
+      await fs.mkdir(chartDir, { recursive: true });
       await fs.writeFile(imagePath, buffer, 'binary');
-      
-      logger.info({ imagePath }, 'Successfully generated and saved chart image.');
-      return {
-        success: true,
-        data: { imagePath },
-      } as const;
+      logger.info({ imagePath }, 'Generated chart PNG and saved to disk (legacy mode).');
+      return { success: true, data: { imagePath } } as const;
 
     } catch (error) {
       const message = error instanceof Error ? error.message : "An unknown error occurred during chart generation.";
-      logger.error({ error, imagePath }, 'Failed to generate chart.');
+      logger.error({ error }, 'Failed to generate chart.');
       return {
         success: false,
         message,
