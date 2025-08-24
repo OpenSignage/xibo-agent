@@ -252,6 +252,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
+        titleSlideImageBuffer: z.any().optional(),
         errorMessage: z.string().optional(),
     }),
     execute: async (params) => {
@@ -302,16 +303,21 @@ export const intelligentPresenterWorkflow = createWorkflow({
                     prompt,
                     aspectRatio: '16:9',
                     negativePrompt,
+                    returnBuffer: true,
                 },
             });
 
-            if (imageResult.success && imageResult.data?.imagePath) {
-                const fullImagePath = imageResult.data.imagePath;
-                return { ...params.inputData, titleSlideImagePath: fullImagePath };
-            } else {
-                logger.warn(`Failed to generate title slide image. error=${imageResult.message ?? ''}`);
-                return { ...params.inputData, titleSlideImagePath: undefined };
+            if (imageResult.success && imageResult.data) {
+                const d: any = imageResult.data as any;
+                if (d.buffer) {
+                    return { ...params.inputData, titleSlideImageBuffer: d.buffer, titleSlideImagePath: undefined };
+                }
+                if (d.imagePath) {
+                    return { ...params.inputData, titleSlideImagePath: d.imagePath };
+                }
             }
+            logger.warn(`Failed to generate title slide image. error=${(imageResult as any).message ?? ''}`);
+            return { ...params.inputData, titleSlideImagePath: undefined };
         } catch (error) {
             const message = error instanceof Error ? error.message : "An unknown error occurred during title image generation.";
             logger.error({ error }, message);
@@ -336,6 +342,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
+        titleSlideImageBuffer: z.any().optional(),
         errorMessage: z.string().optional(),
     }),
     outputSchema: z.object({
@@ -348,90 +355,72 @@ export const intelligentPresenterWorkflow = createWorkflow({
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
+        titleSlideImageBuffer: z.any().optional(),
         errorMessage: z.string().optional(),
     }),
     execute: async (params) => {
-        const { presentationDesign, reportContent, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath } = params.inputData;
+        const { presentationDesign, reportContent, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, titleSlideImageBuffer } = params.inputData;
         if (errorMessage) {
-            return { enrichedSlides: [], fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath };
+            return { enrichedSlides: [], fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, titleSlideImageBuffer };
         }
 
-        logger.info("✍️ [Analyst & Speechwriter AIs] Generating chart data and speech scripts...");
-        const contentGenerationPromises = presentationDesign.map(async (design) => {
-            // Concurrently generate speech and chart data for the current slide.
-            const speechPromise = summarizeAndAnalyzeTool.execute({ ...params, context: {
-                text: `- タイトル: ${design.title}\n- 要点: ${design.bullets.join(', ')}`,
-                objective: `あなたはこのスライドのプレゼンターです。上記のタイトルと要点に基づき、約150字程度の自然で聞きやすいスピーチ原稿を作成してください。`,
-                temperature: 0.7, // Default temperature for creative speech
-                topP: 0.9,
-            }});
+        logger.info("✍️ [Analyst & Speechwriter AIs] Generating content in batch...");
+        const slidesInput = presentationDesign.map((s, idx) => ({
+            idx,
+            title: s.title,
+            bullets: s.bullets,
+            visual_suggestion: s.visual_suggestion,
+            context_for_visual: s.context_for_visual,
+        }));
 
-            let chartDataPromise: Promise<ChartData | null> = Promise.resolve(null);
-            if (design.visual_suggestion !== 'none') {
-                // This async block is wrapped in a promise for parallel execution.
-                chartDataPromise = (async () => {
-                    const analystPrompt = `あなたは優秀なデータアナリストです。以下のレポート本文とスライドの文脈情報を注意深く分析し、「${design.context_for_visual}」というテーマに最も関連性の高いデータを抽出してください。
-そのデータを基に、${design.visual_suggestion.replace('_', ' ')}を描画するためのJSONデータを生成してください。
-
-**JSON出力の厳格なルール:**
-- 形式: \`{ "chart_type": "${design.visual_suggestion.replace('_chart', '')}", "title": "グラフのタイトル", "labels": ["項目1", "項目2", ...], "data": [数値1, 数値2, ...] }\`
-- \`labels\`と\`data\`の配列の要素数は必ず一致させてください。
-- 数値は必ず\`number\`型にしてください。文字列の数値は許可されません。
-
-**データ抽出のヒント:**
-- レポート内の具体的な数値、パーセンテージ、日付、期間に注目してください。
-- もし直接的な数値データが見つからない場合でも、レポートの主張を補強する象徴的なデータを生成することを試みてください。例えば、「成長」を示す文脈であれば、右肩上がりの傾向を持つ架空のデータを生成しても構いません。
-- どうしても適切なデータを生成できない場合は、\`null\`を返すのではなく、\`{ "chart_type": "error", "title": "データ生成不可", "labels": ["理由"], "data": [0] }\` のようなエラーを示すJSONを返してください。
-
-**レポート本文:**
----
-${reportContent}
----
+        const batchObjective = `You are a presentation content generator. Given an array of slides and the report body, output a JSON object strictly in the following format (no extra commentary):
+{
+  "slides": [
+    { "idx": number, "speech": string, "chartData": null | { "chart_type": "bar"|"pie"|"line", "title": string, "labels": string[], "data": number[] } }
+  ]
+}
+Rules:
+- The speech should be ~150 Japanese characters, readable and presenter-friendly. Do not include markdown fences.
+- If a slide's visual_suggestion is 'none', set chartData to null.
+- If chartData is provided, labels.length must equal data.length and data values must be numbers.
+- Use the slide's context_for_visual only when chartData is required.
 `;
-                    const analystResult = await summarizeAndAnalyzeTool.execute({ ...params, context: { 
-                        text: reportContent, 
-                        objective: analystPrompt,
-                        temperature: 0.1, // Very low temperature for precise data extraction
-                        topP: 0.9,
-                    }});
-                    if (!analystResult.success) return null;
-                    const parsed = parseJsonStrings(analystResult.data.summary);
-                    if (parsed && parsed.chart_type === 'error') return null; // Handle explicit error from AI
+
+        const combined = `# Slides\n\n${JSON.stringify(slidesInput, null, 2)}\n\n# Report\n\n${reportContent}`;
+        const batchRes = await summarizeAndAnalyzeTool.execute({ ...params, context: { text: combined, objective: batchObjective, temperature: 0.4, topP: 0.9 } });
+
+        let idxToResult = new Map<number, { speech: string; chartData: any | null }>();
+        if (batchRes.success) {
+            const parsed = parseJsonStrings(batchRes.data.summary) as any;
+            const arr = Array.isArray(parsed?.slides) ? parsed.slides : [];
+            for (const it of arr) {
+                const i = Number(it?.idx);
+                if (!Number.isFinite(i)) continue;
+                const rawSpeech = typeof it?.speech === 'string' ? it.speech : '';
+                const speech = rawSpeech.trim().replace(/([。\.])/g, '$1\n');
+                let chartData: ChartData | null = null;
+                if (it?.chartData && typeof it.chartData === 'object' && it.chartData !== null) {
                     try {
-                        // Attempt to parse the AI's JSON output against the schema.
-                        return parsed ? chartDataSchema.parse(parsed) : null;
-                    } catch { return null; }
-                })();
-            }
-
-            const [speechResult, chartData] = await Promise.all([speechPromise, chartDataPromise]);
- 
-            let speech = "（原稿の生成に失敗しました）";
-            if (speechResult.success) {
-                const rawSpeech = speechResult.data.summary;
-                // The AI sometimes includes preamble. We split by '---' and take the last part.
-                const parts = rawSpeech.split('---');
-                
-                let baseSpeech;
-                if (parts.length > 1) {
-                    baseSpeech = (parts.pop() || '').trim();
-                } else {
-                    baseSpeech = rawSpeech.trim();
+                        chartData = chartDataSchema.parse(it.chartData);
+                    } catch { chartData = null; }
                 }
-
-                // Add newlines after periods for better readability in the notes section.
-                speech = baseSpeech.replace(/([。\.])/g, '$1\n');
+                idxToResult.set(i, { speech: speech || '（原稿の生成に失敗しました）', chartData });
             }
+        } else {
+            logger.warn('Batch generation failed; falling back to empty results.');
+        }
 
-             return {
-                 design,
-                 chartData,
-                speech,
-             };
-         });
+        const enrichedSlides = presentationDesign.map((design, idx) => {
+            const got = idxToResult.get(idx);
+            const speech = got?.speech || '（原稿の生成に失敗しました）';
+            let chartData: ChartData | null = null;
+            if (design.visual_suggestion !== 'none') {
+                chartData = got?.chartData || null;
+            }
+            return { design, chartData, speech };
+        });
 
-        const enrichedSlides = await Promise.all(contentGenerationPromises);
-        return { enrichedSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath };
+        return { enrichedSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, titleSlideImageBuffer };
     },
 }))
 .then(createStep({
@@ -453,6 +442,7 @@ ${reportContent}
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
+        titleSlideImageBuffer: z.any().optional(),
         errorMessage: z.string().optional(),
     }),
     outputSchema: z.object({
@@ -479,12 +469,18 @@ ${reportContent}
         logger.info("🖼️ [Chart Generator] Creating chart images...");
         const finalSlidesPromises = enrichedSlides.map(async (slide, index) => {
             let imagePath: string | undefined = undefined;
+            let imageBuffer: Buffer | undefined = undefined;
             // Attempt to generate a chart if data is present
             if (slide.chartData) {
                 const { chart_type, ...restOfChartData } = slide.chartData;
-                const chartResult = await generateChartTool.execute({ ...params, context: { ...restOfChartData, chartType: chart_type, fileName: `chart_${fileNameBase}_${index}` }});
+                const chartResult = await generateChartTool.execute({ ...params, context: { ...restOfChartData, chartType: chart_type, fileName: `chart_${fileNameBase}_${index}`, returnBuffer: true }});
                 if (chartResult.success) {
-                    imagePath = chartResult.data.imagePath;
+                    const d: any = chartResult.data as any;
+                    if (d?.buffer) {
+                        imageBuffer = d.buffer as Buffer;
+                    } else if (d?.imagePath) {
+                        imagePath = d.imagePath as string;
+                    }
                 } else {
                     logger.warn({ slideTitle: slide.design.title }, "Chart generation failed, proceeding without an image.");
                 }
@@ -504,6 +500,8 @@ ${reportContent}
                 notes: slide.speech,
                 layout: finalLayout,
                 special_content: slide.design.special_content,
+                // Non-schema field for buffer-based images (consumed by createPowerpointTool if supported)
+                ...(imageBuffer ? { imageBuffer } : {}),
             };
         });
 

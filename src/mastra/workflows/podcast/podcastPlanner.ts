@@ -18,8 +18,7 @@ import { summarizeAndAnalyzeTool } from '../../tools/market-research/summarizeAn
 import { googleTextToSpeechTool } from '../../tools/audio/googleTextToSpeech';
 import { config } from '../../tools/xibo-agent/config';
 import { podcastConfig } from './config';
-// @ts-ignore - lamejs has no official types by default
-import lamejs from 'lamejs';
+import crypto from 'crypto';
 
 /**
  * @module podcastPlannerWorkflow
@@ -71,7 +70,6 @@ export const podcastPlannerWorkflow = createWorkflow({
     title: z.string().optional().describe('Title of the program. Defaults to the report base filename when omitted.'),
     casterA: z.object({ name: z.string() }).describe('Caster A name (host).'),
     casterB: z.object({ name: z.string() }).describe('Caster B name (co-host/presenter).'),
-    format: z.enum(['mp3', 'wav']).optional().default('wav'),
     programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
     pronunciationDictFileName: z.string().optional().default('pronunciation-ja.json'),
     // Script persistence options
@@ -93,7 +91,6 @@ export const podcastPlannerWorkflow = createWorkflow({
     title: z.string().optional(),
     casterA: z.object({ name: z.string() }),
     casterB: z.object({ name: z.string() }),
-    format: z.enum(['mp3','wav']).optional().default('wav'),
     programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
     pronunciationDictFileName: z.string().optional().default('pronunciation-ja.json'),
     saveScriptJson: z.boolean().optional().default(false),
@@ -109,7 +106,6 @@ export const podcastPlannerWorkflow = createWorkflow({
     languageCode: z.string().optional().default('ja-JP'),
     speakingRate: z.number().optional().default(1.05),
     pitch: z.number().optional().default(0.0),
-    format: z.enum(['mp3','wav']).optional().default('mp3'),
     insertOpeningBgm: z.boolean().optional().default(false),
     insertEndingBgm: z.boolean().optional().default(false),
     insertJingles: z.boolean().optional().default(false),
@@ -141,7 +137,6 @@ export const podcastPlannerWorkflow = createWorkflow({
         languageCode: defaults.languageCode,
         speakingRate: defaults.speakingRate,
         pitch: defaults.pitch,
-        format: inputData.format,
         insertOpeningBgm: defaults.insertOpeningBgm,
         insertEndingBgm: defaults.insertEndingBgm,
         insertJingles: defaults.insertJingles,
@@ -169,7 +164,6 @@ export const podcastPlannerWorkflow = createWorkflow({
         languageCode: defaults.languageCode,
         speakingRate: defaults.speakingRate,
         pitch: defaults.pitch,
-        format: inputData.format,
         insertOpeningBgm: defaults.insertOpeningBgm,
         insertEndingBgm: defaults.insertEndingBgm,
         insertJingles: defaults.insertJingles,
@@ -201,7 +195,6 @@ export const podcastPlannerWorkflow = createWorkflow({
     languageCode: z.string().optional().default('ja-JP'),
     speakingRate: z.number().optional().default(1.05),
     pitch: z.number().optional().default(0.0),
-    format: z.enum(['mp3','wav']).optional().default('mp3'),
     insertOpeningBgm: z.boolean().optional().default(false),
     insertEndingBgm: z.boolean().optional().default(false),
     insertJingles: z.boolean().optional().default(false),
@@ -223,7 +216,6 @@ export const podcastPlannerWorkflow = createWorkflow({
     languageCode: z.string().optional().default('ja-JP'),
     speakingRate: z.number().optional().default(1.05),
     pitch: z.number().optional().default(0.0),
-    format: z.enum(['mp3','wav']).optional().default('mp3'),
     insertOpeningBgm: z.boolean().optional().default(false),
     insertEndingBgm: z.boolean().optional().default(false),
     insertJingles: z.boolean().optional().default(false),
@@ -236,7 +228,7 @@ export const podcastPlannerWorkflow = createWorkflow({
     scriptJsonFileName: z.string().optional(),
   }),
   execute: async ({ inputData, runtimeContext }) => {
-    const { reportText, reportBaseName, title, casterA, casterB, languageCode, speakingRate, pitch, format, insertOpeningBgm, insertEndingBgm, insertJingles, insertContinuousBgm, laughterMode, programType, pronunciationDictPath, saveScriptJson, loadScriptJson, scriptJsonFileName } = inputData;
+    const { reportText, reportBaseName, title, casterA, casterB, languageCode, speakingRate, pitch, insertOpeningBgm, insertEndingBgm, insertJingles, insertContinuousBgm, laughterMode, programType, pronunciationDictPath, saveScriptJson, loadScriptJson, scriptJsonFileName } = inputData;
     const scriptsDir = path.join(config.generatedDir, 'podcast');
     await fs.mkdir(scriptsDir, { recursive: true });
     const jsonFile = scriptJsonFileName && scriptJsonFileName.trim().length > 0 ? scriptJsonFileName.trim() : `${reportBaseName}.json`;
@@ -262,7 +254,6 @@ export const podcastPlannerWorkflow = createWorkflow({
           languageCode: parsed?.languageCode ?? languageCode,
           speakingRate: parsed?.speakingRate ?? speakingRate,
           pitch: parsed?.pitch ?? pitch,
-          format: parsed?.format ?? format,
           insertOpeningBgm: parsed?.insertOpeningBgm ?? insertOpeningBgm,
           insertEndingBgm: parsed?.insertEndingBgm ?? insertEndingBgm,
           insertJingles: parsed?.insertJingles ?? insertJingles,
@@ -299,7 +290,7 @@ ${baseRules}`;
     const res = await summarizeAndAnalyzeTool.execute({ context: { text: combined, objective, temperature: 0.7, topP: 0.9 }, runtimeContext });
     if (!res.success) {
       const fallback = `${casterA.name}: レポートの読み込みに失敗しました。\n${casterB.name}: 別のファイルで試してみましょう。`;
-      return { scriptMarkdown: fallback, lines: [{ speaker: casterA.name, text: 'レポートの読み込みに失敗しました。' }], reportBaseName, title, casterA, casterB, languageCode, speakingRate, pitch, format, insertOpeningBgm, insertEndingBgm, insertJingles, insertContinuousBgm, laughterMode, programType, pronunciationDictPath, saveScriptJson, loadScriptJson, scriptJsonFileName: jsonFile };
+      return { scriptMarkdown: fallback, lines: [{ speaker: casterA.name, text: 'レポートの読み込みに失敗しました。' }], reportBaseName, title, casterA, casterB, languageCode, speakingRate, pitch, insertOpeningBgm, insertEndingBgm, insertJingles, insertContinuousBgm, laughterMode, programType, pronunciationDictPath, saveScriptJson, loadScriptJson, scriptJsonFileName: jsonFile };
     }
     const scriptMarkdown = res.data.summary.trim();
     const lines: Array<{ speaker: string; text: string }> = [];
@@ -359,7 +350,7 @@ ${baseRules}`;
           languageCode,
           speakingRate,
           pitch,
-          format,
+          // persisted fields for reproducibility
           programType,
           insertOpeningBgm,
           insertEndingBgm,
@@ -375,7 +366,7 @@ ${baseRules}`;
         logger.warn({ e, jsonPath }, 'Failed to save drafted script JSON.');
       }
     }
-    return { scriptMarkdown, lines, reportBaseName, title, casterA, casterB, languageCode, speakingRate, pitch, format, insertOpeningBgm, insertEndingBgm, insertJingles, insertContinuousBgm, laughterMode, programType, pronunciationDictPath, saveScriptJson, loadScriptJson, scriptJsonFileName: jsonFile };
+    return { scriptMarkdown, lines, reportBaseName, title, casterA, casterB, languageCode, speakingRate, pitch, insertOpeningBgm, insertEndingBgm, insertJingles, insertContinuousBgm, laughterMode, programType, pronunciationDictPath, saveScriptJson, loadScriptJson, scriptJsonFileName: jsonFile };
   },
 }))
 .then(createStep({
@@ -394,7 +385,6 @@ ${baseRules}`;
     languageCode: z.string().optional().default('ja-JP'),
     speakingRate: z.number().optional().default(1.05),
     pitch: z.number().optional().default(0.0),
-    format: z.enum(['mp3','wav']).optional().default('mp3'),
     insertOpeningBgm: z.boolean().optional().default(false),
     insertEndingBgm: z.boolean().optional().default(false),
     insertJingles: z.boolean().optional().default(false),
@@ -416,7 +406,6 @@ ${baseRules}`;
     languageCode: z.string().optional().default('ja-JP'),
     speakingRate: z.number().optional().default(1.05),
     pitch: z.number().optional().default(0.0),
-    format: z.enum(['mp3','wav']).optional().default('mp3'),
     insertOpeningBgm: z.boolean().optional().default(false),
     insertEndingBgm: z.boolean().optional().default(false),
     insertJingles: z.boolean().optional().default(false),
@@ -471,7 +460,6 @@ ${baseRules}`;
     languageCode: z.string().optional().default('ja-JP'),
     speakingRate: z.number().optional().default(1.05),
     pitch: z.number().optional().default(0.0),
-    format: z.enum(['mp3','wav']).optional().default('mp3'),
     cleanupSegments: z.boolean().optional().default(true),
     openingBgmPathResolved: z.string(),
     endingBgmPathResolved: z.string(),
@@ -495,69 +483,152 @@ ${baseRules}`;
   outputSchema: z.object({
     scriptMarkdown: z.string(),
     reportBaseName: z.string(),
-    format: z.enum(['mp3','wav']).optional().default('mp3'),
     combinedFileWav: z.string(),
-    tempDir: z.string(),
     countdownPathResolved: z.string().optional(),
   }),
   execute: async ({ inputData, runtimeContext }) => {
     const { scriptMarkdown, lines, reportBaseName, casterA, casterB, languageCode, speakingRate, pitch } = inputData;
-    const format = (inputData as any).format;
+    // format removed
     const openingBgm = (inputData as any).openingBgmPathResolved;
     const endingBgm = (inputData as any).endingBgmPathResolved;
     const jingle = (inputData as any).jinglePathResolved;
     const laughSfx = (inputData as any).laughSfxPathResolved || path.join(config.projectRoot, 'persistent_data', 'assets', 'sfx', 'laugh.mp3');
     const jingleInterval = (inputData as any).jingleInterval ?? 6;
-    const runStamp = Date.now();
-    const tempDir = path.join(config.publicDir, 'temp', 'podcast', `${reportBaseName}-${runStamp}`);
     const outDir = path.join(config.generatedDir, 'podcast');
-    await fs.mkdir(tempDir, { recursive: true });
-    logger.debug({ tempDir }, 'Using per-run podcast temp directory');
     await fs.mkdir(outDir, { recursive: true });
-    const segmentFiles: string[] = [];
+    const segmentItems: Array<{ buffer: Buffer; label: string; muteBgm: boolean }> = [];
     const defaultA = 'ja-JP-Neural2-B';
     const defaultB = 'ja-JP-Neural2-C';
-    const pushExternal = async (srcPath: string) => {
+    const pushExternal = async (srcPath: string, opts?: { muteBgm?: boolean }) => {
       try {
         if (typeof srcPath !== 'string' || srcPath.trim().length === 0) return;
         const absPath = path.isAbsolute(srcPath) ? srcPath : path.join(config.projectRoot, srcPath);
         try { await fs.access(absPath); } catch { return; }
         const data = await fs.readFile(absPath);
-        const dest = path.join(tempDir, `ext-${path.basename(absPath)}`);
-        await fs.writeFile(dest, data);
-        segmentFiles.push(dest);
+        segmentItems.push({ buffer: data, label: path.basename(absPath), muteBgm: !!(opts && opts.muteBgm) });
       } catch {}
     };
     if ((inputData as any).insertOpeningBgm) {
-      await pushExternal(openingBgm);
+      await pushExternal(openingBgm, { muteBgm: true });
     }
-    for (let i = 0; i < lines.length; i++) {
-      const l = lines[i];
+
+    // External asset buffer cache to avoid repeated disk reads
+    const externalBufferCache = new Map<string, Buffer>();
+    const getExternalBuffer = async (srcPath: string): Promise<Buffer | null> => {
+      try {
+        const abs = path.isAbsolute(srcPath) ? srcPath : path.join(config.projectRoot, srcPath);
+        if (externalBufferCache.has(abs)) return externalBufferCache.get(abs)!;
+        await fs.access(abs);
+        const data = await fs.readFile(abs);
+        externalBufferCache.set(abs, data);
+        return data;
+      } catch { return null; }
+    };
+
+    // TTS persistent cache (disk) setup
+    const ttsCacheDir = path.join(config.projectRoot, 'persistent_data', 'cache', 'tts');
+    try { await fs.mkdir(ttsCacheDir, { recursive: true }); } catch {}
+    let dictMtime = '0';
+    try {
+      const absDict = (inputData as any).pronunciationDictPath ? ((path.isAbsolute((inputData as any).pronunciationDictPath) ? (inputData as any).pronunciationDictPath : path.join(config.projectRoot, (inputData as any).pronunciationDictPath))) : '';
+      if (absDict) {
+        const st = await fs.stat(absDict).catch(() => null as any);
+        if (st && st.mtimeMs) dictMtime = String(Math.floor(st.mtimeMs));
+      }
+    } catch {}
+
+    // Concurrency-limited execution helper (simple p-limit)
+    const runWithConcurrency = async <T>(tasks: Array<() => Promise<T>>, limit: number): Promise<T[]> => {
+      const results: T[] = new Array(tasks.length) as T[];
+      let next = 0;
+      const worker = async () => {
+        while (true) {
+          const cur = next++;
+          if (cur >= tasks.length) break;
+          results[cur] = await tasks[cur]();
+        }
+      };
+      const workers = Array.from({ length: Math.max(1, limit) }, () => worker());
+      await Promise.all(workers);
+      return results;
+    };
+    const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+    const maxRetries = 3;
+    const concurrency = Number(process.env.PODCAST_TTS_CONCURRENCY || 4);
+
+    const tasks: Array<() => Promise<Array<{ buffer: Buffer; label: string; muteBgm: boolean }>>> = lines.map((l, i) => async () => {
+      const out: Array<{ buffer: Buffer; label: string; muteBgm: boolean }> = [];
       // STAGE: handle [COUNTDOWN]
       if (l.speaker === '__STAGE__' && /^\s*\[COUNTDOWN\]\s*$/i.test(l.text || '')) {
         const countdown = (inputData as any).countdownPathResolved as string | undefined;
-        if (countdown) { await pushExternal(countdown); }
-        continue;
+        if (countdown) {
+          const b = await getExternalBuffer(countdown);
+          if (b) out.push({ buffer: b, label: path.basename(countdown), muteBgm: false });
+        }
+        return out;
       }
       const hadLaugh = /[（(]\s*笑\s*[）)]/g.test(l.text);
       const cleaned = sanitizeSpokenText(l.text, { laughterMode: (inputData as any).laughterMode });
-      if (!cleaned) continue;
-      const voiceName = l.speaker === casterA.name ? (casterA.voiceName || defaultA) : (casterB.voiceName || defaultB);
-      const tts = await googleTextToSpeechTool.execute({ context: { text: cleaned, voiceName, languageCode, speakingRate, pitch, format, fileNameBase: `seg-${String(i).padStart(3,'0')}`, outDir: tempDir, pronunciationDictPath: (inputData as any).pronunciationDictPath }, runtimeContext });
-      if (tts.success) segmentFiles.push(tts.data.filePath);
-      // Quiz: ヒューリスティック挿入は廃止（[COUNTDOWN] トークンのみで制御）
-      // QuizではJINGLE自動挿入を無効化
-      if ((inputData as any).programType !== 'quiz') {
-        if ((inputData as any).insertJingles && jingleInterval > 0 && (i + 1) % jingleInterval === 0) {
-          await pushExternal(jingle);
+      if (cleaned) {
+        const voiceName = l.speaker === casterA.name ? (casterA.voiceName || defaultA) : (casterB.voiceName || defaultB);
+        let attempt = 0; let ok = false;
+        let lastErr: any = null;
+        // Compute cache key
+        const keyPayload = { v: 1, text: cleaned, voiceName, languageCode, speakingRate, pitch, dictMtime };
+        const key = crypto.createHash('sha1').update(JSON.stringify(keyPayload)).digest('hex');
+        const cachePath = path.join(ttsCacheDir, `${key}.wav`);
+        // Try cache first
+        try {
+          const cached = await fs.readFile(cachePath);
+          if (cached && cached.length > 0) {
+            out.push({ buffer: cached, label: path.basename(cachePath), muteBgm: false });
+            ok = true;
+          }
+        } catch {}
+        while (attempt <= maxRetries && !ok) {
+          try {
+            const tts = await googleTextToSpeechTool.execute({ context: { text: cleaned, voiceName, languageCode, speakingRate, pitch, format: 'wav', returnBuffer: true, fileNameBase: `seg-${String(i).padStart(3,'0')}`, pronunciationDictPath: (inputData as any).pronunciationDictPath }, runtimeContext });
+            if (tts.success && (tts as any).data?.buffer) {
+              const buf = (tts as any).data.buffer as Buffer;
+              // Write-through cache (best-effort)
+              try { await fs.writeFile(cachePath, buf); } catch {}
+              out.push({ buffer: buf, label: `tts-${String(i).padStart(3,'0')}.wav`, muteBgm: false });
+              ok = true;
+              break;
+            }
+            lastErr = (tts as any).message || 'unknown';
+          } catch (e) { lastErr = e; }
+          if (!ok) {
+            if (attempt >= maxRetries) { logger.warn({ i, lastErr }, 'TTS retry exhausted'); break; }
+            const backoff = Math.min(2000, 300 * Math.pow(2, attempt)) + Math.floor(Math.random() * 200);
+            await sleep(backoff);
+          }
+          attempt++;
         }
       }
-      if ((inputData as any).laughterMode === 'audio' && hadLaugh) {
-        await pushExternal(laughSfx);
+      // JINGLE insertion (non-quiz) after the line
+      if ((inputData as any).programType !== 'quiz') {
+        if ((inputData as any).insertJingles && jingleInterval > 0 && (i + 1) % jingleInterval === 0) {
+          const b = await getExternalBuffer(jingle);
+          if (b) out.push({ buffer: b, label: path.basename(jingle), muteBgm: false });
+        }
       }
+      // Laugh SFX if needed
+      if ((inputData as any).laughterMode === 'audio' && hadLaugh) {
+        const b = await getExternalBuffer(laughSfx);
+        if (b) out.push({ buffer: b, label: path.basename(laughSfx), muteBgm: false });
+      }
+      return out;
+    });
+
+    const perLineSegments = await runWithConcurrency(tasks, concurrency);
+    for (let i = 0; i < perLineSegments.length; i++) {
+      const segs = perLineSegments[i];
+      for (const s of segs) segmentItems.push(s);
     }
     if ((inputData as any).insertEndingBgm) {
-      await pushExternal(endingBgm);
+      await pushExternal(endingBgm, { muteBgm: true });
     }
     const safeBase = reportBaseName;
     const combinedFileWav = path.join(outDir, `${safeBase}.wav`);
@@ -595,9 +666,8 @@ ${baseRules}`;
       }
       return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
     };
-    for (const idx in segmentFiles) {
-      const f = segmentFiles[idx as any];
-      let buf = await fs.readFile(f);
+    for (const it of segmentItems) {
+      const buf = it.buffer;
       if (buf.slice(0,4).toString() !== 'RIFF' || buf.slice(8,12).toString() !== 'WAVE') { continue; }
       let pos = 12; let fmtFound = false; let dataFound = false; let localSampleRate = 0; let localNumChannels = 0; let dataStartPos = -1; let dataSize = 0;
       while (pos + 8 <= buf.length) {
@@ -609,10 +679,8 @@ ${baseRules}`;
       if (!fmtFound || !dataFound) continue;
       let dataBuf = buf.slice(dataStartPos, dataStartPos + dataSize);
       let normalized = convertToTargetPcm16(dataBuf, localSampleRate || 44100, localNumChannels || 1);
-      const baseName = path.basename(f);
-      const isOpening = baseName.includes(path.basename(openingBgm));
-      const isEnding = baseName.includes(path.basename(endingBgm));
-      normalizedChunks.push(normalized); muteFlags.push(isOpening || isEnding); totalDataLen += normalized.length;
+      const isMuted = !!it.muteBgm;
+      normalizedChunks.push(normalized); muteFlags.push(isMuted); totalDataLen += normalized.length;
     }
     // Continuous BGM (pure JS mixing)
     let outChunks = normalizedChunks;
@@ -665,97 +733,26 @@ ${baseRules}`;
     header.writeUInt32LE(totalDataLen, 40);
     await fs.writeFile(combinedFileWav, Buffer.concat([header, ...outChunks]));
 
-    // Optional: emit ffmpeg mixing command
-    try {
-      const continuousSrc = (podcastConfig.assets[(inputData as any).programType === 'presentation' ? 'presentation' : ((inputData as any).programType === 'quiz' ? 'quiz' : 'podcast')].continuous) || '';
-      if (continuousSrc && (inputData as any).insertOpeningBgm !== undefined) {
-        const absContinuous = path.isAbsolute(continuousSrc) ? continuousSrc : path.join(config.projectRoot, continuousSrc);
-        const volDb = podcastConfig.defaults.continuousBgmVolumeDb ?? -20;
-        const ffmpeg = 'ffmpeg';
-        const mixedOut = combinedFileWav.replace(/\.wav$/, '.mixed.wav');
-        const cmd1 = `${ffmpeg} -y -stream_loop -1 -i "${absContinuous}" -i "${combinedFileWav}" -filter_complex "[0:a]volume=${Math.pow(10, volDb/20).toFixed(4)}[bgm];[bgm][1:a]amix=inputs=2:normalize=0:dropout_transition=0,aresample=44100,pan=mono|c0=0.5*c0+0.5*c1" -ar 44100 -ac 1 -c:a pcm_s16le "${mixedOut}"`;
-        await fs.writeFile(path.join(outDir, '.ffmpeg_cmd.txt'), Buffer.from(cmd1));
-      }
-    } catch {}
+    // Note: we no longer emit an ffmpeg command file; mixing happens in-memory above.
 
-    if ((inputData as any).cleanupSegments) {
-      for (const f of segmentFiles) { try { await fs.unlink(f); } catch {} }
-      try {
-        const names = await fs.readdir(tempDir);
-        for (const name of names) { if (name.startsWith('seg-') || name.startsWith('ext-')) { try { await fs.unlink(path.join(tempDir, name)); } catch {} } }
-        const remain = await fs.readdir(tempDir); if (remain.length === 0) { try { await fs.rmdir(tempDir); } catch {} }
-      } catch {}
-    }
     logger.info({ combinedFileWav }, 'WAV master rendered.');
-    return { scriptMarkdown, reportBaseName, format, combinedFileWav, tempDir } as const;
+    return { scriptMarkdown, reportBaseName, combinedFileWav } as const;
   },
 }))
-// Overview: Branch by desired output format. If the user requests 'mp3', encode the
-// WAV master to MP3; otherwise keep the WAV master as the final output.
-.branch([
-  [
-    async (ctx: any) => Promise.resolve((ctx?.inputData?.format) === 'mp3'),
-    createStep({
-      id: 'encode-mp3',
-      // Overview: Convert the normalized 44.1kHz mono WAV master to MP3 (CBR 128 kbps)
-      // using lamejs, then remove the per-run temp directory. Returns a success payload
-      // with the final MP3 file path.
-      inputSchema: z.object({
-        scriptMarkdown: z.string(),
-        reportBaseName: z.string(),
-        format: z.enum(['mp3','wav']).optional().default('mp3'),
-        combinedFileWav: z.string(),
-        tempDir: z.string(),
-        countdownPathResolved: z.string().optional(),
-      }),
-      outputSchema: successOutput.extend({ success: z.literal(true), tempDir: z.string() }),
-      execute: async ({ inputData }) => {
-        const { combinedFileWav, reportBaseName, scriptMarkdown, tempDir } = inputData;
-        const outDir = path.dirname(combinedFileWav);
-        const combinedFile = path.join(outDir, `${reportBaseName}.mp3`);
-        const targetSampleRate = 44100; const targetNumChannels = 1;
-        const buf = await fs.readFile(combinedFileWav);
-        const pcmAll = buf.slice(44);
-        const pcm16 = new Int16Array(pcmAll.buffer, pcmAll.byteOffset, pcmAll.byteLength / 2);
-        const mp3Encoder = new lamejs.Mp3Encoder(targetNumChannels, targetSampleRate, 128);
-        const CHUNK = 1152; const mp3Data: Uint8Array[] = [];
-        for (let i = 0; i < pcm16.length; i += CHUNK) {
-          const sampleChunk = pcm16.subarray(i, Math.min(i + CHUNK, pcm16.length));
-          const mp3buf = mp3Encoder.encodeBuffer(sampleChunk);
-          if (mp3buf.length > 0) mp3Data.push(mp3buf);
-        }
-        const mp3End = mp3Encoder.flush(); if (mp3End.length > 0) mp3Data.push(mp3End);
-        await fs.writeFile(combinedFile, Buffer.concat(mp3Data.map(b => Buffer.from(b))));
-        logger.info({ combinedFile }, 'Encoded MP3 created.');
-        // Cleanup per-run temp directory
-        try { await fs.rm(tempDir, { recursive: true, force: true }); } catch (e) { logger.warn({ tempDir, e }, 'Failed to cleanup podcast temp dir'); }
-        return { success: true, scriptMarkdown, filePath: combinedFile, tempDir } as const;
-      },
-    })
-  ],
-  [
-    async () => Promise.resolve(true),
-    createStep({
-      id: 'finalize-wav',
-      // Overview: Confirm the WAV master as the final output and remove the per-run
-      // temp directory. Returns a success payload with the final WAV file path.
-      inputSchema: z.object({
-        scriptMarkdown: z.string(),
-        reportBaseName: z.string(),
-        format: z.enum(['mp3','wav']).optional().default('mp3'),
-        combinedFileWav: z.string(),
-        tempDir: z.string(),
-        countdownPathResolved: z.string().optional(),
-      }),
-      outputSchema: successOutput.extend({ success: z.literal(true), tempDir: z.string() }),
-      execute: async ({ inputData }) => {
-        const { combinedFileWav, scriptMarkdown, tempDir } = inputData;
-        logger.info({ combinedFile: combinedFileWav }, 'WAV finalized.');
-        // Cleanup per-run temp directory
-        try { await fs.rm(tempDir, { recursive: true, force: true }); } catch (e) { logger.warn({ tempDir, e }, 'Failed to cleanup podcast temp dir'); }
-        return { success: true, scriptMarkdown, filePath: combinedFileWav, tempDir } as const;
-      },
-    })
-  ]
-])
+.then(createStep({
+  id: 'finalize-wav',
+  // Overview: Confirm the WAV master as the final output and remove the per-run temp directory.
+  inputSchema: z.object({
+    scriptMarkdown: z.string(),
+    reportBaseName: z.string(),
+    combinedFileWav: z.string(),
+    countdownPathResolved: z.string().optional(),
+  }),
+  outputSchema: successOutput.extend({ success: z.literal(true) }),
+  execute: async ({ inputData }) => {
+    const { combinedFileWav, scriptMarkdown } = inputData as any;
+    logger.info({ combinedFile: combinedFileWav }, 'WAV finalized.');
+    return { success: true, scriptMarkdown, filePath: combinedFileWav } as const;
+  },
+}))
 .commit();

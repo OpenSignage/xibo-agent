@@ -21,7 +21,27 @@ import fs from 'fs/promises';
  * @description Synthesizes speech using Google Cloud Text-to-Speech (v1) via REST API key and saves to file.
  */
 
-const successSchema = z.object({ filePath: z.string() });
+// In-memory pronunciation dictionary cache (by absolute path)
+const dictCache = new Map<string, { entries: Array<[RegExp, string]> }>();
+
+// Normalization helpers shared across calls
+const normalizeForMatching = (s: string) => {
+  // NFKC covers most width variants (e.g., half-width Katakana → full-width)
+  let n = s.normalize('NFKC');
+  // Normalize prolonged sound mark variants to standard "ー"
+  n = n.replace(/[ｰ‐―–—]/g, 'ー');
+  // Normalize middle dot variants to "・"
+  n = n.replace(/[･·∙•]/g, '・');
+  // Convert full-width spaces to regular space and collapse multiples
+  n = n.replace(/\u3000/g, ' ').replace(/\s{2,}/g, ' ');
+  return n;
+};
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const successSchema = z.union([
+	z.object({ filePath: z.string() }),
+	z.object({ buffer: z.any(), bufferSize: z.number() }),
+]);
 const errorSchema = z.object({ success: z.literal(false), message: z.string(), error: z.any().optional() });
 const successWrap = z.object({ success: z.literal(true), data: successSchema });
 
@@ -38,10 +58,11 @@ export const googleTextToSpeechTool = createTool({
 		fileNameBase: z.string().optional().describe('Optional base filename.'),
 		outDir: z.string().optional().describe('Optional output directory for the audio file.'),
 		pronunciationDictPath: z.string().optional().describe('Optional path to a JSON dictionary (word -> reading) applied before TTS.'),
+		returnBuffer: z.boolean().optional().describe('If true, return audio Buffer instead of writing a file.'),
 	}),
 	outputSchema: z.union([successWrap, errorSchema]),
 	execute: async ({ context }) => {
-		const { text, voiceName, languageCode = 'ja-JP', speakingRate = 1.0, pitch = 0.0, format = 'mp3', fileNameBase, outDir, pronunciationDictPath } = context;
+		const { text, voiceName, languageCode = 'ja-JP', speakingRate = 1.0, pitch = 0.0, format = 'mp3', fileNameBase, outDir, pronunciationDictPath, returnBuffer } = context as any;
 		const apiKey = process.env.GOOGLE_TTS_API_KEY;
 		if (!apiKey) {
 			const message = 'GOOGLE_TTS_API_KEY is not set.';
@@ -50,31 +71,29 @@ export const googleTextToSpeechTool = createTool({
 		}
 		try {
 			// Apply full-width/half-width normalization and pronunciation dictionary if provided
-			const normalizeForMatching = (s: string) => {
-				// NFKC covers most width variants (e.g., half-width Katakana → full-width)
-				let n = s.normalize('NFKC');
-				// Normalize prolonged sound mark variants to standard "ー"
-				n = n.replace(/[ｰ‐―–—]/g, 'ー');
-				// Normalize middle dot variants to "・"
-				n = n.replace(/[･·∙•]/g, '・');
-				// Convert full-width spaces to regular space and collapse multiples
-				n = n.replace(/\u3000/g, ' ').replace(/\s{2,}/g, ' ');
-				return n;
-			};
 			let processedText = normalizeForMatching(text);
 			if (pronunciationDictPath) {
 				try {
 					const abs = path.isAbsolute(pronunciationDictPath) ? pronunciationDictPath : path.join(config.projectRoot, pronunciationDictPath);
-					await fs.access(abs);
-					const raw = await fs.readFile(abs, 'utf-8');
-					const dict = JSON.parse(raw) as Record<string, string>;
-					const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-					for (const [from, to] of Object.entries(dict)) {
-						if (typeof from !== 'string' || typeof to !== 'string' || from.length === 0) continue;
-						const fromNorm = normalizeForMatching(from);
-						processedText = processedText.replace(new RegExp(escapeRegExp(fromNorm), 'gi'), to);
+					let cached = dictCache.get(abs);
+					if (!cached) {
+						await fs.access(abs);
+						const raw = await fs.readFile(abs, 'utf-8');
+						const dict = JSON.parse(raw) as Record<string, string>;
+						const entries: Array<[RegExp, string]> = [];
+						for (const [from, to] of Object.entries(dict)) {
+							if (typeof from !== 'string' || typeof to !== 'string' || from.length === 0) continue;
+							const fromNorm = normalizeForMatching(from);
+							entries.push([new RegExp(escapeRegExp(fromNorm), 'gi'), to]);
+						}
+						cached = { entries };
+						dictCache.set(abs, cached);
+						logger.debug({ entries: entries.length, path: abs }, 'Loaded pronunciation dictionary into cache.');
 					}
-					logger.debug({ entries: Object.keys(dict).length, path: abs }, 'Applied normalization and pronunciation dictionary.');
+					for (const [re, to] of cached.entries) {
+						processedText = processedText.replace(re, to);
+					}
+					logger.debug({ entries: cached.entries.length, path: abs }, 'Applied normalization and pronunciation dictionary (cached).');
 				} catch (e) {
 					// Non-fatal: log and continue with original text
 					logger.warn({ pronunciationDictPath, message: (e as any)?.message }, 'Failed to apply pronunciation dictionary.');
@@ -108,6 +127,10 @@ export const googleTextToSpeechTool = createTool({
 				return { success: false, message } as const;
 			}
 			const buf = Buffer.from(audioContent, 'base64');
+			if (returnBuffer) {
+				logger.debug({ bytes: buf.length }, 'Generated Google TTS audio (buffer mode).');
+				return { success: true, data: { buffer: buf, bufferSize: buf.length } } as const;
+			}
 			const outDirFinal = outDir || path.join(config.generatedDir, 'podcast');
 			await fs.mkdir(outDirFinal, { recursive: true });
 			const stamp = new Date().toISOString().replace(/[:.]/g, '-');
