@@ -125,6 +125,18 @@ export const generateImage = createTool({
     let generatorId = '';
     let textResponse = '';
     try {
+      // Disk cache
+      const cacheDir = path.join(config.generatedDir, 'cache', 'images');
+      const keyRaw = JSON.stringify({ prompt: context.prompt, aspectRatio: context.aspectRatio, negativePrompt: context.negativePrompt });
+      const crypto = await import('node:crypto');
+      const key = crypto.createHash('sha1').update(keyRaw, 'utf8').digest('hex');
+      const cachePath = path.join(cacheDir, `${key}.bin`);
+      try {
+        if (context.returnBuffer && fs.existsSync(cachePath)) {
+          const cached = fs.readFileSync(cachePath);
+          return { success: true, data: { buffer: cached, bufferSize: cached.length, prompt: context.prompt } } as const;
+        }
+      } catch {}
       const geminiApiKey = process.env.GEMINI_API_KEY;
       if (!geminiApiKey) {
         throw new Error('GEMINI_API_KEY is not set in environment variables');
@@ -205,6 +217,7 @@ export const generateImage = createTool({
             width = croppedWidth;
             height = croppedHeight;
             logger.info('Returning on-memory PNG buffer for generated image.');
+            try { if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true }); fs.writeFileSync(cachePath, croppedBuffer); } catch {}
             return {
               success: true,
               data: {

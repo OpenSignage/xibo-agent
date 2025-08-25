@@ -34,8 +34,8 @@ export const config = {
   previewFontImageDir: path.join(projectRoot, 'persistent_data', 'previewFontImage'),
   logsDir: path.join(projectRoot, 'logs'),
   publicDir: path.join(projectRoot, 'public'),
-  reportsDir: path.join(projectRoot, 'persistent_data', 'reports'),
-  presentationsDir: path.join(projectRoot, 'persistent_data', 'presentations'),
+  reportsDir: path.join(projectRoot, 'persistent_data', 'generated', 'reports'),
+  presentationsDir: path.join(projectRoot, 'persistent_data', 'generated', 'presentations'),
   tempDir: path.join(projectRoot, 'public', 'temp'),
 } as const;
 

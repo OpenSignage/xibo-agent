@@ -79,7 +79,7 @@ export const summarizeAndAnalyzeTool = createTool({
 
     } catch (error) {
       const message = error instanceof Error ? error.message : "An unknown error occurred during text analysis.";
-      logger.error('Failed to analyze text', { error });
+      logger.error({ error }, 'Failed to analyze text');
       return { 
         success: false, 
         message,

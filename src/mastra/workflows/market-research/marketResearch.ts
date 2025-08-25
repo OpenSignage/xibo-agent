@@ -47,7 +47,7 @@ export const marketResearchWorkflow = createWorkflow({
   id: 'market-research-workflow',
   description: 'A comprehensive workflow to search, scrape, analyze, generate a report, and save it to a file.',
   inputSchema: z.object({ 
-    topic: z.string(),
+    topic: z.string().describe('Topic to research (keyword)'),
     maxWebsites: z.number().optional().default(20).describe('Maximum number of websites to scrape (default: 20)')
   }),
   outputSchema: finalOutputSchema,
@@ -127,20 +127,55 @@ export const marketResearchWorkflow = createWorkflow({
         const topResults = results.slice(0, maxWebsites);
         const scrapedData: { url: string; title: string; content: string; }[] = [];
 
-        for (const result of topResults) {
-            const { url, title } = result;
-            let scrapeResult;
-            if (url.toLowerCase().endsWith('.pdf')) {
-                scrapeResult = await pdfScrapeTool.execute({ context: { url }, runtimeContext });
-            } else {
-                scrapeResult = await contentScrapeTool.execute({ context: { url }, runtimeContext });
+        // Helper: sleep with jitter
+        const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+        // Retry with exponential backoff and jitter
+        const attemptScrape = async (url: string, title: string) => {
+            const maxRetries = 3;
+            const baseDelayMs = 500;
+            for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                try {
+                    // polite small jitter before each attempt
+                    await sleep(100 + Math.floor(Math.random() * 150));
+                    const isPdf = url.toLowerCase().endsWith('.pdf');
+                    const res = isPdf
+                        ? await pdfScrapeTool.execute({ context: { url }, runtimeContext })
+                        : await contentScrapeTool.execute({ context: { url }, runtimeContext });
+                    if (!res.success) {
+                        throw new Error(res.message || 'Scrape failed');
+                    }
+                    const content = res.data.content || '';
+                    if (content.length <= 100) {
+                        throw new Error('Content too short');
+                    }
+                    return { url, title, content };
+                } catch (err) {
+                    if (attempt === maxRetries) throw err;
+                    const backoff = baseDelayMs * Math.pow(2, attempt) + Math.floor(Math.random() * 200);
+                    logger.warn({ url, attempt, backoff }, 'Scrape failed, retrying with backoff');
+                    await sleep(backoff);
+                }
             }
-            if (scrapeResult.success && scrapeResult.data.content.length > 100) {
-                scrapedData.push({ url, title, content: scrapeResult.data.content });
-            } else if (!scrapeResult.success) {
-                logger.warn({ url, error: scrapeResult.message }, 'Skipping URL due to scraping failure.');
+            // Should not reach here
+            throw new Error('Unexpected retry loop exit');
+        };
+
+        // Concurrency-limited execution (p-limit equivalent with chunking)
+        const concurrency = 6;
+        for (let i = 0; i < topResults.length; i += concurrency) {
+            const batch = topResults.slice(i, i + concurrency);
+            const promises = batch.map(({ url, title }) => attemptScrape(url, title));
+            const settled = await Promise.allSettled(promises);
+            for (const s of settled) {
+                if (s.status === 'fulfilled') {
+                    scrapedData.push(s.value);
+                } else {
+                    logger.warn({ error: s.reason instanceof Error ? s.reason.message : String(s.reason) }, 'Skipping URL due to scraping failure.');
+                }
             }
         }
+
         logger.info(`Step 3: Finished scraping. Scraped ${scrapedData.length} articles.`);
         return { scrapedData, topic };
     },

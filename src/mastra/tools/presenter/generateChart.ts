@@ -28,6 +28,8 @@ const inputSchema = z.object({
   data: z.array(z.number()).describe('The numerical data for the chart.'),
   fileName: z.string().optional().describe('Optional base name for the image. Ignored in buffer mode.'),
   returnBuffer: z.boolean().optional().describe('If true, returns PNG buffer instead of writing a file.'),
+  themeColor1: z.string().optional().describe('Optional primary theme color (hex like #RRGGBB) for styling.'),
+  themeColor2: z.string().optional().describe('Optional secondary theme color for styling.'),
 });
 
 const outputFileSchema = z.object({ imagePath: z.string() });
@@ -41,16 +43,51 @@ const errorResponseSchema = z.object({
 
 const successResponseSchema = z.object({ success: z.literal(true), data: z.union([outputBufferSchema, outputFileSchema]) });
 
+// Singleton ChartJSNodeCanvas and in-memory LRU cache for chart buffers
+let singletonCanvas: ChartJSNodeCanvas | null = null;
+const getCanvas = () => {
+  if (!singletonCanvas) {
+    singletonCanvas = new ChartJSNodeCanvas({ width: 800, height: 450, backgroundColour: 'white' });
+  }
+  return singletonCanvas;
+};
+
+type ChartKey = string;
+const chartCache = new Map<ChartKey, Buffer>();
+const chartCacheOrder: ChartKey[] = [];
+const CHART_CACHE_MAX = 50;
+const makeKey = (o: any) => JSON.stringify(o);
+const cachePut = (k: ChartKey, buf: Buffer) => {
+  if (chartCache.has(k)) return;
+  chartCache.set(k, buf);
+  chartCacheOrder.push(k);
+  if (chartCacheOrder.length > CHART_CACHE_MAX) {
+    const old = chartCacheOrder.shift();
+    if (old) chartCache.delete(old);
+  }
+};
+
 export const generateChartTool = createTool({
   id: 'generate-chart',
   description: 'Generates a chart image (bar, pie, or line) as PNG. Supports on-memory buffer return.',
   inputSchema,
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
-    const { chartType, title, labels, data, fileName, returnBuffer } = context as any;
+    const { chartType, title, labels, data, fileName, returnBuffer, themeColor1, themeColor2 } = context as any;
     logger.info({ chartType, title }, 'Generating chart image (PNG)...');
 
     try {
+      // Style preset derived from optional theme colors
+      const primary = typeof themeColor1 === 'string' && /^#?[0-9a-fA-F]{6}$/.test(themeColor1) ? (themeColor1.startsWith('#') ? themeColor1 : `#${themeColor1}`) : '#005A9C';
+      const secondary = typeof themeColor2 === 'string' && /^#?[0-9a-fA-F]{6}$/.test(themeColor2) ? (themeColor2.startsWith('#') ? themeColor2 : `#${themeColor2}`) : '#00B0FF';
+      const alpha = (hex: string, a: number) => {
+        const h = hex.replace('#', '');
+        const r = parseInt(h.slice(0,2), 16), g = parseInt(h.slice(2,4), 16), b = parseInt(h.slice(4,6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${a})`;
+      };
+      const palette = [primary, secondary, '#FFC107', '#4CAF50', '#9C27B0', '#FF7043'];
+      const bgPalette = palette.map((c, i) => alpha(c, chartType === 'pie' ? 0.9 : 0.7));
+
       const chartConfig: ChartConfiguration = {
         type: chartType,
         data: {
@@ -58,28 +95,36 @@ export const generateChartTool = createTool({
           datasets: [{
             label: title,
             data: data,
-            backgroundColor: [
-              'rgba(0, 90, 156, 0.7)', 'rgba(255, 99, 132, 0.7)', 'rgba(54, 162, 235, 0.7)',
-              'rgba(255, 206, 86, 0.7)', 'rgba(75, 192, 192, 0.7)', 'rgba(153, 102, 255, 0.7)'
-            ],
-            borderColor: 'rgba(0, 90, 156, 1)',
+            backgroundColor: bgPalette,
+            borderColor: alpha(primary, 1),
             borderWidth: 1,
+            ...(chartType === 'bar' ? { borderRadius: 6, borderSkipped: false } : {}),
+            ...(chartType === 'line' ? { tension: 0.35, fill: true, pointRadius: 3, pointHoverRadius: 4, backgroundColor: alpha(primary, 0.15) } : {}),
           }],
         },
         options: {
+          responsive: false,
+          maintainAspectRatio: false,
+          layout: { padding: 16 },
           plugins: {
-            title: { display: true, text: title, font: { size: 16 } },
-            legend: { display: chartType === 'pie' }
+            title: { display: true, text: title, font: { size: 18, family: 'Yu Gothic' }, color: '#111' },
+            legend: { display: chartType === 'pie', position: 'bottom', labels: { font: { family: 'Yu Gothic' } } },
           },
         },
       };
 
       if (chartType !== 'pie') {
-        chartConfig.options!.scales = { y: { beginAtZero: true } };
+        chartConfig.options!.scales = {
+          x: { grid: { display: false }, ticks: { font: { family: 'Yu Gothic' } } },
+          y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.08)' }, ticks: { font: { family: 'Yu Gothic' } } },
+        } as any;
       }
 
-      const chartJSNodeCanvas = new ChartJSNodeCanvas({ width: 800, height: 450, backgroundColour: 'white' });
-      const buffer = await chartJSNodeCanvas.renderToBuffer(chartConfig, 'image/png');
+      const key = makeKey({ chartType, title, labels, data, primary, secondary });
+      const hit = chartCache.get(key);
+      const canvas = getCanvas();
+      const buffer = hit || await canvas.renderToBuffer(chartConfig, 'image/png');
+      if (!hit) cachePut(key, buffer);
 
       // Prefer buffer mode by default
       if (returnBuffer !== false) {
