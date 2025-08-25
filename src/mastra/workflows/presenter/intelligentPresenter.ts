@@ -26,6 +26,101 @@ const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid 6-
 /**
  * Defines the structure for a single slide's design, as determined by the design AI.
  */
+const visualRecipeKpiSchema = z.object({
+  type: z.literal('kpi'),
+  items: z.array(z.object({ label: z.string(), value: z.string(), icon: z.string().optional() })).min(1),
+});
+const visualRecipeComparisonSchema = z.object({
+  type: z.literal('comparison'),
+  a: z.object({ label: z.string(), value: z.string() }),
+  b: z.object({ label: z.string(), value: z.string() }),
+});
+const visualRecipeTimelineSchema = z.object({
+  type: z.literal('timeline'),
+  steps: z.array(z.object({ label: z.string() })).min(2),
+});
+const visualRecipeMatrixSchema = z.object({
+  type: z.literal('matrix'),
+  axes: z.object({ xLabels: z.tuple([z.string(), z.string()]), yLabels: z.tuple([z.string(), z.string()]) }),
+  items: z.array(z.object({ x: z.number().int().min(0).max(1), y: z.number().int().min(0).max(1), label: z.string() })).optional(),
+});
+const visualRecipeFunnelSchema = z.object({
+  type: z.literal('funnel'),
+  steps: z.array(z.object({ label: z.string(), value: z.string().optional() })).min(2),
+});
+const visualRecipeProcessSchema = z.object({
+  type: z.literal('process'),
+  steps: z.array(z.object({ label: z.string() })).min(2),
+});
+const visualRecipeRoadmapSchema = z.object({
+  type: z.literal('roadmap'),
+  milestones: z.array(z.object({ label: z.string(), date: z.string().optional() })).min(2),
+});
+const visualRecipeKpiDonutSchema = z.object({
+  type: z.literal('kpi_donut'),
+  items: z.array(z.object({ label: z.string(), value: z.number().min(0).max(100) })).min(1),
+});
+const visualRecipeProgressSchema = z.object({
+  type: z.literal('progress'),
+  items: z.array(z.object({ label: z.string(), value: z.number().min(0).max(100) })).min(1),
+});
+const visualRecipeGanttSchema = z.object({
+  type: z.literal('gantt'),
+  tasks: z.array(z.object({ label: z.string(), start: z.string(), end: z.string() })).min(1),
+});
+const visualRecipeHeatmapSchema = z.object({
+  type: z.literal('heatmap'),
+  x: z.array(z.string()).min(1),
+  y: z.array(z.string()).min(1),
+  z: z.array(z.array(z.number())),
+});
+const visualRecipeVenn2Schema = z.object({
+  type: z.literal('venn2'),
+  a: z.object({ label: z.string(), size: z.number().min(0) }),
+  b: z.object({ label: z.string(), size: z.number().min(0) }),
+  overlap: z.number().min(0),
+});
+const visualRecipePyramidSchema = z.object({
+  type: z.literal('pyramid'),
+  steps: z.array(z.object({ label: z.string(), value: z.number().optional() })).min(2),
+});
+const visualRecipeWaterfallSchema = z.object({
+  type: z.literal('waterfall'),
+  items: z.array(z.object({ label: z.string(), delta: z.number() })).min(1),
+});
+const visualRecipeBulletSchema = z.object({
+  type: z.literal('bullet'),
+  items: z.array(z.object({ label: z.string(), value: z.number(), target: z.number() })).min(1),
+});
+const visualRecipeMapMarkersSchema = z.object({
+  type: z.literal('map_markers'),
+  markers: z.array(z.object({ label: z.string(), x: z.number().min(0).max(1), y: z.number().min(0).max(1) })).min(1),
+});
+const visualRecipeCalloutsSchema = z.object({
+  type: z.literal('callouts'),
+  items: z.array(z.object({ label: z.string(), value: z.string().optional(), icon: z.string().optional() })).min(1),
+});
+
+const visualRecipeSchema = z.union([
+  visualRecipeKpiSchema,
+  visualRecipeComparisonSchema,
+  visualRecipeTimelineSchema,
+  visualRecipeMatrixSchema,
+  visualRecipeFunnelSchema,
+  visualRecipeProcessSchema,
+  visualRecipeRoadmapSchema,
+  visualRecipeKpiDonutSchema,
+  visualRecipeProgressSchema,
+  visualRecipeGanttSchema,
+  visualRecipeHeatmapSchema,
+  visualRecipeVenn2Schema,
+  visualRecipePyramidSchema,
+  visualRecipeWaterfallSchema,
+  visualRecipeBulletSchema,
+  visualRecipeMapMarkersSchema,
+  visualRecipeCalloutsSchema,
+]);
+
 const slideDesignSchema = z.object({
   title: z.string().describe("The main title of the slide."),
   layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote'])
@@ -34,6 +129,7 @@ const slideDesignSchema = z.object({
   visual_suggestion: z.enum(['bar_chart', 'pie_chart', 'line_chart', 'none']).describe("The suggested type of visual for the slide."),
   context_for_visual: z.string().describe("The specific topic or data context from the report needed to create the visual."),
   special_content: z.string().optional().describe("Special content for layouts like 'quote'."),
+  visual_recipe: visualRecipeSchema.optional().nullable().describe("Optional infographic recipe for shapes/icons/timelines/etc."),
 });
 type SlideDesign = z.infer<typeof slideDesignSchema>;
 
@@ -159,6 +255,33 @@ export const intelligentPresenterWorkflow = createWorkflow({
             - "visual_suggestion": 'bar_chart' | 'pie_chart' | 'line_chart' | 'none' (グラフの提案、不要なら'none')
             - "context_for_visual": string (グラフ作成に必要な文脈)
             - "special_content": string (任意。引用レイアウトの場合の引用文など)
+            - "visual_recipe": object (任意。以下のいずれかの厳密スキーマで返してください)
+                1) KPI: { "type": "kpi", "items": [{"label": string, "value": string, "icon"?: string}] }
+                2) 比較: { "type": "comparison", "a": {"label": string, "value": string}, "b": {"label": string, "value": string} }
+                3) タイムライン: { "type": "timeline", "steps": [{"label": string}, ...] }
+                4) マトリクス: { "type": "matrix", "axes": { "xLabels": [string,string], "yLabels": [string,string] }, "items"?: [{"x":0|1, "y":0|1, "label": string}] }
+                5) ファネル: { "type": "funnel", "steps": [{"label": string, "value"?: string}, ...] }
+                6) プロセス: { "type": "process", "steps": [{"label": string}, ...] }
+                7) ロードマップ: { "type": "roadmap", "milestones": [{"label": string, "date"?: string}, ...] }
+                8) KPIドーナツ: { "type": "kpi_donut", "items": [{"label": string, "value": number(0-100)}] }
+                9) 進捗バー群: { "type": "progress", "items": [{"label": string, "value": number(0-100)}] }
+                10) ガント簡易: { "type": "gantt", "tasks": [{"label": string, "start": string, "end": string}] }
+                11) ヒートマップ2D: { "type": "heatmap", "x": string[], "y": string[], "z": number[][] }
+                12) ベン図(2要素): { "type": "venn2", "a": {"label": string, "size": number}, "b": {"label": string, "size": number}, "overlap": number }
+                13) ピラミッド: { "type": "pyramid", "steps": [{"label": string, "value"?: number}] }
+                14) ウォーターフォール: { "type": "waterfall", "items": [{"label": string, "delta": number}] }
+                15) バレット: { "type": "bullet", "items": [{"label": string, "value": number, "target": number}] }
+                16) ロケーション(地図風): { "type": "map_markers", "markers": [{"label": string, "x": number(0-1), "y": number(0-1)}] }
+                17) コールアウト/バッジ: { "type": "callouts", "items": [{"label": string, "value"?: string, "icon"?: string}] }
+
+            重要な表記ルール（短文化/名詞化/非会話体）:
+            - タイトル: 名詞句/1行/最大26文字。動詞「〜する」等を避ける。絵文字・過度な記号を避ける。
+            - セクション見出し: 名詞句/1行/最大24文字。
+            - 箇条書き: 各項目は名詞句中心。1項目は最大3行、各行最大22文字。冗長表現や話し言葉を避ける。
+            - 引用文: 最大4行。長文は要約・抜粋して簡潔に。
+            - content系タイトルもタイトルの制約に準拠。
+            - 全体として、会話体/敬体（です・ます）を避け、資料の見出し・要点として自然な書き言葉の名詞句で短くまとめる。
+            - visual_recipe の各ラベル（KPI/タイムライン等）は原則12文字以内。
             
             最初のスライドは必ず layout: 'title_slide' にし、途中に区切りとして layout: 'section_header' を適切に配置してください。
             --- レポート ---
@@ -376,7 +499,24 @@ export const intelligentPresenterWorkflow = createWorkflow({
         const batchObjective = `You are a presentation content generator. Given an array of slides and the report body, output a JSON object strictly in the following format (no extra commentary):
 {
   "slides": [
-    { "idx": number, "speech": string, "chartData": null | { "chart_type": "bar"|"pie"|"line", "title": string, "labels": string[], "data": number[] } }
+    { "idx": number, "speech": string, "chartData": null | { "chart_type": "bar"|"pie"|"line", "title": string, "labels": string[], "data": number[] }, "visual_recipe": null | (
+      { "type": "kpi", "items": [{"label": string, "value": string, "icon"?: string}] } |
+      { "type": "comparison", "a": {"label": string, "value": string}, "b": {"label": string, "value": string} } |
+      { "type": "timeline", "steps": [{"label": string}, ...] } |
+      { "type": "matrix", "axes": { "xLabels": [string,string], "yLabels": [string,string] }, "items"?: [{"x":0|1, "y":0|1, "label": string}] } |
+      { "type": "funnel", "steps": [{"label": string, "value"?: string}, ...] } |
+      { "type": "process", "steps": [{"label": string}, ...] } |
+      { "type": "roadmap", "milestones": [{"label": string, "date"?: string}, ...] } |
+      { "type": "kpi_donut", "items": [{"label": string, "value": number(0-100)}] } |
+      { "type": "progress", "items": [{"label": string, "value": number(0-100)}] } |
+      { "type": "gantt", "tasks": [{"label": string, "start": string, "end": string}] } |
+      { "type": "heatmap", "x": string[], "y": string[], "z": number[][] } |
+      { "type": "venn2", "a": {"label": string, "size": number}, "b": {"label": string, "size": number}, "overlap": number } |
+      { "type": "pyramid", "steps": [{"label": string, "value"?: number}] } |
+      { "type": "waterfall", "items": [{"label": string, "delta": number}] } |
+      { "type": "bullet", "items": [{"label": string, "value": number, "target": number}] } |
+      { "type": "map_markers", "markers": [{"label": string, "x": number, "y": number}] }
+    ) }
   ]
 }
 Rules:
@@ -384,12 +524,19 @@ Rules:
 - If a slide's visual_suggestion is 'none', set chartData to null.
 - If chartData is provided, labels.length must equal data.length and data values must be numbers.
 - Use the slide's context_for_visual only when chartData is required.
+- If chartData is null but a visual is useful, propose a simple visual_recipe such as KPI cards or a short timeline. Keep it minimal and structured.
+Shortening and style constraints (Japanese):
+- Titles and section headers must be noun phrases, no verbs like "〜する". 1 line only. Title max 26 chars, section max 24 chars.
+- Content titles must also be noun phrases, 1 line, max 24 chars.
+- Bullets are concise lead phrases (noun-based), each item up to 3 lines, each line up to 22 chars; avoid spoken style.
+- Quotes up to 4 lines; summarize if longer.
+- Avoid emojis and excessive symbols. Use formal written style fit for slide headlines.
 `;
 
         const combined = `# Slides\n\n${JSON.stringify(slidesInput, null, 2)}\n\n# Report\n\n${reportContent}`;
         const batchRes = await summarizeAndAnalyzeTool.execute({ ...params, context: { text: combined, objective: batchObjective, temperature: 0.4, topP: 0.9 } });
 
-        let idxToResult = new Map<number, { speech: string; chartData: any | null }>();
+        let idxToResult = new Map<number, { speech: string; chartData: any | null; visual_recipe: z.infer<typeof visualRecipeSchema> | null }>();
         if (batchRes.success) {
             const parsed = parseJsonStrings(batchRes.data.summary) as any;
             const arr = Array.isArray(parsed?.slides) ? parsed.slides : [];
@@ -404,7 +551,17 @@ Rules:
                         chartData = chartDataSchema.parse(it.chartData);
                     } catch { chartData = null; }
                 }
-                idxToResult.set(i, { speech: speech || '（原稿の生成に失敗しました）', chartData });
+                let visual_recipe: z.infer<typeof visualRecipeSchema> | null = null;
+                if (it && typeof it === 'object') {
+                    if ((it as any).visual_recipe === null) {
+                        // normalize null -> undefined
+                    } else if ((it as any).visual_recipe) {
+                        const vr = (it as any).visual_recipe;
+                        const parsedVr = visualRecipeSchema.safeParse(vr);
+                        visual_recipe = parsedVr.success ? parsedVr.data : null;
+                    }
+                }
+                idxToResult.set(i, { speech: speech || '（原稿の生成に失敗しました）', chartData, visual_recipe });
             }
         } else {
             logger.warn('Batch generation failed; falling back to empty results.');
@@ -417,7 +574,8 @@ Rules:
             if (design.visual_suggestion !== 'none') {
                 chartData = got?.chartData || null;
             }
-            return { design, chartData, speech };
+            const normalizedVr = (got?.visual_recipe === null ? undefined : got?.visual_recipe) ?? (design.visual_recipe === null ? undefined : design.visual_recipe);
+            return { design: { ...design, visual_recipe: normalizedVr }, chartData, speech } as any;
         });
 
         return { enrichedSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, titleSlideImageBuffer };
@@ -458,6 +616,8 @@ Rules:
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
+        titleSlideImageBuffer: z.any().optional(),
+        visualRecipes: z.array(z.any()).optional(),
         errorMessage: z.string().optional(),
     }),
     execute: async (params) => {
@@ -473,7 +633,7 @@ Rules:
             // Attempt to generate a chart if data is present
             if (slide.chartData) {
                 const { chart_type, ...restOfChartData } = slide.chartData;
-                const chartResult = await generateChartTool.execute({ ...params, context: { ...restOfChartData, chartType: chart_type, fileName: `chart_${fileNameBase}_${index}`, returnBuffer: true }});
+                const chartResult = await generateChartTool.execute({ ...params, context: { ...restOfChartData, chartType: chart_type, fileName: `chart_${fileNameBase}_${index}`, returnBuffer: true, themeColor1, themeColor2 }});
                 if (chartResult.success) {
                     const d: any = chartResult.data as any;
                     if (d?.buffer) {
@@ -485,6 +645,8 @@ Rules:
                     logger.warn({ slideTitle: slide.design.title }, "Chart generation failed, proceeding without an image.");
                 }
             }
+
+            // (reverted) do not generate special image for section headers
 
             // Fallback logic: If layout requires a visual but we don't have one, change layout.
             let finalLayout = slide.design.layout;
@@ -506,7 +668,9 @@ Rules:
         });
 
         const finalSlides = await Promise.all(finalSlidesPromises);
-        return { finalSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath };
+        const titleBuffer = (params.inputData as any).titleSlideImageBuffer;
+        const visualRecipes = enrichedSlides.map(s => (s as any).design?.visual_recipe ?? null);
+        return { finalSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, titleSlideImageBuffer: titleBuffer, visualRecipes };
     },
 }))
 .then(createStep({
@@ -529,11 +693,13 @@ Rules:
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
+        titleSlideImageBuffer: z.any().optional(),
+        visualRecipes: z.array(z.any()).optional(),
         errorMessage: z.string().optional(),
     }),
     outputSchema: finalOutputSchema,
     execute: async (params) => {
-        const { finalSlides, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath } = params.inputData;
+        const { finalSlides, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, titleSlideImageBuffer, visualRecipes } = params.inputData as any;
         if (errorMessage) {
             return { success: false, message: errorMessage } as const;
         }
@@ -545,6 +711,9 @@ Rules:
             themeColor1,
             themeColor2,
             titleSlideImagePath,
+            titleSlideImageBuffer,
+            styleTokens: { primary: themeColor1, secondary: themeColor2, accent: '#FFC107', cornerRadius: 12, outlineColor: '#FFFFFF' },
+            visualRecipes,
         }});
 
         if (!pptResult.success) {

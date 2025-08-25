@@ -23,6 +23,15 @@ const JPN_FONT = 'Yu Gothic';
 // Define a master slide layout for a consistent look and feel
 const MASTER_SLIDE = 'MASTER_SLIDE';
 
+function lightenHex(hex: string, amount: number): string {
+  const h = (hex || '#E6F7FF').replace('#', '');
+  const r = Math.min(255, Math.round(parseInt(h.slice(0,2) || 'E6', 16) + amount));
+  const g = Math.min(255, Math.round(parseInt(h.slice(2,4) || 'F7', 16) + amount));
+  const b = Math.min(255, Math.round(parseInt(h.slice(4,6) || 'FF', 16) + amount));
+  const toHex = (n: number) => n.toString(16).padStart(2, '0').toUpperCase();
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
 /**
  * Wraps text at word or punctuation boundaries up to a max character length per line.
  * Works for both spaced (EN) and unspaced (JA) texts by using breakable characters.
@@ -55,6 +64,31 @@ function wrapTextAtWordBoundaries(text: string, maxCharsPerLine: number): string
   return lines.join('\n');
 }
 
+// Memoization caches
+const wrapMemo = new Map<string, string>();
+const fitMemo = new Map<string, { text: string; fontSize: number; wrapChars: number }>();
+const colonMemo = new Map<string, string>();
+const bufferToDataUrlMemo = new WeakMap<Buffer, string>();
+
+// Wrap with memo
+function wrapWithMemo(text: string, maxCharsPerLine: number): string {
+  const key = `${maxCharsPerLine}|${text}`;
+  const hit = wrapMemo.get(key);
+  if (hit) return hit;
+  const out = wrapTextAtWordBoundaries(text, maxCharsPerLine);
+  wrapMemo.set(key, out);
+  return out;
+}
+
+// Convert Buffer to data URL with WeakMap cache
+function bufferToDataUrl(buf: Buffer): string {
+  const hit = bufferToDataUrlMemo.get(buf);
+  if (hit) return hit;
+  const url = `data:image/png;base64,${buf.toString('base64')}`;
+  bufferToDataUrlMemo.set(buf, url);
+  return url;
+}
+
 /**
  * Formats a single bullet that may contain a title and content separated by '：' or ':'.
  * The content is wrapped and subsequent lines are indented to align after the colon.
@@ -68,14 +102,22 @@ function formatColonSeparatedBullet(bullet: string, maxContentLineChars: number,
   })();
   if (idx <= 0) {
     // No colon pattern found; fallback to a gentle wrap of the whole bullet
-    return wrapTextAtWordBoundaries(bullet, maxContentLineChars);
+    return wrapWithMemo(bullet, maxContentLineChars);
   }
   const title = bullet.slice(0, idx).trim();
   let content = bullet.slice(idx + 1).trim();
   if (!content) return bullet.trim();
-  // Wrap content only
-  const wrapped = wrapTextAtWordBoundaries(content, maxContentLineChars);
+  // Wrap content only (memoized)
+  const wrapped = wrapWithMemo(content, maxContentLineChars);
   const contentLines = wrapped.split('\n');
+  // Ensure that the first line after the colon does NOT immediately wrap
+  const firstLineCapacity = Math.max(1, maxContentLineChars - (title.length + 1));
+  if (contentLines.length > 0 && contentLines[0].length > firstLineCapacity) {
+    const overflow = contentLines[0].length - firstLineCapacity;
+    const move = contentLines[0].slice(firstLineCapacity);
+    contentLines[0] = contentLines[0].slice(0, firstLineCapacity);
+    if (contentLines.length > 1) contentLines[1] = move + contentLines[1]; else contentLines.push(move);
+  }
   const first = `${title}：${contentLines[0]}`;
   // Use full-width spaces to create a visual hanging indent for subsequent lines
   const clamped = Math.max(2, Math.min(indentCols, 8));
@@ -115,6 +157,47 @@ function preventLeadingPunctuation(text: string): string {
 }
 
 /**
+ * Formats quote text into 2-4 short lines by removing surrounding quotes,
+ * collapsing spaces/newlines, and splitting at Japanese punctuation while
+ * respecting a max characters per line budget.
+ */
+function formatQuoteLines(raw: string, maxCharsPerLine: number): string {
+  if (!raw) return '';
+  let text = (raw || '')
+    .replace(/[\r\t\v\f]+/g, ' ')
+    .replace(/\n+/g, '\n')
+    .trim();
+  // Strip surrounding quotes (Japanese and Latin)
+  text = text.replace(/^[“”"『「\s]+/, '').replace(/[””"』」\s]+$/, '');
+  // If content still contains line breaks, respect them as hard breaks
+  const paragraphs = text.split('\n').map((p) => p.trim()).filter(Boolean);
+  const source = paragraphs.length > 0 ? paragraphs.join(' ') : text;
+  // Tokenize by punctuation to keep natural breaks
+  const tokens = source.split(/(?<=[。．！!？?、,，])/);
+  const lines: string[] = [];
+  let current = '';
+  for (const t of tokens) {
+    const chunk = t.trim();
+    if (!chunk) continue;
+    if ((current + (current ? '' : '') + chunk).length > maxCharsPerLine) {
+      if (current) lines.push(current);
+      current = chunk;
+    } else {
+      current = current ? current + chunk : chunk;
+    }
+  }
+  if (current) lines.push(current);
+  // Limit to 4 lines, append ellipsis if needed
+  if (lines.length > 4) {
+    const kept = lines.slice(0, 4);
+    const last = kept[3];
+    kept[3] = last.length > maxCharsPerLine ? last.slice(0, Math.max(0, maxCharsPerLine - 1)) + '…' : last + '…';
+    return kept.join('\n');
+  }
+  return lines.join('\n');
+}
+
+/**
  * Dynamically fits bullets to a target number of lines per bullet by
  * adjusting wrap width in proportion to font size, and reducing font size if needed.
  */
@@ -124,7 +207,8 @@ function fitBulletsToLines(
   minFontSize: number,
   baseWrapCharsAtInitial: number,
   indentCols: number,
-  targetMaxLinesPerBullet: number
+  targetMaxLinesPerBullet: number,
+  maxCharsPerBulletHard?: number
 ): { text: string; fontSize: number; wrapChars: number } {
   let fontSize = initialFontSize;
   while (fontSize >= minFontSize) {
@@ -138,7 +222,87 @@ function fitBulletsToLines(
   }
   // Fallback at minimum font size
   const wrapChars = Math.max(8, Math.round(baseWrapCharsAtInitial * (minFontSize / initialFontSize)));
-  return { text: bullets.map(b => preventLeadingPunctuation(formatColonSeparatedBullet(b, wrapChars, indentCols))).join('\n'), fontSize: minFontSize, wrapChars };
+  const formattedAtMin = bullets.map(b => preventLeadingPunctuation(formatColonSeparatedBullet(b, wrapChars, indentCols)));
+  if (typeof maxCharsPerBulletHard === 'number' && maxCharsPerBulletHard > 0) {
+    const trimmed = formattedAtMin.map(t => {
+      const lines = t.split('\n');
+      if (lines.length <= targetMaxLinesPerBullet) return t;
+      const cut = lines.slice(0, targetMaxLinesPerBullet);
+      const last = cut[cut.length - 1] || '';
+      const hard = last.length > maxCharsPerBulletHard ? (last.slice(0, Math.max(0, maxCharsPerBulletHard - 1)) + '…') : last + '…';
+      cut[cut.length - 1] = hard;
+      return cut.join('\n');
+    });
+    return { text: trimmed.join('\n'), fontSize: minFontSize, wrapChars };
+  }
+  return { text: formattedAtMin.join('\n'), fontSize: minFontSize, wrapChars };
+}
+
+/**
+ * Fits a block of text to target number of lines by adjusting wrap width
+ * proportional to font size, then reducing font size as needed.
+ */
+function fitTextToLines(
+  text: string,
+  initialFontSize: number,
+  minFontSize: number,
+  baseWrapCharsAtInitial: number,
+  targetMaxLines: number,
+  maxCharsHard?: number,
+  options?: { suppressEllipsis?: boolean; minFontFloor?: number }
+): { text: string; fontSize: number; wrapChars: number } {
+  const memoKey = JSON.stringify({ text, initialFontSize, minFontSize, baseWrapCharsAtInitial, targetMaxLines, maxCharsHard, options });
+  const hit = fitMemo.get(memoKey);
+  if (hit) return hit;
+  let fontSize = initialFontSize;
+  const normalized = preventLeadingPunctuation((text || '').replace(/[\t\r\f\v]+/g, ' ').replace(/ +/g, ' ').trim());
+  while (fontSize >= minFontSize) {
+    const wrapChars = Math.max(8, Math.round(baseWrapCharsAtInitial * (fontSize / initialFontSize)));
+    const wrapped = wrapWithMemo(normalized, wrapChars);
+    const lines = wrapped.split('\n');
+    if (lines.length <= targetMaxLines) {
+      const out = { text: wrapped, fontSize, wrapChars };
+      fitMemo.set(memoKey, out);
+      return out;
+    }
+    fontSize -= 1;
+  }
+  if (options?.minFontFloor && options.minFontFloor < minFontSize) {
+    while (fontSize >= options.minFontFloor) {
+      const wrapChars = Math.max(8, Math.round(baseWrapCharsAtInitial * (fontSize / initialFontSize)));
+      const wrapped = wrapWithMemo(normalized, wrapChars);
+      const lines = wrapped.split('\n');
+      if (lines.length <= targetMaxLines) {
+        const out = { text: wrapped, fontSize, wrapChars };
+        fitMemo.set(memoKey, out);
+        return out;
+      }
+      fontSize -= 1;
+    }
+  }
+  const wrapChars = Math.max(8, Math.round(baseWrapCharsAtInitial * (minFontSize / initialFontSize)));
+  const wrappedMin = wrapWithMemo(normalized, wrapChars);
+  const linesMin = wrappedMin.split('\n');
+  if (linesMin.length > targetMaxLines) {
+    if (options?.suppressEllipsis) {
+      const out = { text: wrappedMin, fontSize: Math.max(options?.minFontFloor ?? minFontSize, 1), wrapChars };
+      fitMemo.set(memoKey, out);
+      return out;
+    }
+    const cut = linesMin.slice(0, targetMaxLines);
+    if (typeof maxCharsHard === 'number' && maxCharsHard > 0) {
+      const last = cut[cut.length - 1] || '';
+      cut[cut.length - 1] = last.length > maxCharsHard ? (last.slice(0, Math.max(0, maxCharsHard - 1)) + '…') : (last + '…');
+    } else {
+      cut[cut.length - 1] = (cut[cut.length - 1] || '') + '…';
+    }
+    const out = { text: cut.join('\n'), fontSize: minFontSize, wrapChars };
+    fitMemo.set(memoKey, out);
+    return out;
+  }
+  const out = { text: wrappedMin, fontSize: minFontSize, wrapChars };
+  fitMemo.set(memoKey, out);
+  return out;
 }
 
 /**
@@ -162,6 +326,15 @@ const inputSchema = z.object({
   themeColor2: z.string().optional().describe('The secondary hex color for the background gradient.'),
   titleSlideImagePath: z.string().optional().describe('An optional path to a background image for the title slide.'),
   titleSlideImageBuffer: z.any().optional().describe('Optional PNG buffer or data URL for the title slide background.'),
+  // Optional tokenized style parameters to unify theme
+  styleTokens: z.object({
+    primary: z.string().optional(),
+    secondary: z.string().optional(),
+    accent: z.string().optional(),
+    cornerRadius: z.number().optional(),
+    outlineColor: z.string().optional(),
+  }).optional(),
+  visualRecipes: z.array(z.any()).optional().describe('Per-slide visual recipe list aligned by index.'),
 });
 
 const outputSchema = z.object({
@@ -186,6 +359,12 @@ export const createPowerpointTool = createTool({
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
     const { fileName, slides, themeColor1, themeColor2, titleSlideImagePath } = context;
+    const styleTokens = (context as any).styleTokens || {};
+    const primary = typeof styleTokens.primary === 'string' ? styleTokens.primary : (themeColor1 || '#0B5CAB');
+    const secondary = typeof styleTokens.secondary === 'string' ? styleTokens.secondary : (themeColor2 || '#00B0FF');
+    const accent = typeof styleTokens.accent === 'string' ? styleTokens.accent : '#FFC107';
+    const cornerRadius = typeof styleTokens.cornerRadius === 'number' ? styleTokens.cornerRadius : 12;
+    const outlineColor = typeof styleTokens.outlineColor === 'string' ? styleTokens.outlineColor : '#FFFFFF';
     const presenterDir = config.presentationsDir;
     const filePath = path.join(presenterDir, `${fileName}.pptx`);
 
@@ -219,11 +398,326 @@ export const createPowerpointTool = createTool({
             ],
         });
 
+        // Draw infographic primitives on the given slide
+        function drawInfographic(targetSlide: any, type: string, payload: any, region?: { x: number; y: number; w: number; h: number }) {
+            const rx = region?.x ?? 0.8;
+            const ry = region?.y ?? 3.6;
+            const rw = region?.w ?? 8.4;
+            const rh = region?.h ?? 2.2;
+            switch (type) {
+                case 'kpi_donut': {
+                    const items = Array.isArray(payload?.items) ? payload.items : [];
+                    const values = items.map((it: any) => Number(it?.value ?? 0)).filter((n: number) => Number.isFinite(n) && n >= 0);
+                    const sum = values.reduce((a: number, b: number) => a + b, 0);
+                    const isDistribution = items.length >= 4 || (sum > 95 && sum < 105);
+                    if (isDistribution) {
+                        // Render as doughnut chart for multi-category distribution
+                        const labels = items.map((it: any) => String(it?.label ?? ''));
+                        const data = [{ name: 'Share', labels, values }];
+                        const colors = labels.map((_: string, i: number) => (i % 3 === 0 ? primary : i % 3 === 1 ? secondary : lightenHex(accent, 40)));
+                        try {
+                            (targetSlide as any).addChart((PptxGenJS as any).ChartType.doughnut, data, {
+                                x: rx, y: ry, w: rw, h: rh,
+                                showLegend: true, legendPos: 'b',
+                                donutHoleSize: 60,
+                                dataLabelColor: '333333', dataLabelFontSize: 9,
+                                chartColors: colors,
+                            });
+                        } catch {
+                            // Fallback: simple title if chart fails
+                            targetSlide.addText('KPI Donut', { x: rx, y: ry, w: rw, h: 0.3, fontSize: 12, bold: true, fontFace: JPN_FONT });
+                        }
+                    } else {
+                        // Render 1-3 concentric progress rings
+                        const cx = rx + rw / 2;
+                        const cy = ry + rh / 2;
+                        const radius = Math.min(rw, rh) / 2 - 0.1;
+                        items.slice(0, 3).forEach((it: any, i: number) => {
+                            const r = radius - i * 0.3;
+                            const v = Math.max(0, Math.min(100, Number(it?.value ?? 0)));
+                            // background ring
+                            targetSlide.addShape(pres.ShapeType.ellipse, { x: cx - r, y: cy - r, w: 2 * r, h: 2 * r, line: { color: '#CCCCCC', width: 2 } });
+                            // foreground arc approximation using pie slice (limited API)
+                            const wedgeDeg = Math.max(0, Math.min(359.9, (v / 100) * 360));
+                            targetSlide.addShape(pres.ShapeType.pie, { x: cx - r, y: cy - r, w: 2 * r, h: 2 * r, fill: { color: i % 2 ? secondary : primary }, angle: wedgeDeg } as any);
+                            targetSlide.addText(String(it?.label ?? ''), { x: cx - r, y: cy + r + 0.05 + i * 0.25, w: 2 * r, h: 0.25, fontSize: 10, align: 'center', fontFace: JPN_FONT });
+                        });
+                    }
+                    break;
+                }
+                case 'progress': {
+                    const items = Array.isArray(payload?.items) ? payload.items : [];
+                    const barH = Math.min(0.4, rh / Math.max(1, items.length) - 0.1);
+                    items.slice(0, 5).forEach((it: any, i: number) => {
+                        const y = ry + i * (barH + 0.15);
+                        targetSlide.addText(String(it?.label ?? ''), { x: rx, y, w: rw * 0.35, h: barH, fontSize: 11, fontFace: JPN_FONT });
+                        targetSlide.addShape(pres.ShapeType.rect, { x: rx + rw * 0.4, y, w: rw * 0.55, h: barH, fill: { color: '#EEEEEE' }, line: { color: '#DDDDDD', width: 0.5 } });
+                        const v = Math.max(0, Math.min(100, Number(it?.value ?? 0)));
+                        targetSlide.addShape(pres.ShapeType.rect, { x: rx + rw * 0.4, y, w: (rw * 0.55) * (v / 100), h: barH, fill: { color: primary }, line: { color: primary, width: 0 } });
+                    });
+                    break;
+                }
+                case 'gantt': {
+                    const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
+                    const barH = Math.min(0.35, rh / Math.max(1, tasks.length) - 0.08);
+                    // naive scale: position by index since we don't parse dates here
+                    tasks.slice(0, 6).forEach((t: any, i: number) => {
+                        const y = ry + i * (barH + 0.12);
+                        targetSlide.addText(String(t?.label ?? ''), { x: rx, y, w: rw * 0.25, h: barH, fontSize: 10, fontFace: JPN_FONT });
+                        targetSlide.addShape(pres.ShapeType.rect, { x: rx + rw * 0.28, y, w: rw * 0.65, h: barH, fill: { color: lightenHex(secondary, 20) }, line: { color: secondary, width: 0.5 } });
+                    });
+                    break;
+                }
+                case 'heatmap': {
+                    const xLabels = Array.isArray(payload?.x) ? payload.x : [];
+                    const yLabels = Array.isArray(payload?.y) ? payload.y : [];
+                    const z: number[][] = Array.isArray(payload?.z) ? payload.z : [];
+                    const cols = Math.max(1, xLabels.length);
+                    const rows = Math.max(1, yLabels.length);
+                    const cellW = rw / cols;
+                    const cellH = rh / rows;
+                    for (let r = 0; r < rows; r++) {
+                        for (let c = 0; c < cols; c++) {
+                            const v = Math.max(0, Math.min(1, Number((z[r] || [])[c] || 0)));
+                            const col = Math.round(255 * (1 - v));
+                            const color = `#${col.toString(16).padStart(2,'0')}${lightenHex('#00',0)}${(255 - col).toString(16).padStart(2,'0')}`.slice(0,7);
+                            targetSlide.addShape(pres.ShapeType.rect, { x: rx + c * cellW, y: ry + r * cellH, w: cellW, h: cellH, fill: { color }, line: { color: '#FFFFFF', width: 0.5 } });
+                        }
+                    }
+                    break;
+                }
+                case 'venn2': {
+                    const a = payload?.a, b = payload?.b, overlap = Math.max(0, Number(payload?.overlap ?? 0));
+                    const r = Math.min(rw, rh) / 3;
+                    const cx1 = rx + rw / 2 - r * 0.6;
+                    const cx2 = rx + rw / 2 + r * 0.6;
+                    const cy = ry + rh / 2;
+                    targetSlide.addShape(pres.ShapeType.ellipse, { x: cx1 - r, y: cy - r, w: 2 * r, h: 2 * r, fill: { color: lightenHex(primary, 40) }, line: { color: primary, width: 1 } });
+                    targetSlide.addShape(pres.ShapeType.ellipse, { x: cx2 - r, y: cy - r, w: 2 * r, h: 2 * r, fill: { color: lightenHex(secondary, 40) }, line: { color: secondary, width: 1 } });
+                    targetSlide.addText(String(a?.label ?? 'A'), { x: cx1 - r, y: cy + r + 0.05, w: 2 * r, h: 0.25, fontSize: 10, align: 'center', fontFace: JPN_FONT });
+                    targetSlide.addText(String(b?.label ?? 'B'), { x: cx2 - r, y: cy + r + 0.05, w: 2 * r, h: 0.25, fontSize: 10, align: 'center', fontFace: JPN_FONT });
+                    break;
+                }
+                case 'pyramid': {
+                    const steps = Array.isArray(payload?.steps) ? payload.steps : [];
+                    const layers = Math.min(5, steps.length);
+                    for (let i = 0; i < layers; i++) {
+                        const y = ry + i * (rh / layers);
+                        const width = rw * (1 - i * 0.15);
+                        targetSlide.addShape(pres.ShapeType.triangle, { x: rx + (rw - width)/2, y, w: width, h: rh / layers - 0.05, fill: { color: i % 2 ? secondary : primary }, line: { color: '#FFFFFF', width: 0.5 } });
+                        targetSlide.addText(String(steps[i]?.label ?? ''), { x: rx, y: y + 0.02, w: rw, h: rh / layers - 0.09, fontSize: 11, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: JPN_FONT });
+                    }
+                    break;
+                }
+                case 'waterfall': {
+                    const items = Array.isArray(payload?.items) ? payload.items : [];
+                    const sliced = items.slice(0, 8);
+                    const count = Math.max(1, sliced.length);
+                    const gap = 0.2;
+                    const totalGap = gap * Math.max(0, count - 1);
+                    const barW = Math.max(0.2, (rw - totalGap) / count);
+                    const maxAbs = Math.max(1, ...sliced.map((it: any) => Math.abs(Number(it?.delta || 0))));
+                    const maxBarH = rh * 0.85; // leave some top/bottom padding
+                    const scale = maxBarH / maxAbs;
+                    const minBarH = Math.min(0.15, rh * 0.25);
+                    const baseline = ry + rh * 0.55; // slightly above center in the bottom band
+                    let x = rx;
+                    sliced.forEach((it: any) => {
+                        const v = Number(it?.delta || 0);
+                        let h = Math.max(minBarH, Math.abs(v) * scale);
+                        // Clamp to region
+                        if (h > maxBarH) h = maxBarH;
+                        let y = v >= 0 ? (baseline - h) : baseline;
+                        if (y < ry) y = ry;
+                        if (y + h > ry + rh) h = (ry + rh) - y;
+                        targetSlide.addShape(pres.ShapeType.rect, { x, y, w: barW, h, fill: { color: v >= 0 ? secondary : primary }, line: { color: '#FFFFFF', width: 0.5 } });
+                        // value label near bar end
+                        const valText = `${v >= 0 ? '+' : ''}${v}`;
+                        let valY = v >= 0 ? (y - 0.25) : (y + h + 0.05);
+                        if (valY < ry) valY = ry;
+                        if (valY + 0.3 > ry + rh) valY = ry + rh - 0.3;
+                        targetSlide.addText(valText, { x: x - 0.2, y: valY, w: barW + 0.4, h: 0.3, fontSize: 10, align: 'center', fontFace: JPN_FONT });
+                        // category label at baseline
+                        let labY = baseline + 0.1;
+                        if (labY + 0.3 > ry + rh) labY = ry + rh - 0.3;
+                        targetSlide.addText(String(it?.label ?? ''), { x: x - 0.3, y: labY, w: barW + 0.6, h: 0.3, fontSize: 10, align: 'center', fontFace: JPN_FONT });
+                        x += barW + gap;
+                    });
+                    break;
+                }
+                case 'bullet': {
+                    const items = Array.isArray(payload?.items) ? payload.items : [];
+                    const rowH = Math.min(0.45, rh / Math.max(1, items.length) - 0.08);
+                    items.slice(0, 5).forEach((it: any, i: number) => {
+                        const y = ry + i * (rowH + 0.12);
+                        targetSlide.addText(String(it?.label ?? ''), { x: rx + 0.1, y, w: rw * 0.25 - 0.1, h: rowH, fontSize: 11, fontFace: JPN_FONT });
+                        const baseX = rx + rw * 0.30;
+                        targetSlide.addShape(pres.ShapeType.rect, { x: baseX, y, w: rw * 0.58, h: rowH, fill: { color: '#EEEEEE' }, line: { color: '#DDDDDD', width: 0.5 } });
+                        const val = Number(it?.value ?? 0), tgt = Number(it?.target ?? 0);
+                        const denom = Math.max(1, Math.max(val, tgt, 100));
+                        const valW = Math.max(0, Math.min(rw * 0.58, (rw * 0.58) * (val / denom)));
+                        const tgtX = baseX + Math.max(0, Math.min(rw * 0.58, (rw * 0.58) * (tgt / denom)));
+                        targetSlide.addShape(pres.ShapeType.rect, { x: baseX, y, w: valW, h: rowH, fill: { color: primary }, line: { color: primary, width: 0 } });
+                        targetSlide.addShape(pres.ShapeType.line, { x: tgtX, y, w: 0, h: rowH, line: { color: '#333333', width: 2 } });
+                    });
+                    break;
+                }
+                case 'map_markers': {
+                    const markers = Array.isArray(payload?.markers) ? payload.markers : [];
+                    // draw a simple placeholder map rect
+                    targetSlide.addShape(pres.ShapeType.rect, { x: rx, y: ry, w: rw, h: rh, fill: { color: '#F2F6FA' }, line: { color: '#DDE3EA', width: 1 } });
+                    markers.slice(0, 8).forEach((m: any) => {
+                        const px = rx + Math.max(0, Math.min(1, Number(m?.x || 0))) * rw;
+                        const py = ry + Math.max(0, Math.min(1, Number(m?.y || 0))) * rh;
+                        targetSlide.addShape(pres.ShapeType.ellipse, { x: px - 0.06, y: py - 0.06, w: 0.12, h: 0.12, fill: { color: accent }, line: { color: '#FFFFFF', width: 0.8 } });
+                        targetSlide.addText(String(m?.label ?? ''), { x: px + 0.1, y: py - 0.06, w: 1.6, h: 0.24, fontSize: 10, fontFace: JPN_FONT });
+                    });
+                    break;
+                }
+                case 'callouts': {
+                    const items = Array.isArray(payload?.items) ? payload.items : [];
+                    items.slice(0, 4).forEach((it: any, i: number) => {
+                        const x = rx + (i % 2) * (rw/2) + 0.1;
+                        const y = ry + Math.floor(i/2) * (rh/2) + 0.1;
+                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: rw/2 - 0.2, h: rh/2 - 0.2, fill: { color: lightenHex(secondary, 60) }, rectRadius: cornerRadius, line: { color: secondary, width: 0.5 } });
+                        targetSlide.addText(String(it?.label ?? ''), { x: x + 0.1, y: y + 0.1, w: rw/2 - 0.4, h: 0.4, fontSize: 12, bold: true, fontFace: JPN_FONT });
+                        if (it?.value) {
+                            targetSlide.addText(String(it.value), { x: x + 0.1, y: y + 0.55, w: rw/2 - 0.4, h: 0.4, fontSize: 14, fontFace: JPN_FONT });
+                        }
+                    });
+                    break;
+                }
+                case 'kpi': {
+                    const items = Array.isArray(payload?.items) ? payload.items : [];
+                    const cardW = Math.min( (rw - 0.6) / 2, 2.2 );
+                    const cardH = Math.min( rh / 2 - 0.2, 1.2 );
+                    const gap = 0.3;
+                    items.slice(0, 4).forEach((it: any, idx: number) => {
+                        const row = Math.floor(idx / 2), col = idx % 2;
+                        const x = rx + 0.3 + col * (cardW + gap);
+                        const y = ry + 0.2 + row * (cardH + gap);
+                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: cornerRadius });
+                        targetSlide.addText(String(it?.value ?? ''), { x: x + 0.15, y: y + 0.18, w: cardW - 0.3, h: cardH * 0.55, fontSize: 16, bold: true, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
+                        targetSlide.addText(String(it?.label ?? ''), { x: x + 0.15, y: y + cardH * 0.65, w: cardW - 0.3, h: cardH * 0.3, fontSize: 11, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
+                    });
+                    break;
+                }
+                case 'matrix': {
+                    const xL = payload?.axes?.xLabels || ['X1','X2'];
+                    const yL = payload?.axes?.yLabels || ['Y1','Y2'];
+                    // Draw 2x2 grid
+                    const gridX = rx;
+                    const gridY = ry;
+                    const gridW = rw;
+                    const gridH = rh;
+                    targetSlide.addShape(pres.ShapeType.rect, { x: gridX, y: gridY, w: gridW, h: gridH, fill: { color: 'FFFFFF' }, line: { color: primary, width: 1 } });
+                    targetSlide.addShape(pres.ShapeType.line, { x: gridX + gridW/2, y: gridY, w: 0, h: gridH, line: { color: primary, width: 1 } });
+                    targetSlide.addShape(pres.ShapeType.line, { x: gridX, y: gridY + gridH/2, w: gridW, h: 0, line: { color: primary, width: 1 } });
+                    // Axis labels
+                    targetSlide.addText(String(xL[0]), { x: gridX + 0.1, y: gridY - 0.3, w: gridW/2 - 0.2, h: 0.25, fontSize: 11, align: 'left', fontFace: JPN_FONT });
+                    targetSlide.addText(String(xL[1]), { x: gridX + gridW/2 + 0.1, y: gridY - 0.3, w: gridW/2 - 0.2, h: 0.25, fontSize: 11, align: 'right', fontFace: JPN_FONT });
+                    targetSlide.addText(String(yL[0]), { x: gridX - 0.45, y: gridY + 0.1, w: 0.45, h: gridH/2 - 0.1, fontSize: 11, valign: 'top', fontFace: JPN_FONT });
+                    targetSlide.addText(String(yL[1]), { x: gridX - 0.45, y: gridY + gridH/2 + 0.1, w: 0.45, h: gridH/2 - 0.1, fontSize: 11, valign: 'top', fontFace: JPN_FONT });
+                    // Items
+                    const items = Array.isArray(payload?.items) ? payload.items : [];
+                    items.slice(0, 6).forEach((it: any) => {
+                        const cx = gridX + (it?.x === 1 ? 3 * gridW/4 : gridW/4);
+                        const cy = gridY + (it?.y === 1 ? 3 * gridH/4 : gridH/4);
+                        targetSlide.addShape(pres.ShapeType.ellipse, { x: cx - 0.08, y: cy - 0.08, w: 0.16, h: 0.16, fill: { color: accent }, line: { color: outlineColor, width: 0.75 } });
+                        targetSlide.addText(String(it?.label ?? ''), { x: cx + 0.12, y: cy - 0.12, w: Math.min(1.8, gridW/2 - 0.3), h: 0.3, fontSize: 10, fontFace: JPN_FONT });
+                    });
+                    break;
+                }
+                case 'funnel': {
+                    const steps = Array.isArray(payload?.steps) ? payload.steps : [];
+                    const startX = rx;
+                    const startY = ry;
+                    const topW = rw;
+                    const height = rh;
+                    const layers = Math.min(4, steps.length);
+                    for (let i = 0; i < layers; i++) {
+                        const tW = topW * (1 - i * 0.15);
+                        const bW = topW * (1 - (i + 1) * 0.15);
+                        const y = startY + (i * (height / layers));
+                        targetSlide.addShape(pres.ShapeType.trapezoid, { x: startX + (topW - tW)/2, y, w: tW, h: height / layers - 0.04, fill: { color: i % 2 ? secondary : primary }, line: { color: outlineColor, width: 0.5 } } as any);
+                        targetSlide.addText(String(steps[i]?.label ?? ''), { x: startX + 0.15, y: y + 0.04, w: topW - 0.3, h: (height / layers) - 0.12, fontSize: 12, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: JPN_FONT });
+                    }
+                    break;
+                }
+                case 'process': {
+                    const steps = Array.isArray(payload?.steps) ? payload.steps : [];
+                    const startX = rx;
+                    const y = ry + rh * 0.20;
+                    const maxSteps = Math.min(4, steps.length);
+                    const gap = 0.5;
+                    const totalGap = gap * Math.max(0, maxSteps - 1);
+                    const stepW = Math.min(1.6, (rw - totalGap) / Math.max(1, maxSteps));
+                    const stepH = Math.min( rh * 0.6, 0.9 );
+                    steps.slice(0, maxSteps).forEach((s: any, i: number) => {
+                        const x = startX + i * (stepW + gap);
+                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: stepW, h: stepH, fill: { color: primary }, rectRadius: cornerRadius, line: { color: outlineColor, width: 0.5 } });
+                        targetSlide.addText(String(s?.label ?? `Step ${i+1}`), { x: x + 0.08, y: y + 0.14, w: stepW - 0.16, h: stepH - 0.28, fontSize: 11, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: JPN_FONT });
+                        if (i < maxSteps - 1) {
+                            // place chevron centered in the gap between items
+                            targetSlide.addShape(pres.ShapeType.chevron, { x: x + stepW + (gap - 0.4) / 2, y: y + (stepH - 0.4) / 2, w: 0.4, h: 0.4, fill: { color: secondary }, line: { color: secondary, width: 0 } } as any);
+                        }
+                    });
+                    break;
+                }
+                case 'roadmap': {
+                    const milestones = Array.isArray(payload?.milestones) ? payload.milestones : [];
+                    const startX = rx;
+                    const startY = ry + rh / 2;
+                    const totalW = rw;
+                    targetSlide.addShape(pres.ShapeType.line, { x: startX, y: startY, w: totalW, h: 0, line: { color: outlineColor, width: 1.2 } });
+                    milestones.slice(0, 6).forEach((m: any, i: number) => {
+                        const cx = startX + (i * (totalW / Math.max(1, milestones.length - 1)));
+                        targetSlide.addShape(pres.ShapeType.ellipse, { x: cx - 0.08, y: startY - 0.08, w: 0.16, h: 0.16, fill: { color: accent }, line: { color: outlineColor, width: 0.8 } });
+                        targetSlide.addText(String(m?.label ?? ''), { x: cx - 0.9, y: startY + 0.18, w: 1.8, h: 0.32, fontSize: 11, align: 'center', fontFace: JPN_FONT });
+                        if (m?.date) {
+                            targetSlide.addText(String(m.date), { x: cx - 0.9, y: startY + 0.52, w: 1.8, h: 0.25, fontSize: 9, align: 'center', color: '666666', fontFace: JPN_FONT });
+                        }
+                    });
+                    break;
+                }
+                case 'comparison': {
+                    const a = payload?.a, b = payload?.b;
+                    const boxW = Math.min((rw - 0.6) / 2, 2.2);
+                    const boxH = Math.min(rh - 0.2, 1.4);
+                    const y = ry + 0.1;
+                    const compRadius = Math.max(2, Math.floor(cornerRadius / 2));
+                    targetSlide.addShape(pres.ShapeType.roundRect, { x: rx + 0.1, y, w: boxW, h: boxH, fill: { color: primary }, rectRadius: compRadius, line: { color: outlineColor, width: 0.5 } });
+                    targetSlide.addShape(pres.ShapeType.roundRect, { x: rx + 0.3 + boxW, y, w: boxW, h: boxH, fill: { color: secondary }, rectRadius: compRadius, line: { color: outlineColor, width: 0.5 } });
+                    targetSlide.addText(String(a?.label ?? 'A'), { x: rx + 0.1, y: y + 0.05, w: boxW, h: 0.4, fontSize: 12, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center' });
+                    targetSlide.addText(String(a?.value ?? ''), { x: rx + 0.1, y: y + 0.5, w: boxW, h: boxH - 0.55, fontSize: 18, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center' });
+                    targetSlide.addText(String(b?.label ?? 'B'), { x: rx + 0.3 + boxW, y: y + 0.05, w: boxW, h: 0.4, fontSize: 12, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center' });
+                    targetSlide.addText(String(b?.value ?? ''), { x: rx + 0.3 + boxW, y: y + 0.5, w: boxW, h: boxH - 0.55, fontSize: 18, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center' });
+                    break;
+                }
+                case 'timeline': {
+                    const steps = Array.isArray(payload?.steps) ? payload.steps : [];
+                    const startX = rx;
+                    const startY = ry + rh * 0.4;
+                    const totalW = rw;
+                    const segW = totalW / Math.max(1, steps.length);
+                    targetSlide.addShape(pres.ShapeType.line, { x: startX, y: startY, w: totalW, h: 0, line: { color: outlineColor, width: 1.2 } });
+                    steps.slice(0, 6).forEach((s: any, i: number) => {
+                        const cx = startX + i * segW + segW / 2;
+                        targetSlide.addShape(pres.ShapeType.ellipse, { x: cx - 0.08, y: startY - 0.08, w: 0.16, h: 0.16, fill: { color: accent }, line: { color: outlineColor, width: 0.8 } });
+                        targetSlide.addText(String(s?.label ?? `Step ${i+1}`), { x: cx - 0.9, y: startY + 0.18, w: 1.8, h: 0.32, fontSize: 11, align: 'center', fontFace: JPN_FONT });
+                    });
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+
         // 2. Create slides using the Master Slide
         for (const [index, slideData] of slides.entries()) {
             const slide = pres.addSlide({ masterName: MASTER_SLIDE });
 
-            // Set a fixed light blue background as a temporary solution, as gradient logic is unstable.
+            // Background: prioritize title image; otherwise themed flat color.
             if (index === 0) {
                 if ((context as any).titleSlideImageBuffer) {
                     const rawBg = (context as any).titleSlideImageBuffer as Buffer | string;
@@ -234,18 +728,18 @@ export const createPowerpointTool = createTool({
                     logger.info('Set title slide background image from buffer.');
                 } else if (titleSlideImagePath) {
                     try {
-                        await fs.access(titleSlideImagePath);
-                        slide.background = { path: titleSlideImagePath };
+                    await fs.access(titleSlideImagePath);
+                    slide.background = { path: titleSlideImagePath };
                         logger.info({ path: titleSlideImagePath }, 'Set title slide background image.');
-                    } catch (error) {
+                } catch (error) {
                         logger.warn({ path: titleSlideImagePath, error }, 'Could not access title slide image file. Using default background.');
-                        slide.background = { color: 'E6F7FF' };
+                        slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
                     }
                 } else {
-                    slide.background = { color: 'E6F7FF' };
+                    slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
                 }
             } else {
-                slide.background = { color: 'E6F7FF' };
+                slide.background = { color: lightenHex(secondary, 80).replace('#', '') } as any;
             }
 
 
@@ -255,81 +749,127 @@ export const createPowerpointTool = createTool({
                 slide.addNotes(slideData.notes);
             }
 
+            // Accent band at top for visual hierarchy
+            slide.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.18, fill: { color: lightenHex(primary, 40) }, line: { color: lightenHex(primary, 40), width: 0 } });
+
+            const perSlideRecipeHere = Array.isArray((context as any).visualRecipes) ? (context as any).visualRecipes[index] : null;
+            const isBottomVisual = perSlideRecipeHere && (['process','roadmap','gantt','timeline'].includes(String(perSlideRecipeHere.type)));
+
             switch (slideData.layout) {
                 case 'title_slide':
-                    // Wrap long titles to avoid awkward auto-wrap
-                    const wrappedTitle = wrapTextAtWordBoundaries(slideData.title, 22);
-                    slide.addText(wrappedTitle, { 
+                    // Auto-fit title
+                    const fittedTitle = fitTextToLines(slideData.title, /*initial*/44, /*min*/30, /*baseWrap*/22, /*lines*/2, /*hard*/26);
+                    slide.addText(fittedTitle.text, { 
                         x: 0, y: 0, w: '100%', h: '55%', // Move title up by adjusting the bounding box height
                         align: 'center', valign: 'middle', 
-                        fontSize: 44, bold: true, fontFace: JPN_FONT,
+                        fontSize: fittedTitle.fontSize, bold: true, fontFace: JPN_FONT,
                         color: '000000', // Ensure text is black
-                        outline: { size: 1.5, color: 'FFFFFF' }, // Add a white outline
+                        outline: { size: 1.5, color: outlineColor },
                     });
                     if (slideData.bullets.length > 0) {
                         // Format multiple colon-separated entries across lines for readability
                         const subtitle = preventLeadingPunctuation(formatBulletsForColonSeparation(slideData.bullets, 24, 4));
-                        const wrappedSubtitle = subtitle;
-                        slide.addText(wrappedSubtitle, {
+                        const fittedSub = fitTextToLines(subtitle, /*initial*/18, /*min*/14, /*baseWrap*/36, /*lines*/3, /*hard*/32);
+                        slide.addText(fittedSub.text, {
                             x: 0, y: '70%', w: '100%', // Move subtitle down
                             align: 'center', valign: 'top', 
-                            fontSize: 18, fontFace: JPN_FONT,
-                            color: '000000', // Ensure text is black for visibility
-                            outline: { size: 1.0, color: 'FFFFFF' }, // Add a white outline
+                            fontSize: fittedSub.fontSize, fontFace: JPN_FONT,
+                            color: '000000',
+                            outline: { size: 1.0, color: outlineColor },
                         });
                     }
                     break;
                 case 'section_header':
-                    slide.addText(wrapTextAtWordBoundaries(slideData.title, 28), {
+                    {
+                        const fitted = fitTextToLines(slideData.title, /*initial*/36, /*min*/20, /*baseWrap*/28, /*lines*/1, /*hard*/24);
+                        slide.addText(fitted.text, {
                         x: 0, y: 0, w: '100%', h: '100%',
                         align: 'center', valign: 'middle',
-                        fontSize: 36, bold: true, fontFace: JPN_FONT
+                            fontSize: fitted.fontSize, bold: true, fontFace: JPN_FONT
                     });
+                    }
                     break;
                 case 'quote':
                     if (slideData.special_content) {
-                        slide.addText(`“${slideData.special_content}”`, {
-                            x: 0, y: 0, w: '100%', h: '100%',
+                        const formatted = formatQuoteLines(slideData.special_content, 18);
+                        const fittedQuote = fitTextToLines(formatted, /*initial*/32, /*min*/22, /*baseWrap*/30, /*lines*/4, /*hard*/38, { suppressEllipsis: true, minFontFloor: 20 });
+                        slide.addText(fittedQuote.text, {
+                            x: 0.8, y: 1.2, w: '88%', h: 3.2,
                             align: 'center', valign: 'middle',
-                            fontSize: 32, italic: true, fontFace: JPN_FONT
+                            fontSize: fittedQuote.fontSize, italic: true, fontFace: JPN_FONT
                         });
                     }
-                    slide.addText(wrapTextAtWordBoundaries(slideData.title, 30), { 
+                    {
+                        const fitted = fitTextToLines(slideData.title, /*initial*/18, /*min*/14, /*baseWrap*/30, /*lines*/1, /*hard*/24);
+                        slide.addText(fitted.text, { 
                         x: 0, y: '80%', w: '100%', 
-                        align: 'center', fontSize: 18, fontFace: JPN_FONT
+                            align: 'center', fontSize: fitted.fontSize, fontFace: JPN_FONT
                     });
+                    }
                     break;
                 case 'content_with_visual':
-                    slide.addText(wrapTextAtWordBoundaries(slideData.title, 36), { x: 0.5, y: 0.25, w: '90%', h: 0.75, fontSize: 32, bold: true, fontFace: JPN_FONT });
+                    {
+                        const fitted = fitTextToLines(slideData.title, /*initial*/32, /*min*/22, /*baseWrap*/36, /*lines*/1, /*hard*/24);
+                        slide.addText(fitted.text, { x: 0.5, y: 0.25, w: '90%', h: 0.6, fontSize: fitted.fontSize, bold: true, fontFace: JPN_FONT });
+                    }
                     // Dynamically fit bullets to max 3 lines per bullet, reducing font size if needed
-                    const fittedCv = fitBulletsToLines(slideData.bullets, /*initial*/18, /*min*/16, /*baseWrap*/22, /*indent*/4, /*targetLines*/3);
+                    const fittedCv = fitBulletsToLines(slideData.bullets, /*initial*/18, /*min*/16, /*baseWrap*/22, /*indent*/4, /*targetLines*/3, /*hard*/22);
                     slide.addText(fittedCv.text, { 
-                        x: 0.5, y: 1.5, w: '45%', h: '75%', 
+                        x: (isBottomVisual ? 0.8 : 0.5), y: 1.0, w: (isBottomVisual ? '88%' : '45%'), h: (isBottomVisual ? 3.2 : 3.6), 
                         fontSize: fittedCv.fontSize, bullet: { type: 'bullet' }, fontFace: JPN_FONT,
                         valign: 'top', paraSpaceAfter: 12,
                     });
                     // Prefer in-memory buffer if provided; fallback to file path
-                    if ((slideData as any).imageBuffer) {
+                    if (!isBottomVisual && (slideData as any).imageBuffer) {
                         const raw = (slideData as any).imageBuffer as Buffer | string;
                         const dataUrl = typeof raw === 'string' && raw.startsWith('data:')
                           ? raw
-                          : `data:image/png;base64,${(raw as Buffer).toString('base64')}`;
-                        slide.addImage({ data: dataUrl, x: 5.25, y: 1.5, w: 4.5, h: 4.5 * (9 / 16) });
-                    } else if (slideData.imagePath) {
-                        slide.addImage({ path: slideData.imagePath, x: 5.25, y: 1.5, w: 4.5, h: 4.5 * (9 / 16) });
+                          : bufferToDataUrl(raw as Buffer);
+                        slide.addImage({ data: dataUrl, x: 5.25, y: 1.0, w: 4.2, h: 3.0 });
+                    } else if (!isBottomVisual && slideData.imagePath) {
+                        slide.addImage({ path: slideData.imagePath, x: 5.25, y: 1.0, w: 4.2, h: 3.0 });
                     }
                     break;
                 case 'content_only':
                 default:
-                    slide.addText(wrapTextAtWordBoundaries(slideData.title, 40), { x: 0.5, y: 0.25, w: '90%', h: 0.75, fontSize: 32, bold: true, fontFace: JPN_FONT });
+                    {
+                        const fitted = fitTextToLines(slideData.title, /*initial*/32, /*min*/20, /*baseWrap*/40, /*lines*/1, /*hard*/24);
+                        slide.addText(fitted.text, { x: 0.5, y: 0.25, w: '90%', h: 0.6, fontSize: fitted.fontSize, bold: true, fontFace: JPN_FONT });
+                    }
                     // Allow a bit more content on content-only slides: target 4 lines per bullet
-                    const fittedCo = fitBulletsToLines(slideData.bullets, /*initial*/20, /*min*/19, /*baseWrap*/30, /*indent*/3, /*targetLines*/4);
+                    const fittedCo = fitBulletsToLines(slideData.bullets, /*initial*/20, /*min*/19, /*baseWrap*/30, /*indent*/3, /*targetLines*/4, /*hard*/22);
                     slide.addText(fittedCo.text, { 
-                        x: 0.8, y: 1.5, w: '88%', h: '75%', 
+                        x: (isBottomVisual ? 0.8 : (perSlideRecipeHere ? 0.5 : 0.8)), y: 1.0, w: (isBottomVisual ? '88%' : (perSlideRecipeHere ? '45%' : '88%')), h: (isBottomVisual ? 3.2 : 4.0), 
                         fontSize: fittedCo.fontSize, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT,
                         valign: 'top', paraSpaceAfter: 12,
                     });
                     break;
+            }
+
+            // If a per-slide visual recipe exists, render it in a right panel (for content_* only)
+            const layout = slideData.layout || 'content_only';
+            if (perSlideRecipeHere && (layout === 'content_with_visual' || layout === 'content_only')) {
+                // place process/roadmap/gantt/timeline at bottom band, others to right panel
+                const typeStr = String(perSlideRecipeHere.type || '');
+                const isBottom = isBottomVisual || typeStr === 'gantt' || typeStr === 'timeline';
+                const useUpperBand = (typeStr === 'roadmap' || typeStr === 'timeline');
+                const region = isBottom
+                  ? { x: 0.8, y: (useUpperBand ? 3.2 : 3.6), w: 8.4, h: 2.2 }
+                  : { x: 5.25, y: 1.0, w: 4.2, h: 3.0 };
+                drawInfographic(slide as any, String(perSlideRecipeHere.type || ''), perSlideRecipeHere, region);
+            }
+        }
+        // drawInfographic defined earlier; ensure not duplicated here
+
+        // Try to render visual_recipe if supplied in slide payload
+        for (const s of slides as any[]) {
+            const recipe = (s as any).visual_recipe;
+            if (recipe && typeof recipe === 'object') {
+                const infoSlide = pres.addSlide({ masterName: MASTER_SLIDE });
+                infoSlide.background = { color: secondary.replace('#', '') } as any;
+                if (recipe.type) {
+                    drawInfographic(infoSlide, String(recipe.type), recipe);
+                }
             }
         }
         

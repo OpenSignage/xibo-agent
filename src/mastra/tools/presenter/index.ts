@@ -10,5 +10,4 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 export { generateChartTool } from './generateChart';
-//export { saveSpeechScriptTool } from './saveSpeechScript';
 export { createPowerpointTool } from './createPowerpoint';
