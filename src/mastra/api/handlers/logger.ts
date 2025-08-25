@@ -20,10 +20,10 @@
  * logger.error('Error message', { error });
  */
 
-import { createLogger } from '@mastra/core/logger';
+import { ConsoleLogger } from '@mastra/core/logger';
 
 // Create shared logger instance for centralized logging
-export const logger = createLogger({
+export const logger = new ConsoleLogger({
   name: 'Xibo-Agent-API',
   level: 'info',  // Set to info level to exclude debug logs
-}); 
+});
