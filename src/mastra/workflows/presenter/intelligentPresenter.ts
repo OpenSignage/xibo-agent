@@ -148,6 +148,7 @@ const successOutputSchema = z.object({
     success: z.literal(true),
     data: z.object({
         powerpointPath: z.string(),
+        googleSlidesLink: z.string().optional(),
     }),
 });
 const errorOutputSchema = z.object({
@@ -165,10 +166,9 @@ const finalOutputSchema = z.union([successOutputSchema, errorOutputSchema]);
  * It follows a multi-step process involving several AI agents:
  * 1. Read Report: Reads the source markdown file.
  * 2. Design Presentation: An AI designs the slide structure and theme.
- * 3. Generate Title Image: An AI generates a background image for the title slide.
- * 4. Generate Content: AIs generate speech notes and data for charts.
- * 5. Generate Visuals: The system creates chart images from the data.
- * 6. Assemble Outputs: All components are combined into a final .pptx file.
+ * 3. Generate Content: AIs generate speech notes and data for charts. (Title background image is generated in parallel here.)
+ * 4. Generate Visuals: The system creates chart images from the data.
+ * 5. Assemble Outputs: All components are combined into a final .pptx file.
  */
 export const intelligentPresenterWorkflow = createWorkflow({
   id: 'intelligent-presenter-workflow',
@@ -353,102 +353,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
         }
     },
 }))
-.then(createStep({
-    /**
-     * @step generate-title-image
-     * Generates a background image for the title slide based on its title.
-     * This step is optional; if it fails, the workflow continues without a title image.
-     */
-    id: 'generate-title-image',
-    inputSchema: z.object({
-        presentationDesign: z.array(slideDesignSchema),
-        reportContent: z.string(),
-        fileNameBase: z.string(),
-        themeColor1: z.string(),
-        themeColor2: z.string(),
-        errorMessage: z.string().optional(),
-    }),
-    outputSchema: z.object({
-        presentationDesign: z.array(slideDesignSchema),
-        reportContent: z.string(),
-        fileNameBase: z.string(),
-        themeColor1: z.string(),
-        themeColor2: z.string(),
-        titleSlideImagePath: z.string().optional(),
-        titleSlideImageBuffer: z.any().optional(),
-        errorMessage: z.string().optional(),
-    }),
-    execute: async (params) => {
-        const { presentationDesign, reportContent, fileNameBase, errorMessage, themeColor1, themeColor2 } = params.inputData;
-        if (errorMessage || presentationDesign.length === 0) {
-            return { ...params.inputData, titleSlideImagePath: undefined };
-        }
-        
-        const titleSlide = presentationDesign[0];
-        // We only generate an image for the title slide.
-        if (titleSlide.layout !== 'title_slide') {
-            return { ...params.inputData, titleSlideImagePath: undefined };
-        }
-
-        logger.info("🎨 [Image Generator] Generating background image for the title slide...");
-
-        try {
-            // Step 1: Use an AI to distill the title into visual keywords.
-            // This prevents the image generator from trying to render the literal title text.
-            const keywordExtractionPrompt = `From the following presentation title, extract 5-7 core visual keywords suitable for generating an abstract background image. The keywords should focus on concepts, themes, and colors. Do not include the original title text. Output only a comma-separated list. Title: "${titleSlide.title}"`;
-
-            const keywordResult = await summarizeAndAnalyzeTool.execute({
-                ...params,
-                context: {
-                    text: titleSlide.title,
-                    objective: keywordExtractionPrompt,
-                    temperature: 0.2, // Low temperature for precise keyword extraction
-                    topP: 0.9,
-                }
-            });
-
-            if (!keywordResult.success) {
-                logger.warn("Failed to extract keywords for title image. Skipping image generation.");
-                return { ...params.inputData, titleSlideImagePath: undefined };
-            }
-
-            const keywords = keywordResult.data.summary.trim();
-            logger.info({ keywords }, "Extracted keywords for title image.");
-
-            // Step 2: Generate an image using only the distilled keywords.
-            const prompt = `An abstract, professional background image representing the following themes: ${keywords}. High resolution, clean, and visually appealing.`;
-            const negativePrompt = 'text, words, letters, numbers, writing, typography, signatures, logos, people, faces';
-
-            const { generateImage } = await import('../../tools/xibo-agent/generateImage/imageGeneration');
-            const imageResult = await generateImage.execute({
-                ...params,
-                context: {
-                    prompt,
-                    aspectRatio: '16:9',
-                    negativePrompt,
-                    returnBuffer: true,
-                },
-            });
-
-            if (imageResult.success && imageResult.data) {
-                const d: any = imageResult.data as any;
-                if (d.buffer) {
-                    return { ...params.inputData, titleSlideImageBuffer: d.buffer, titleSlideImagePath: undefined };
-                }
-                if (d.imagePath) {
-                    return { ...params.inputData, titleSlideImagePath: d.imagePath };
-                }
-            }
-            logger.warn(`Failed to generate title slide image. error=${(imageResult as any).message ?? ''}`);
-            return { ...params.inputData, titleSlideImagePath: undefined };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : "An unknown error occurred during title image generation.";
-            logger.error({ error }, message);
-            // Don't propagate this as a workflow-stopping error. Just proceed without the image.
-            return { ...params.inputData, titleSlideImagePath: undefined };
-        }
-    },
-}))
+// (Removed) generate-title-image step: now handled in parallel within generate-content
 .then(createStep({
     /**
      * @step generate-content
@@ -496,6 +401,30 @@ export const intelligentPresenterWorkflow = createWorkflow({
             context_for_visual: s.context_for_visual,
         }));
 
+        // Launch title image generation concurrently (if needed)
+        const titleImagePromise = (async () => {
+            try {
+                if (!presentationDesign.length || presentationDesign[0].layout !== 'title_slide') return { buffer: undefined as any, imagePath: undefined as string | undefined };
+                const titleSlide = presentationDesign[0];
+                const keywordExtractionPrompt = `From the following presentation title, extract 5-7 core visual keywords suitable for generating an abstract background image. The keywords should focus on concepts, themes, and colors. Do not include the original title text. Output only a comma-separated list. Title: "${titleSlide.title}"`;
+                const keywordResult = await summarizeAndAnalyzeTool.execute({ ...params, context: { text: titleSlide.title, objective: keywordExtractionPrompt, temperature: 0.2, topP: 0.9 } });
+                if (!keywordResult.success) return { buffer: undefined as any, imagePath: undefined };
+                const keywords = (keywordResult.data.summary || '').trim();
+                const prompt = `An abstract, professional background image representing the following themes: ${keywords}. High resolution, clean, and visually appealing.`;
+                const negativePrompt = 'text, words, letters, numbers, writing, typography, signatures, logos, people, faces';
+                const { generateImage } = await import('../../tools/xibo-agent/generateImage/imageGeneration');
+                const imageResult = await generateImage.execute({ ...params, context: { prompt, aspectRatio: '16:9', negativePrompt, returnBuffer: true } });
+                if (imageResult.success && imageResult.data) {
+                    const d: any = imageResult.data as any;
+                    if (d.buffer) return { buffer: d.buffer as any, imagePath: undefined };
+                    if (d.imagePath) return { buffer: undefined as any, imagePath: d.imagePath as string };
+                }
+                return { buffer: undefined as any, imagePath: undefined };
+            } catch {
+                return { buffer: undefined as any, imagePath: undefined };
+            }
+        })();
+
         const batchObjective = `You are a presentation content generator. Given an array of slides and the report body, output a JSON object strictly in the following format (no extra commentary):
 {
   "slides": [
@@ -534,7 +463,10 @@ Shortening and style constraints (Japanese):
 `;
 
         const combined = `# Slides\n\n${JSON.stringify(slidesInput, null, 2)}\n\n# Report\n\n${reportContent}`;
-        const batchRes = await summarizeAndAnalyzeTool.execute({ ...params, context: { text: combined, objective: batchObjective, temperature: 0.4, topP: 0.9 } });
+        const [batchRes, titleGen] = await Promise.all([
+            summarizeAndAnalyzeTool.execute({ ...params, context: { text: combined, objective: batchObjective, temperature: 0.4, topP: 0.9 } }),
+            titleImagePromise,
+        ]);
 
         let idxToResult = new Map<number, { speech: string; chartData: any | null; visual_recipe: z.infer<typeof visualRecipeSchema> | null }>();
         if (batchRes.success) {
@@ -563,7 +495,7 @@ Shortening and style constraints (Japanese):
                 }
                 idxToResult.set(i, { speech: speech || '（原稿の生成に失敗しました）', chartData, visual_recipe });
             }
-        } else {
+                } else {
             logger.warn('Batch generation failed; falling back to empty results.');
         }
 
@@ -578,7 +510,9 @@ Shortening and style constraints (Japanese):
             return { design: { ...design, visual_recipe: normalizedVr }, chartData, speech } as any;
         });
 
-        return { enrichedSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, titleSlideImageBuffer };
+        const finalTitleBuffer = (titleGen && (titleGen as any).buffer) ? (titleGen as any).buffer : titleSlideImageBuffer;
+        const finalTitlePath = (titleGen && (titleGen as any).imagePath) ? (titleGen as any).imagePath : titleSlideImagePath;
+        return { enrichedSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath: finalTitlePath, titleSlideImageBuffer: finalTitleBuffer };
     },
 }))
 .then(createStep({
@@ -719,11 +653,29 @@ Shortening and style constraints (Japanese):
         if (!pptResult.success) {
             return { success: false, message: `Failed to assemble final PowerPoint file: ${pptResult.message}` } as const;
         }
+        let googleSlidesLink: string | undefined;
+        // Temporarily disabled Google Slides upload until preparation is complete.
+        // try {
+        //     const { uploadToGoogleSlidesTool } = await import('../../tools/util/uploadToGoogleSlides');
+        //     const gsRes = await uploadToGoogleSlidesTool.execute({
+        //         ...params,
+        //         context: {
+        //             pptxPath: pptResult.data.filePath,
+        //             name: fileNameBase,
+        //             folderId: process.env.GDRIVE_FOLDER_ID,
+        //             serviceAccountJson: process.env.GSA_KEY_JSON,
+        //         },
+        //     });
+        //     if (gsRes.success) {
+        //         googleSlidesLink = gsRes.data.webViewLink;
+        //     }
+        // } catch {}
 
         return {
             success: true,
             data: {
                 powerpointPath: pptResult.data.filePath,
+                ...(googleSlidesLink ? { googleSlidesLink } : {}),
             },
         } as const;
     },

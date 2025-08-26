@@ -571,7 +571,7 @@ ${baseRules}`;
       const hadLaugh = /[（(]\s*笑\s*[）)]/g.test(l.text);
       const cleaned = sanitizeSpokenText(l.text, { laughterMode: (inputData as any).laughterMode });
       if (cleaned) {
-        const voiceName = l.speaker === casterA.name ? (casterA.voiceName || defaultA) : (casterB.voiceName || defaultB);
+      const voiceName = l.speaker === casterA.name ? (casterA.voiceName || defaultA) : (casterB.voiceName || defaultB);
         let attempt = 0; let ok = false;
         let lastErr: any = null;
         // Compute cache key
@@ -740,19 +740,19 @@ ${baseRules}`;
   },
 }))
 .then(createStep({
-  id: 'finalize-wav',
+      id: 'finalize-wav',
   // Overview: Confirm the WAV master as the final output and remove the per-run temp directory.
-  inputSchema: z.object({
-    scriptMarkdown: z.string(),
-    reportBaseName: z.string(),
-    combinedFileWav: z.string(),
-    countdownPathResolved: z.string().optional(),
-  }),
+      inputSchema: z.object({
+        scriptMarkdown: z.string(),
+        reportBaseName: z.string(),
+        combinedFileWav: z.string(),
+        countdownPathResolved: z.string().optional(),
+      }),
   outputSchema: successOutput.extend({ success: z.literal(true) }),
-  execute: async ({ inputData }) => {
+      execute: async ({ inputData }) => {
     const { combinedFileWav, scriptMarkdown } = inputData as any;
-    logger.info({ combinedFile: combinedFileWav }, 'WAV finalized.');
+        logger.info({ combinedFile: combinedFileWav }, 'WAV finalized.');
     return { success: true, scriptMarkdown, filePath: combinedFileWav } as const;
-  },
+      },
 }))
 .commit();

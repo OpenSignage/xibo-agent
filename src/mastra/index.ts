@@ -25,8 +25,9 @@ import { config } from './tools/xibo-agent/config';
 // Import agents
 import { xiboAgent } from './agents/xibo-agent';
 import { xiboManualAgent } from './agents/xibo-manual';
-import { marketResearchAgent } from './agents/market-research-agent';
-import { productAnalysisAgent } from './agents/product-analysis-agent';
+//import { marketResearchAgent } from './agents/market-research-agent';
+import { marketingAgent } from './agents/marketing-agent';
+//import { productAnalysisAgent } from './agents/product-analysis-agent';
 
 // Import workflows
 import { marketResearchWorkflow } from './workflows/market-research/marketResearch';
@@ -83,9 +84,9 @@ export const mastra = new Mastra({
   agents: {
     xibo: xiboAgent,         // Xibo system operation agent
     manual: xiboManualAgent, // Xibo manual operation agent
-    marketResearch: marketResearchAgent, // Market research agent
-    productAnalysis: productAnalysisAgent, // Product analysis agent
-  //  mcp: mcpAgent            // MCP (Master Control Program) agent
+  //marketResearch: marketResearchAgent, // Market research agent
+  //productAnalysis: productAnalysisAgent, // Product analysis agent
+    marketing: marketingAgent, // Marketing agent
   },
   // Register available workflows
   workflows: {
