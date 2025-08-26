@@ -410,20 +410,34 @@ export const createPowerpointTool = createTool({
                     const values = items.map((it: any) => Number(it?.value ?? 0)).filter((n: number) => Number.isFinite(n) && n >= 0);
                     const sum = values.reduce((a: number, b: number) => a + b, 0);
                     const isDistribution = items.length >= 4 || (sum > 95 && sum < 105);
+                    const labelsForLog = items.map((it: any) => String(it?.label ?? ''));
                     if (isDistribution) {
                         // Render as doughnut chart for multi-category distribution
                         const labels = items.map((it: any) => String(it?.label ?? ''));
                         const data = [{ name: 'Share', labels, values }];
-                        const colors = labels.map((_: string, i: number) => (i % 3 === 0 ? primary : i % 3 === 1 ? secondary : lightenHex(accent, 40)));
+                        const palette = [
+                            primary,
+                            secondary,
+                            accent,
+                            lightenHex(primary, 20),
+                            lightenHex(secondary, 20),
+                            lightenHex(accent, 20),
+                            lightenHex(primary, 40),
+                            lightenHex(secondary, 40),
+                            lightenHex(accent, 40),
+                        ];
+                        const colors = labels.map((_: string, i: number) => palette[i % palette.length]);
+                        const chartColors = colors.map((c: string) => String(c || '').replace('#', ''));
                         try {
-                            (targetSlide as any).addChart((PptxGenJS as any).ChartType.doughnut, data, {
+                            const doughnutType = ((PptxGenJS as any).ChartType && (PptxGenJS as any).ChartType.doughnut) || ('doughnut' as any);
+                            const hasAddChart = typeof (targetSlide as any).addChart === 'function';
+                            (targetSlide as any).addChart(doughnutType, data, {
                                 x: rx, y: ry, w: rw, h: rh,
-                                showLegend: true, legendPos: 'b',
-                                donutHoleSize: 60,
-                                dataLabelColor: '333333', dataLabelFontSize: 9,
-                                chartColors: colors,
-                            });
-                        } catch {
+                                showLegend: true,
+                                legendPos: 'b',
+                                chartColors,
+                            } as any);
+                        } catch (e) {
                             // Fallback: simple title if chart fails
                             targetSlide.addText('KPI Donut', { x: rx, y: ry, w: rw, h: 0.3, fontSize: 12, bold: true, fontFace: JPN_FONT });
                         }
