@@ -17,4 +17,3 @@
 
 //export * from './xibo-agent';
 export * from './xibo-manual';
-export * from './mcp-agent';

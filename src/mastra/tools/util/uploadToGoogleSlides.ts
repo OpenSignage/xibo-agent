@@ -4,7 +4,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import fs from 'node:fs';
-// Do NOT import googleapis at top-level to avoid module resolution errors when not installed
+import { google } from 'googleapis';
 
 const outputSchema = z.object({ id: z.string(), webViewLink: z.string().optional() });
 const errorResponseSchema = z.object({ success: z.literal(false), message: z.string(), error: z.any().optional() });
@@ -27,13 +27,6 @@ export const uploadToGoogleSlidesTool = createTool({
       if (!credentials || !credentials.client_email) {
         return { success: false, message: 'Missing service account JSON (GSA_KEY_JSON).' } as const;
       }
-      // Lazy import googleapis only when actually uploading
-      let google: any;
-      try {
-        google = (await import('googleapis')).google;
-      } catch (e) {
-        return { success: false, message: 'googleapis is not installed. Please run: npm i googleapis' } as const;
-      }
       const auth = new google.auth.GoogleAuth({
         credentials,
         scopes: ['https://www.googleapis.com/auth/drive.file'],
@@ -51,7 +44,8 @@ export const uploadToGoogleSlidesTool = createTool({
       } as any;
 
       const res = await drive.files.create({ requestBody: fileMetadata, media, fields: 'id, webViewLink' });
-      return { success: true, data: { id: res.data.id!, webViewLink: res.data.webViewLink } } as const;
+      const link: string | undefined = res.data.webViewLink ?? undefined;
+      return { success: true, data: { id: res.data.id!, webViewLink: link } } as const;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to upload to Google Slides';
       return { success: false, message, error } as const;

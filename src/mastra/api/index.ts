@@ -18,6 +18,9 @@ import { uploadHandler } from './handlers/upload';
 import { getImageHandler } from './handlers/getImage';
 import { swaggerHandler } from './handlers/swagger';
 import { getFontImageHandler } from './handlers/getFontImage';
+import { uploadProductsInfoHandler } from './handlers/uploadProductsInfo';
+import { uploadProductsInfoFormHandler } from './handlers/uploadProductsInfoForm';
+import { downloadUnifiedHandler } from './handlers/downloadUnified';
 
 export const apiRoutes = [
   // Swagger UI - API Documentation
@@ -34,6 +37,25 @@ export const apiRoutes = [
   registerApiRoute("/ext-api/upload", {
     method: "POST",
     handler: uploadHandler,
+  }),
+  // Upload form (HTML)
+  registerApiRoute("/ext-api/threads/products_info/upload-form", {
+    method: "GET",
+    handler: uploadProductsInfoFormHandler,
+  }),
+  // Upload product-related files into persistent_data/<threadId>/products_info
+  registerApiRoute("/ext-api/threads/:threadId/products_info/upload", {
+    method: "POST",
+    handler: uploadProductsInfoHandler,
+  }),
+  // Unified download endpoint
+  // Examples:
+  //   /ext-api/download/report/xxxx.md
+  //   /ext-api/download/podcast/xxxx.wav
+  //   /ext-api/download/presentation/xxxx.pptx
+  registerApiRoute("/ext-api/download/:kind/:fileName", {
+    method: "GET",
+    handler: downloadUnifiedHandler,
   }),
   // Get Image API - Serves generated images
   registerApiRoute("/ext-api/getImage/:filename", {

@@ -10,3 +10,4 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 export { powerpointExtractTool } from './powerpointExtract';
+export { getProductsInfoUploadUrlsTool } from './getProductsInfoUploadUrls';

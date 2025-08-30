@@ -25,9 +25,7 @@ import { config } from './tools/xibo-agent/config';
 // Import agents
 import { xiboAgent } from './agents/xibo-agent';
 import { xiboManualAgent } from './agents/xibo-manual';
-//import { marketResearchAgent } from './agents/market-research-agent';
 import { marketingAgent } from './agents/marketing-agent';
-//import { productAnalysisAgent } from './agents/product-analysis-agent';
 
 // Import workflows
 import { marketResearchWorkflow } from './workflows/market-research/marketResearch';
@@ -113,3 +111,6 @@ export const mastra = new Mastra({
 export const workflows = [
   // ... existing workflows ...
 ];
+
+// Expose mastra on global to allow tools to access memory without importing this file
+(globalThis as any).__mastra = mastra;
