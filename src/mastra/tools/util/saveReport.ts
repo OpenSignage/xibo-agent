@@ -61,7 +61,7 @@ export const saveReportTool = createTool({
     // Security check: ensure the final path is within the intended directory
     if (!filePath.startsWith(reportsDir)) {
       const message = 'Error: Path traversal attempt detected.';
-      logger.error(message, { fileName });
+      logger.error({ fileName }, message);
       return { success: false, message } as const;
     }
 

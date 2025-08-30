@@ -41,6 +41,7 @@
     "fast-xml-parser": "^4.4.0",
     "find-up": "^7.0.0",
     "form-data": "^4.0.3",
+    "googleapis": "^131.0.0",
     "iconv-lite": "^0.6.3",
     "lamejs": "^1.2.1",
     "nodejs-pptx": "^1.2.4",
@@ -54,8 +55,7 @@
     "sharp": "^0.34.3",
     "tesseract.js": "^6.0.1",
     "uuid": "^11.1.0",
-    "zod": "^3.24.3",
-    "googleapis": "^131.0.0"
+    "zod": "^3.24.3"
   },
   "devDependencies": {
     "@rollup/plugin-json": "^6.1.0",

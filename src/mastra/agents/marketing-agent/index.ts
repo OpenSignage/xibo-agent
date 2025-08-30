@@ -12,9 +12,10 @@
 import { Agent } from '@mastra/core/agent';
 import { google } from '@ai-sdk/google';
 import { marketResearchWorkflow } from '../../workflows/market-research/marketResearch';
-import { webSearchTool } from '../../tools/market-research/webSearch';
-import { contentScrapeTool } from '../../tools/market-research/contentScrape';
-import { summarizeAndAnalyzeTool } from '../../tools/market-research/summarizeAndAnalyze';
+import { productAnalysisWorkflow } from '../../workflows/product-analysis/productAnalysis';
+import { getProductsInfoUploadUrlsTool } from '../../tools/product-analysis';
+import { strategyPlannerWorkflow } from '../../workflows/strategy-planner/strategyPlanner';
+//import { podcastPlannerWorkflow } from '../../workflows/podcast-planner/podcastPlanner';
 import { marketingAgentInstructions } from './instructions';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
@@ -32,11 +33,11 @@ export const marketingAgent = new Agent({
   instructions: marketingAgentInstructions,
   workflows: {
     marketResearch: marketResearchWorkflow,
+    productAnalysis: productAnalysisWorkflow,
+    strategyPlanner: strategyPlannerWorkflow,
   },
   tools: {
-    webSearch: webSearchTool,
-    contentScrape: contentScrapeTool,
-    summarizeAndAnalyze: summarizeAndAnalyzeTool,
+    getProductsInfoUploadUrls: getProductsInfoUploadUrlsTool,
   },
   memory: new Memory({
     options: {
