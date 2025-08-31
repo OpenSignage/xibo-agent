@@ -20,6 +20,7 @@ import { marketingAgentInstructions } from './instructions';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
 import { fastembed } from '@mastra/fastembed';
+import { getReportsList } from '../../tools/util';
 
 /**
  * @module marketingAgent
@@ -38,6 +39,7 @@ export const marketingAgent = new Agent({
   },
   tools: {
     getProductsInfoUploadUrls: getProductsInfoUploadUrlsTool,
+    getReportsList: getReportsList,
   },
   memory: new Memory({
     options: {

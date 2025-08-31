@@ -11,8 +11,6 @@
  */
 import { z } from 'zod';
 import { createTool } from '@mastra/core/tools';
-import { v4 as uuidv4 } from 'uuid';
-// Note: workingMemoryへの保存はエージェント側で行う（ツール内では行わない）
 
 /**
  * @module getProductsInfoUploadUrlsTool
@@ -20,23 +18,19 @@ import { v4 as uuidv4 } from 'uuid';
  */
 export const getProductsInfoUploadUrlsTool = createTool({
   id: 'get-products-info-upload-urls',
-  description: 'Return upload/form URLs for products_info using current threadId. No network calls.',
+  description: 'Return upload/form URL for products_info using productName. No network calls.',
   inputSchema: z.object({
+    productName: z.string(),
     returnUrl: z.string().optional(),
-    threadId: z.string().optional(), // 明示指定があれば優先
   }),
-  outputSchema: z.object({ formUrl: z.string(), threadId: z.string() }),
-  execute: async ({ context, runtimeContext }) => {
-    const rc: any = runtimeContext || {};
-    const resolvedThreadId = String(
-      (context as any)?.threadId || rc.threadId || rc.threadID || rc.thread?.id || rc.metadata?.threadId || ''
-    );
-    const threadIdToUse = resolvedThreadId || uuidv4();
-    // formUrl は threadId が無くても開ける（入力欄が表示される）
-    const baseForm = '/ext-api/threads/products_info/upload-form';
-    const formUrl = `${baseForm}?threadId=${encodeURIComponent(threadIdToUse)}${context.returnUrl ? `&return=${encodeURIComponent(context.returnUrl)}` : ''}`;
-
-    return { formUrl, threadId: threadIdToUse } as const;
+  outputSchema: z.object({ formUrl: z.string(), productName: z.string() }),
+  execute: async ({ context }) => {
+    const { productName } = context as { productName: string };
+    // Build form URL with productName and optional return (if provided externally)
+    const baseForm = '/ext-api/products_info/upload-form';
+    const returnParam = (context as any)?.returnUrl ? `&return=${encodeURIComponent((context as any).returnUrl)}` : '';
+    const formUrl = `${baseForm}?productName=${encodeURIComponent(productName)}${returnParam}`;
+    return { formUrl, productName } as const;
   },
 });
 

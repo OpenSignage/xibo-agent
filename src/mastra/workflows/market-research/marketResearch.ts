@@ -28,7 +28,8 @@ const successOutputSchema = z.object({
   success: z.literal(true),
   data: z.object({
     reportText: z.string().describe('The final, generated report content.'),
-    filePath: z.string().describe('The absolute path to where the report was saved.'),
+    mdFileName: z.string().describe('The saved report file name (e.g., "xxxx.md").'),
+    pdfFileName: z.string().describe('The saved PDF file name (e.g., "xxxx.pdf").'),
   }),
 });
 const errorOutputSchema = z.object({
@@ -45,7 +46,7 @@ const finalOutputSchema = z.union([successOutputSchema, errorOutputSchema]);
  */
 export const marketResearchWorkflow = createWorkflow({
   id: 'market-research-workflow',
-  description: 'A comprehensive workflow to search, scrape, analyze, generate a report, and save it to a file.',
+  description: 'Automated market research workflow. Given a topic, it performs web search, fetches top sources (including PDFs), then summarizes and analyzes the content to produce a marketing-oriented report in Markdown. The report is saved to persistent_data/generated/reports as <title-YYYY-MM-DD>.md, and a PDF with the same basename is also generated. The workflow returns reportText along with saved file names (mdFileName, pdfFileName). Artifacts can be downloaded via /ext-api/download/report/:fileName. Use maxWebsites to control how many sources are processed.',
   inputSchema: z.object({ 
     topic: z.string().describe('Topic to research (keyword)'),
     maxWebsites: z.number().optional().default(20).describe('Maximum number of websites to scrape (default: 20)')
@@ -254,7 +255,8 @@ export const marketResearchWorkflow = createWorkflow({
             success: true,
             data: {
                 reportText,
-                filePath: saveResult.data.filePath,
+                mdFileName: require('path').basename(saveResult.data.filePath),
+                pdfFileName: (saveResult.data.pdfFileName),
             },
         } as const;
     },
