@@ -16,12 +16,50 @@ import path from 'path';
 import fs from 'fs/promises';
 import { config } from '../xibo-agent/config';
 
+// Remove common AI preamble from the beginning of a report
+function sanitizeReportContent(raw: string): string {
+  let text = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const preambles: RegExp[] = [
+    /^(?:はい、?承知いたしました。?|承知しました。?|かしこまりました。?|了解しました。?)(?:\s*\n)+/,
+    /^(?:ご提供いただいた情報に基づき[^\n]*?作成します。?)(?:\s*\n)+/,
+    /^(?:では、?以下の[^\n]*)(?:\s*\n)+/,
+    /^(?:次のとおり[^\n]*)(?:\s*\n)+/,
+    /^(?:Sure[,\s].*|Okay[,\s].*|I (?:will|can) .*)(?:\s*\n)+/i,
+  ];
+  const removeLeadingSeparators = () => {
+    let changed = false;
+    while (/^(?:\*{3,}|-{3,}|_{3,})\s*\n/.test(text)) {
+      text = text.replace(/^(?:\*{3,}|-{3,}|_{3,})\s*\n/, '');
+      changed = true;
+    }
+    return changed;
+  };
+  let iterations = 0;
+  while (iterations++ < 10) {
+    const before = text;
+    text = text.replace(/^(?:\s*\n)+/, '');
+    let matched = false;
+    for (const re of preambles) {
+      const m = text.match(re);
+      if (m && m.index === 0) {
+        text = text.slice(m[0].length);
+        matched = true;
+        break;
+      }
+    }
+    const sepRemoved = removeLeadingSeparators();
+    if (!matched && !sepRemoved && before === text) break;
+  }
+  return text.replace(/^(?:\s*\n)+/, '');
+}
+
 /**
  * @module saveReportTool
  * @description A tool to save a market research report to a designated directory.
  */
 const outputSchema = z.object({
   filePath: z.string().describe('The full, absolute path to the saved report file.'),
+  pdfFileName: z.string().describe('The PDF file name saved alongside the markdown (e.g., "xxxx.pdf").'),
 });
 
 const errorResponseSchema = z.object({
@@ -37,7 +75,7 @@ const successResponseSchema = z.object({
 
 export const saveReportTool = createTool({
   id: 'save-market-research-report',
-  description: 'Saves the provided market research report content to a timestamped Markdown file in a persistent storage directory. It returns the full, absolute path to the saved file.',
+  description: 'Saves the report as markdown and also renders a PDF version in the same directory.',
   inputSchema: z.object({
     title: z.string().describe('A descriptive title for the report (e.g., "Digital Signage Market Report"). This will be used to generate a safe filename.'),
     content: z.string().describe('The full text content of the report to save.'),
@@ -69,13 +107,31 @@ export const saveReportTool = createTool({
       // Ensure the reports directory exists
       await fs.mkdir(reportsDir, { recursive: true });
 
-      // Write the file
-      await fs.writeFile(filePath, content, 'utf-8');
+      // Sanitize content before saving
+      const sanitized = sanitizeReportContent(content);
+      await fs.writeFile(filePath, sanitized, 'utf-8');
+
+      // Render PDF into the same directory using md-to-pdf
+      const pdfFileName = safeFileName.replace(/\.md$/i, '.pdf');
+      const pdfPath = path.join(reportsDir, pdfFileName);
+      try {
+        const { mdToPdf } = await import('md-to-pdf');
+        await mdToPdf({ path: filePath }, { dest: pdfPath });
+        logger.info({ pdfPath }, 'Successfully generated PDF report');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logger.error({ error: msg, filePath }, 'Failed to generate PDF from markdown');
+        return {
+          success: false,
+          message: `PDF生成に失敗しました: ${msg}`,
+          error: e as any,
+        } as const;
+      }
 
       logger.info(`Successfully saved report to ${filePath}`);
       return {
         success: true,
-        data: { filePath }
+        data: { filePath, pdfFileName }
       } as const;
 
     } catch (error) {

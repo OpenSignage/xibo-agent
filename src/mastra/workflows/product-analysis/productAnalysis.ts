@@ -58,8 +58,8 @@ export const productAnalysisWorkflow = createWorkflow({
   id: 'product-analysis-workflow',
   description: 'Analyzes product information from a directory of files (.pdf, .pptx, .txt with URLs).',
   inputSchema: z.object({
-    productName: z.string().optional().describe('Optional product name. If omitted, it will be inferred from the provided materials.'),
     filePath: z.string().describe('Directory path where uploaded files are stored. Absolute or project-root relative.'),
+    productName: z.string().optional().describe('Optional product name. If omitted, it will be inferred from the provided materials.'),
   }),
   outputSchema: finalOutputSchema,
 })
