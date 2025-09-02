@@ -32,6 +32,20 @@ import {
   successResponseSchema,
 } from './schemas';
 
+// NOTE: OpenAPI-only, non-recursive schema to avoid recursive reference warnings during generation.
+// Runtime validation still uses the fully recursive `folderSchema` from './schemas'.
+const openApiFolderSchema = z.object({
+  id: z.number(),
+  type: z.string().nullable(),
+  text: z.string(),
+  parentId: z.union([z.number(), z.string()]).nullable(),
+  isRoot: z.number().nullable(),
+  children: z.union([z.array(z.any()), z.string(), z.null()]),
+  permissionsFolderId: z.number().nullable().optional(),
+  folderId: z.number().optional(),
+  folderName: z.string().optional(),
+});
+
 /**
  * The output schema is a union of possible responses:
  * - A successful response with folder data.
@@ -39,10 +53,10 @@ import {
  * - An error response.
  */
 const outputSchema = z.union([
-  successResponseSchema,
+  z.object({ success: z.literal(true), data: z.array(openApiFolderSchema) }),
   z.object({
     success: z.literal(true),
-    data: z.array(folderSchema),
+    data: z.array(openApiFolderSchema),
     tree: z.array(z.any()),
     treeViewText: z.string(),
   }),

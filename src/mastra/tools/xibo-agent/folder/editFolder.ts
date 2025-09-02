@@ -26,17 +26,27 @@ import {
   errorResponseSchema,
 } from './schemas';
 
+// NOTE: OpenAPI-only, non-recursive schema to avoid recursive reference warnings during generation.
+const openApiFolderSchema = z.object({
+  id: z.number(),
+  type: z.string().nullable(),
+  text: z.string(),
+  parentId: z.union([z.number(), z.string()]).nullable(),
+  isRoot: z.number().nullable(),
+  children: z.union([z.array(z.any()), z.string(), z.null()]),
+  permissionsFolderId: z.number().nullable().optional(),
+  folderId: z.number().optional(),
+  folderName: z.string().optional(),
+});
+
 /**
  * The output schema is a union of possible responses:
  * - A successful response with the updated folder data.
  * - An error response.
  */
 const outputSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        data: folderSchema,
-    }),
-    errorResponseSchema,
+  z.object({ success: z.literal(true), data: openApiFolderSchema }),
+  errorResponseSchema,
 ]);
 
 /**
