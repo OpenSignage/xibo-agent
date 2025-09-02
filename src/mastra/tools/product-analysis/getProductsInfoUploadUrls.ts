@@ -20,7 +20,7 @@ export const getProductsInfoUploadUrlsTool = createTool({
   id: 'get-products-info-upload-urls',
   description: 'Return upload/form URL for products_info using productName. No network calls.',
   inputSchema: z.object({
-    productName: z.string(),
+    productName: z.string().describe('Target product name (used as subdirectory under products_info). This field is required.'),
   }),
   outputSchema: z.object({ formUrl: z.string(), productName: z.string() }),
   execute: async ({ context }) => {

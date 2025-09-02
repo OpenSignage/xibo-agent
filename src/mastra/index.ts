@@ -62,7 +62,7 @@ const pinoLogger = pino(
         options: {
           file: resolve(config.logsDir, 'system.log'), // Base file name
           frequency: 'daily', // Rotate daily
-          pattern: '.yyyy-MM-dd',
+          dateFormat: 'yyyy-MM-dd',
           size: '1G', // サイズの上限を1GBに設定し、サイズによるローテーションを事実上無効化
           maxFiles: 7, // Keep 7 days of old logs
           mkdir: true,

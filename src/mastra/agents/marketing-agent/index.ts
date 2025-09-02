@@ -15,7 +15,9 @@ import { marketResearchWorkflow } from '../../workflows/market-research/marketRe
 import { productAnalysisWorkflow } from '../../workflows/product-analysis/productAnalysis';
 import { getProductsInfoUploadUrlsTool } from '../../tools/product-analysis';
 import { strategyPlannerWorkflow } from '../../workflows/strategy-planner/strategyPlanner';
-//import { podcastPlannerWorkflow } from '../../workflows/podcast-planner/podcastPlanner';
+import { podcastPlannerWorkflow } from '../../workflows/podcast/podcastPlanner';
+import { signageAdsPlannerWorkflow } from '../../workflows/signage-ads/signageAdsPlanner';
+import { intelligentPresenterWorkflow } from '../../workflows/presenter/intelligentPresenter';
 import { marketingAgentInstructions } from './instructions';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
@@ -36,6 +38,9 @@ export const marketingAgent = new Agent({
     marketResearch: marketResearchWorkflow,
     productAnalysis: productAnalysisWorkflow,
     strategyPlanner: strategyPlannerWorkflow,
+    podcastPlanner: podcastPlannerWorkflow,
+    signageAdsPlanner: signageAdsPlannerWorkflow,
+    intelligentPresenter: intelligentPresenterWorkflow,
   },
   tools: {
     getProductsInfoUploadUrls: getProductsInfoUploadUrlsTool,
