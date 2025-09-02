@@ -82,8 +82,6 @@ export const mastra = new Mastra({
   agents: {
     xibo: xiboAgent,         // Xibo system operation agent
     manual: xiboManualAgent, // Xibo manual operation agent
-  //marketResearch: marketResearchAgent, // Market research agent
-  //productAnalysis: productAnalysisAgent, // Product analysis agent
     marketing: marketingAgent, // Marketing agent
   },
   // Register available workflows

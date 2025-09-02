@@ -21,15 +21,12 @@ export const getProductsInfoUploadUrlsTool = createTool({
   description: 'Return upload/form URL for products_info using productName. No network calls.',
   inputSchema: z.object({
     productName: z.string(),
-    returnUrl: z.string().optional(),
   }),
   outputSchema: z.object({ formUrl: z.string(), productName: z.string() }),
   execute: async ({ context }) => {
     const { productName } = context as { productName: string };
-    // Build form URL with productName and optional return (if provided externally)
-    const baseForm = '/ext-api/products_info/upload-form';
-    const returnParam = (context as any)?.returnUrl ? `&return=${encodeURIComponent((context as any).returnUrl)}` : '';
-    const formUrl = `${baseForm}?productName=${encodeURIComponent(productName)}${returnParam}`;
+    // Build form URL with path parameter
+    const formUrl = `/ext-api/products_info/upload-form/${encodeURIComponent(productName)}`;
     return { formUrl, productName } as const;
   },
 });

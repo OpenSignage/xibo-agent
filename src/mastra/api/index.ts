@@ -17,7 +17,7 @@ import { uploadHandler } from './handlers/upload';
 import { getImageHandler } from './handlers/getImage';
 import { getFontImageHandler } from './handlers/getFontImage';
 import { uploadProductsInfoFormHandler } from './handlers/uploadProductsInfoForm';
-import { uploadProductsInfoByNameHandler } from './handlers/uploadProductsInfoByName';
+import { uploadProductsInfoByNameHandler } from './handlers/uploadProductsInfo';
 import { downloadUnifiedHandler } from './handlers/downloadUnified';
 
 export const apiRoutes = [
@@ -54,28 +54,15 @@ export const apiRoutes = [
     },
   }),
   // Upload form (HTML)
-  registerApiRoute("/ext-api/products_info/upload-form", {
+  registerApiRoute("/ext-api/products_info/upload-form/:productName", {
     method: "GET",
     handler: uploadProductsInfoFormHandler,
     openapi: {
       summary: "Products info upload form",
-      description: "Serve an HTML form to upload product-related files. Accepts optional query parameters.",
+      description: "Serve an HTML form to upload product-related files. Uses path parameter to indicate target product.",
       tags: ["Extended API"],
       parameters: [
-        {
-          name: "productName",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Product name to prefill the form and target the upload directory"
-        },
-        {
-          name: "return",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Return URL used by the form's back button after successful upload"
-        }
+        { name: "productName", in: "path", required: true, schema: { type: "string" }, description: "Target product name (used as subdirectory under products_info)" }
       ],
       responses: {
         200: {
@@ -86,7 +73,7 @@ export const apiRoutes = [
     },
   }),
   // Upload product-related files into persistent_data/products_info/<productName>
-  registerApiRoute("/ext-api/products_info/upload", {
+  registerApiRoute("/ext-api/products_info/upload/:productName", {
     method: "POST",
     handler: uploadProductsInfoByNameHandler,
     openapi: {
@@ -94,13 +81,7 @@ export const apiRoutes = [
       description: "Uploads files into persistent_data/products_info/<productName>. Supports .pdf/.ppt/.pptx/.txt/.md/.url.",
       tags: ["Extended API"],
       parameters: [
-        {
-          name: "productName",
-          in: "query",
-          required: true,
-          schema: { type: "string" },
-          description: "Target product name (used as subdirectory under products_info)"
-        }
+        { name: "productName", in: "path", required: true, schema: { type: "string" }, description: "Target product name (used as subdirectory under products_info)" }
       ],
       requestBody: {
         required: true,
