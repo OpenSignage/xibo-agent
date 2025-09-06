@@ -19,6 +19,7 @@ import { getFontImageHandler } from './handlers/getFontImage';
 import { uploadProductsInfoFormHandler } from './handlers/uploadProductsInfoForm';
 import { uploadProductsInfoByNameHandler } from './handlers/uploadProductsInfo';
 import { downloadUnifiedHandler } from './handlers/downloadUnified';
+import { uploadToGoogleSlidesHandler } from './handlers/uploadToGoogleSlides';
 
 export const apiRoutes = [
   // File Upload API - Handles media file uploads
@@ -173,6 +174,25 @@ export const apiRoutes = [
       responses: {
         200: { description: "Font preview image stream", content: { "image/*": { schema: { type: "string", format: "binary" } } } },
         404: { description: "File not found" }
+      }
+    },
+  }),
+  // Upload a presentation to Google Slides
+  registerApiRoute("/ext-api/uploadToGoogleSlides/:fileName", {
+    method: "POST",
+    handler: uploadToGoogleSlidesHandler,
+    openapi: {
+      summary: "Upload PPTX to Google Slides",
+      description: "Uploads a generated PPTX from the presentations directory to Google Drive and converts it to Google Slides. Requires environment variables GSA_KEY_JSON (service account JSON) and optionally GDRIVE_FOLDER_ID.",
+      tags: ["Extended API"],
+      parameters: [
+        { name: "fileName", in: "path", required: true, schema: { type: "string" }, description: "Target PPTX file name (e.g., report-2025-09-04.pptx)" }
+      ],
+      responses: {
+        200: { description: "Upload succeeded", content: { "application/json": { schema: { type: "object" } } } },
+        400: { description: "Invalid parameters" },
+        404: { description: "File not found" },
+        500: { description: "Server error" }
       }
     },
   }),

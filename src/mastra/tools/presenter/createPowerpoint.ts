@@ -18,7 +18,7 @@ import { config } from '../xibo-agent/config';
 import fs from 'fs/promises';
 
 //
-const JPN_FONT = 'Yu Gothic';
+const JPN_FONT = 'Noto Sans JP';
 
 // Define a master slide layout for a consistent look and feel
 const MASTER_SLIDE = 'MASTER_SLIDE';
@@ -32,12 +32,29 @@ function lightenHex(hex: string, amount: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
+// Compute readable text color (black or white) based on background luminance
+function pickTextColorForBackground(hex: string): '000000' | 'FFFFFF' {
+  const h = (hex || '').replace('#', '');
+  const r = parseInt(h.slice(0, 2) || '00', 16) / 255;
+  const g = parseInt(h.slice(2, 4) || '00', 16) / 255;
+  const b = parseInt(h.slice(4, 6) || '00', 16) / 255;
+  const toLinear = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  const rl = toLinear(r), gl = toLinear(g), bl = toLinear(b);
+  const luminance = 0.2126 * rl + 0.7152 * gl + 0.0722 * bl; // 0 (black) .. 1 (white)
+  return luminance > 0.6 ? '000000' : 'FFFFFF';
+}
+
 /**
  * Wraps text at word or punctuation boundaries up to a max character length per line.
  * Works for both spaced (EN) and unspaced (JA) texts by using breakable characters.
  */
 function wrapTextAtWordBoundaries(text: string, maxCharsPerLine: number): string {
-  const normalized = (text ?? '').replace(/[\t\r\f\v]+/g, ' ').replace(/ +/g, ' ').trim();
+  // Collapse hard newlines to spaces to avoid mid-word breaks introduced upstream
+  const normalized = (text ?? '')
+    .replace(/[\t\r\f\v]+/g, ' ')
+    .replace(/\n+/g, ' ')
+    .replace(/ +/g, ' ')
+    .trim();
   if (normalized.length <= maxCharsPerLine || maxCharsPerLine <= 0) return normalized;
   const breakable = /[\s、。，．,\.;:：;・／\/()（）「」『』\-–—]/; // include punctuation and spaces
   const lines: string[] = [];
@@ -54,8 +71,26 @@ function wrapTextAtWordBoundaries(text: string, maxCharsPerLine: number): string
         lines.push(line.slice(0, lastBreakPos));
         line = line.slice(lastBreakPos);
       } else {
-        lines.push(line);
-        line = '';
+        // Fallback: avoid breaking inside numeric tokens like "300億" or "8.0%"
+        const isUnsafePair = (left: string, right: string) => {
+          if (!left || !right) return false;
+          const leftIsDigitOrDot = /[0-9\.]/.test(left);
+          const rightIsDigitOrUnit = /[0-9％%億万千円]/.test(right);
+          const dotFollowedByDigit = left === '.' && /[0-9]/.test(right);
+          return (leftIsDigitOrDot && rightIsDigitOrUnit) || dotFollowedByDigit;
+        };
+        let splitPos = line.length;
+        while (splitPos > 1 && splitPos < line.length && isUnsafePair(line[splitPos - 1], line[splitPos])) {
+          splitPos -= 1;
+        }
+        // If we couldn't find a safe boundary inside the token, keep the original split
+        if (splitPos <= 1 || splitPos >= line.length) {
+          lines.push(line);
+          line = '';
+        } else {
+          lines.push(line.slice(0, splitPos));
+          line = line.slice(splitPos);
+        }
       }
       lastBreakPos = -1;
     }
@@ -94,6 +129,8 @@ function bufferToDataUrl(buf: Buffer): string {
  * The content is wrapped and subsequent lines are indented to align after the colon.
  */
 function formatColonSeparatedBullet(bullet: string, maxContentLineChars: number, indentCols: number = 4): string {
+  // Remove unintended line breaks and leading full-width spaces after newlines
+  bullet = (bullet || '').replace(/\n[ \t　]*/g, '');
   const idx = (() => {
     const z = bullet.indexOf('：');
     if (z >= 0) return z;
@@ -106,6 +143,9 @@ function formatColonSeparatedBullet(bullet: string, maxContentLineChars: number,
   }
   const title = bullet.slice(0, idx).trim();
   let content = bullet.slice(idx + 1).trim();
+  // Prefer breaking at Japanese quotes or parentheses boundaries
+  // e.g., 「LED Vision」のような閉じ括弧の直後で折り返しを促す
+  content = content.replace(/(」|』|\)|）)([^\s])/g, '$1 $2');
   if (!content) return bullet.trim();
   // Wrap content only (memoized)
   const wrapped = wrapWithMemo(content, maxContentLineChars);
@@ -154,6 +194,56 @@ function preventLeadingPunctuation(text: string): string {
     lines[i] = indent + rest;
   }
   return lines.join('\n');
+}
+
+/**
+ * Converts markdown-like bold (**text**) into PPTX text runs with bold styling.
+ * Removes the ** markers and toggles bold for the enclosed segments.
+ */
+function toBoldRunsFromMarkdown(text: string): Array<{ text: string; options?: { bold?: boolean } }> {
+  if (!text) return [];
+  const parts = String(text).split('**');
+  const runs: Array<{ text: string; options?: { bold?: boolean } }> = [];
+  let bold = false;
+  for (let i = 0; i < parts.length; i++) {
+    const seg = parts[i];
+    if (!seg) {
+      // Skip empty segments introduced by adjacent markers
+      bold = !bold; // still toggle to keep sequence consistent
+      continue;
+    }
+    runs.push(bold ? { text: seg, options: { bold: true } } : { text: seg });
+    // Toggle bold state for next segment if there's another marker ahead
+    if (i < parts.length - 1) bold = !bold;
+  }
+  return runs.length ? runs : [{ text: text }];
+}
+
+/**
+ * Prepare bullets so that lines following a header-like bullet (contains '：')
+ * are visually grouped as sub-lines by adding full-width spaces as a prefix.
+ * Also removes unintended newlines inside each item.
+ */
+function prepareBulletsForTemplate(bullets: string[], subIndentCols: number = 10): string[] {
+  const out: string[] = [];
+  let seenHeader = false;
+  const isHeader = (s: string) => /：/.test(s);
+  const clean = (s: string) => (s || '').replace(/\n[ \t　]*/g, '');
+  for (const raw of bullets || []) {
+    const item = clean(raw);
+    if (isHeader(item)) {
+      seenHeader = true;
+      out.push(item);
+    } else {
+      if (seenHeader) {
+        const indent = '　'.repeat(Math.max(2, Math.min(subIndentCols, 16)));
+        out.push(indent + item);
+      } else {
+        out.push(item);
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -255,7 +345,13 @@ function fitTextToLines(
   const hit = fitMemo.get(memoKey);
   if (hit) return hit;
   let fontSize = initialFontSize;
-  const normalized = preventLeadingPunctuation((text || '').replace(/[\t\r\f\v]+/g, ' ').replace(/ +/g, ' ').trim());
+  const normalized = preventLeadingPunctuation(
+    (text || '')
+      .replace(/[\t\r\f\v]+/g, ' ')
+      .replace(/\n+/g, ' ')
+      .replace(/ +/g, ' ')
+      .trim()
+  );
   while (fontSize >= minFontSize) {
     const wrapChars = Math.max(8, Math.round(baseWrapCharsAtInitial * (fontSize / initialFontSize)));
     const wrapped = wrapWithMemo(normalized, wrapChars);
@@ -313,7 +409,7 @@ const slideSchema = z.object({
   title: z.string().describe('The title of the slide.'),
   bullets: z.array(z.string()).describe('An array of bullet points for the slide content.'),
   imagePath: z.string().optional().describe('An optional path to an image to include on the slide.'),
-  imageBuffer: z.any().optional().describe('Optional PNG image buffer or data URL to include on the slide (in-memory).'),
+  
   notes: z.string().optional().describe('Speaker notes for the slide.'),
   layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote']).optional().describe('The layout type for the slide.'),
   special_content: z.string().optional().describe('Special content for layouts like \'quote\'.'),
@@ -325,7 +421,7 @@ const inputSchema = z.object({
   themeColor1: z.string().optional().describe('The primary hex color for the background gradient.'),
   themeColor2: z.string().optional().describe('The secondary hex color for the background gradient.'),
   titleSlideImagePath: z.string().optional().describe('An optional path to a background image for the title slide.'),
-  titleSlideImageBuffer: z.any().optional().describe('Optional PNG buffer or data URL for the title slide background.'),
+  
   // Optional tokenized style parameters to unify theme
   styleTokens: z.object({
     primary: z.string().optional(),
@@ -373,12 +469,33 @@ export const createPowerpointTool = createTool({
     try {
         await fs.mkdir(presenterDir, { recursive: true });
         const pres = new PptxGenJS();
+        // Ensure 16:9 slide size
+        try {
+            (pres as any).defineLayout({ name: 'WIDE_16x9', width: 13.33, height: 7.5 });
+            (pres as any).layout = 'WIDE_16x9';
+        } catch {}
 
         // Set the default theme fonts to a Japanese font to support notes.
         pres.theme = {
             bodyFontFace: JPN_FONT,
             headFontFace: JPN_FONT,
         };
+
+        // --- Layout constants (16:9) ---
+        const pageW = 13.33; // inches
+        const pageH = 7.5;   // inches
+        const marginX = 0.6;
+        const contentW = pageW - marginX * 2; // 12.13
+        const gap = 0.4;
+        const twoColTextW = 7.2; // left text column width
+        const twoColTextX = marginX;
+        const twoColVisualW = Math.max(3.8, contentW - twoColTextW - gap);
+        const twoColVisualX = twoColTextX + twoColTextW + gap;
+        const contentTopY = 0.95;
+        const twoColTextH = 3.6;
+        const twoColVisualH = 3.2;
+        const bottomBandY = 4.6;
+        const bottomBandH = 2.3;
 
         // 1. Define the Master Slide (now for footer only)
         pres.defineSlideMaster({
@@ -488,14 +605,51 @@ export const createPowerpointTool = createTool({
                     const z: number[][] = Array.isArray(payload?.z) ? payload.z : [];
                     const cols = Math.max(1, xLabels.length);
                     const rows = Math.max(1, yLabels.length);
-                    const cellW = rw / cols;
-                    const cellH = rh / rows;
+                    // Compute min/max for normalization
+                    let minZ = Infinity, maxZ = -Infinity;
                     for (let r = 0; r < rows; r++) {
                         for (let c = 0; c < cols; c++) {
-                            const v = Math.max(0, Math.min(1, Number((z[r] || [])[c] || 0)));
-                            const col = Math.round(255 * (1 - v));
-                            const color = `#${col.toString(16).padStart(2,'0')}${lightenHex('#00',0)}${(255 - col).toString(16).padStart(2,'0')}`.slice(0,7);
-                            targetSlide.addShape(pres.ShapeType.rect, { x: rx + c * cellW, y: ry + r * cellH, w: cellW, h: cellH, fill: { color }, line: { color: '#FFFFFF', width: 0.5 } });
+                            const vv = Number((z[r] || [])[c] ?? 0);
+                            if (Number.isFinite(vv)) { minZ = Math.min(minZ, vv); maxZ = Math.max(maxZ, vv); }
+                        }
+                    }
+                    if (!Number.isFinite(minZ) || !Number.isFinite(maxZ) || minZ === maxZ) { minZ = 0; maxZ = 1; }
+                    // Layout padding for axis labels
+                    const padLeft = 1.0; // space for y labels
+                    const padTop = 0.5;  // space for x labels
+                    const gridX = rx + padLeft;
+                    const gridY = ry + padTop;
+                    const gridW = Math.max(0.1, rw - padLeft);
+                    const gridH = Math.max(0.1, rh - padTop);
+                    const cellW = gridW / Math.max(1, cols);
+                    const cellH = gridH / Math.max(1, rows);
+                    // Axis labels (top)
+                    for (let c = 0; c < cols; c++) {
+                        targetSlide.addText(String(xLabels[c] ?? ''), { x: gridX + c * cellW, y: ry + 0.05, w: cellW, h: 0.35, fontSize: 12, align: 'center', fontFace: JPN_FONT });
+                    }
+                    // Axis labels (left)
+                    for (let r = 0; r < rows; r++) {
+                        targetSlide.addText(String(yLabels[r] ?? ''), { x: rx + 0.05, y: gridY + r * cellH + (cellH - 0.3)/2, w: padLeft - 0.1, h: 0.3, fontSize: 12, align: 'right', fontFace: JPN_FONT });
+                    }
+                    // Color helper: blend white -> primary by t
+                    const blend = (t: number) => {
+                        const clamp = Math.max(0, Math.min(1, t));
+                        const hex = (h: string) => h.replace('#','');
+                        const p = hex(primary);
+                        const pr = parseInt(p.slice(0,2),16), pg = parseInt(p.slice(2,4),16), pb = parseInt(p.slice(4,6),16);
+                        const r = Math.round(255 + (pr - 255) * clamp).toString(16).padStart(2,'0');
+                        const g = Math.round(255 + (pg - 255) * clamp).toString(16).padStart(2,'0');
+                        const b = Math.round(255 + (pb - 255) * clamp).toString(16).padStart(2,'0');
+                        return `#${r}${g}${b}`;
+                    };
+                    // Cells
+                    for (let r = 0; r < rows; r++) {
+                        for (let c = 0; c < cols; c++) {
+                            const raw = Number((z[r] || [])[c] ?? 0);
+                            const t = (raw - minZ) / (maxZ - minZ);
+                            const color = blend(t);
+                            const cx = gridX + c * cellW, cy = gridY + r * cellH;
+                            targetSlide.addShape(pres.ShapeType.rect, { x: cx, y: cy, w: cellW, h: cellH, fill: { color }, line: { color: '#EAEAEA', width: 0.75 } });
                         }
                     }
                     break;
@@ -593,7 +747,7 @@ export const createPowerpointTool = createTool({
                     items.slice(0, 4).forEach((it: any, i: number) => {
                         const x = rx + (i % 2) * (rw/2) + 0.1;
                         const y = ry + Math.floor(i/2) * (rh/2) + 0.1;
-                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: rw/2 - 0.2, h: rh/2 - 0.2, fill: { color: lightenHex(secondary, 60) }, rectRadius: cornerRadius, line: { color: secondary, width: 0.5 } });
+                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: rw/2 - 0.2, h: rh/2 - 0.2, fill: { color: lightenHex(secondary, 60) }, rectRadius: cornerRadius, line: { color: secondary, width: 0.5 }, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
                         targetSlide.addText(String(it?.label ?? ''), { x: x + 0.1, y: y + 0.1, w: rw/2 - 0.4, h: 0.4, fontSize: 12, bold: true, fontFace: JPN_FONT });
                         if (it?.value) {
                             targetSlide.addText(String(it.value), { x: x + 0.1, y: y + 0.55, w: rw/2 - 0.4, h: 0.4, fontSize: 14, fontFace: JPN_FONT });
@@ -603,16 +757,30 @@ export const createPowerpointTool = createTool({
                 }
                 case 'kpi': {
                     const items = Array.isArray(payload?.items) ? payload.items : [];
-                    const cardW = Math.min( (rw - 0.6) / 2, 2.2 );
-                    const cardH = Math.min( rh / 2 - 0.2, 1.2 );
-                    const gap = 0.3;
+                    const cardW = Math.min( (rw - 0.8) / 2, 2.6 );
+                    const cardH = Math.min( rh / 2 - 0.2, 1.35 );
+                    const gap = 0.4;
                     items.slice(0, 4).forEach((it: any, idx: number) => {
                         const row = Math.floor(idx / 2), col = idx % 2;
-                        const x = rx + 0.3 + col * (cardW + gap);
+                        const x = rx + 0.2 + col * (cardW + gap);
                         const y = ry + 0.2 + row * (cardH + gap);
-                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: cornerRadius });
-                        targetSlide.addText(String(it?.value ?? ''), { x: x + 0.15, y: y + 0.18, w: cardW - 0.3, h: cardH * 0.55, fontSize: 16, bold: true, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
-                        targetSlide.addText(String(it?.label ?? ''), { x: x + 0.15, y: y + cardH * 0.65, w: cardW - 0.3, h: cardH * 0.3, fontSize: 11, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
+                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: cornerRadius, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
+                        targetSlide.addText(String(it?.value ?? ''), { x: x + 0.2, y: y + 0.2, w: cardW - 0.4, h: cardH * 0.55, fontSize: 18, bold: true, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
+                        targetSlide.addText(String(it?.label ?? ''), { x: x + 0.2, y: y + cardH * 0.65, w: cardW - 0.4, h: cardH * 0.3, fontSize: 11.5, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
+                    });
+                    break;
+                }
+                case 'checklist': {
+                    const items = Array.isArray(payload?.items) ? payload.items : [];
+                    const lineH = Math.min(0.55, rh / Math.max(1, items.length) - 0.06);
+                    const bulletW = 0.22;
+                    items.slice(0, 6).forEach((it: any, i: number) => {
+                        const y = ry + i * (lineH + 0.08);
+                        // bullet circle
+                        targetSlide.addShape(pres.ShapeType.ellipse, { x: rx, y: y + (lineH - bulletW)/2, w: bulletW, h: bulletW, fill: { color: accent }, line: { color: 'FFFFFF', width: 0.5 } });
+                        // text
+                        const label = String(it?.label ?? '');
+                        targetSlide.addText(label, { x: rx + bulletW + 0.15, y, w: rw - (bulletW + 0.25), h: lineH, fontSize: 14, fontFace: JPN_FONT });
                     });
                     break;
                 }
@@ -660,16 +828,18 @@ export const createPowerpointTool = createTool({
                 }
                 case 'process': {
                     const steps = Array.isArray(payload?.steps) ? payload.steps : [];
-                    const startX = rx;
                     const y = ry + rh * 0.20;
                     const maxSteps = Math.min(4, steps.length);
                     const gap = 0.5;
                     const totalGap = gap * Math.max(0, maxSteps - 1);
                     const stepW = Math.min(1.6, (rw - totalGap) / Math.max(1, maxSteps));
                     const stepH = Math.min( rh * 0.6, 0.9 );
+                    // Center the whole process group horizontally within the region
+                    const groupWidth = stepW * Math.max(1, maxSteps) + gap * Math.max(0, maxSteps - 1);
+                    const startX = rx + Math.max(0, (rw - groupWidth) / 2);
                     steps.slice(0, maxSteps).forEach((s: any, i: number) => {
                         const x = startX + i * (stepW + gap);
-                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: stepW, h: stepH, fill: { color: primary }, rectRadius: cornerRadius, line: { color: outlineColor, width: 0.5 } });
+                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: stepW, h: stepH, fill: { color: primary }, rectRadius: cornerRadius, line: { color: outlineColor, width: 0.5 }, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
                         targetSlide.addText(String(s?.label ?? `Step ${i+1}`), { x: x + 0.08, y: y + 0.14, w: stepW - 0.16, h: stepH - 0.28, fontSize: 11, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: JPN_FONT });
                         if (i < maxSteps - 1) {
                             // place chevron centered in the gap between items
@@ -680,32 +850,50 @@ export const createPowerpointTool = createTool({
                 }
                 case 'roadmap': {
                     const milestones = Array.isArray(payload?.milestones) ? payload.milestones : [];
-                    const startX = rx;
+                    // Add horizontal padding to avoid labels overflowing slide edges
+                    const innerPadX = Math.min(0.6, rw * 0.08);
+                    const startX = rx + innerPadX;
                     const startY = ry + rh / 2;
-                    const totalW = rw;
+                    const totalW = Math.max(0, rw - innerPadX * 2);
                     targetSlide.addShape(pres.ShapeType.line, { x: startX, y: startY, w: totalW, h: 0, line: { color: outlineColor, width: 1.2 } });
                     milestones.slice(0, 6).forEach((m: any, i: number) => {
                         const cx = startX + (i * (totalW / Math.max(1, milestones.length - 1)));
+                        // Milestone dot
                         targetSlide.addShape(pres.ShapeType.ellipse, { x: cx - 0.08, y: startY - 0.08, w: 0.16, h: 0.16, fill: { color: accent }, line: { color: outlineColor, width: 0.8 } });
-                        targetSlide.addText(String(m?.label ?? ''), { x: cx - 0.9, y: startY + 0.18, w: 1.8, h: 0.32, fontSize: 11, align: 'center', fontFace: JPN_FONT });
+                        // Clamp label/date boxes within the slide region to prevent overflow
+                        const labelW = 1.6;
+                        const dateW = 1.2;
+                        const labelX = Math.max(rx, Math.min(rx + rw - labelW, cx - labelW / 2));
+                        const dateX = Math.max(rx, Math.min(rx + rw - dateW, cx - dateW / 2));
+                        targetSlide.addText(String(m?.label ?? ''), { x: labelX, y: startY + 0.18, w: labelW, h: 0.36, fontSize: 11, align: 'center', fontFace: JPN_FONT });
                         if (m?.date) {
-                            targetSlide.addText(String(m.date), { x: cx - 0.9, y: startY + 0.52, w: 1.8, h: 0.25, fontSize: 9, align: 'center', color: '666666', fontFace: JPN_FONT });
+                            targetSlide.addText(String(m.date), { x: dateX, y: startY + 0.56, w: dateW, h: 0.25, fontSize: 9, align: 'center', color: '666666', fontFace: JPN_FONT });
                         }
                     });
                     break;
                 }
                 case 'comparison': {
                     const a = payload?.a, b = payload?.b;
-                    const boxW = Math.min((rw - 0.6) / 2, 2.2);
-                    const boxH = Math.min(rh - 0.2, 1.4);
+                    const boxW = Math.min((rw - 0.6) / 2, 2.5);
+                    const boxH = Math.min(rh - 0.2, 1.55);
                     const y = ry + 0.1;
-                    const compRadius = Math.max(2, Math.floor(cornerRadius / 2));
-                    targetSlide.addShape(pres.ShapeType.roundRect, { x: rx + 0.1, y, w: boxW, h: boxH, fill: { color: primary }, rectRadius: compRadius, line: { color: outlineColor, width: 0.5 } });
-                    targetSlide.addShape(pres.ShapeType.roundRect, { x: rx + 0.3 + boxW, y, w: boxW, h: boxH, fill: { color: secondary }, rectRadius: compRadius, line: { color: outlineColor, width: 0.5 } });
-                    targetSlide.addText(String(a?.label ?? 'A'), { x: rx + 0.1, y: y + 0.05, w: boxW, h: 0.4, fontSize: 12, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center' });
-                    targetSlide.addText(String(a?.value ?? ''), { x: rx + 0.1, y: y + 0.5, w: boxW, h: boxH - 0.55, fontSize: 18, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center' });
-                    targetSlide.addText(String(b?.label ?? 'B'), { x: rx + 0.3 + boxW, y: y + 0.05, w: boxW, h: 0.4, fontSize: 12, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center' });
-                    targetSlide.addText(String(b?.value ?? ''), { x: rx + 0.3 + boxW, y: y + 0.5, w: boxW, h: boxH - 0.55, fontSize: 18, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center' });
+                    const compRadius = 0; // squared corners for maximum usable area
+                    const leftX = rx + 0.1;
+                    const rightX = rx + 0.3 + boxW;
+                    // Use rect to avoid corner clipping on long text, with drop shadow bottom-right
+                    targetSlide.addShape(pres.ShapeType.rect, { x: leftX, y, w: boxW, h: boxH, fill: { color: primary }, line: { color: outlineColor, width: 0.5 }, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
+                    targetSlide.addShape(pres.ShapeType.rect, { x: rightX, y, w: boxW, h: boxH, fill: { color: secondary }, line: { color: outlineColor, width: 0.5 }, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
+                    // Fit label/value text into boxes to avoid overflow
+                    const scaleWrap = (base: number) => Math.max(16, Math.floor(base * (boxW / 2.4)));
+                    const aLabelFit = fitTextToLines(String(a?.label ?? 'A'), /*initial*/13, /*min*/9, /*baseWrap*/scaleWrap(24), /*lines*/2, /*hard*/24);
+                    const aValueFit = fitTextToLines(String(a?.value ?? ''), /*initial*/18, /*min*/11, /*baseWrap*/scaleWrap(20), /*lines*/2, /*hard*/22);
+                    const bLabelFit = fitTextToLines(String(b?.label ?? 'B'), /*initial*/13, /*min*/9, /*baseWrap*/scaleWrap(24), /*lines*/2, /*hard*/24);
+                    const bValueFit = fitTextToLines(String(b?.value ?? ''), /*initial*/18, /*min*/11, /*baseWrap*/scaleWrap(20), /*lines*/2, /*hard*/22);
+                    const padX = 0.12;
+                    targetSlide.addText(aLabelFit.text, { x: leftX + padX, y: y + 0.06, w: boxW - padX*2, h: 0.52, fontSize: aLabelFit.fontSize, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center', valign: 'middle' });
+                    targetSlide.addText(aValueFit.text, { x: leftX + padX, y: y + 0.58, w: boxW - padX*2, h: boxH - 0.66, fontSize: aValueFit.fontSize, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center', valign: 'middle' });
+                    targetSlide.addText(bLabelFit.text, { x: rightX + padX, y: y + 0.06, w: boxW - padX*2, h: 0.52, fontSize: bLabelFit.fontSize, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center', valign: 'middle' });
+                    targetSlide.addText(bValueFit.text, { x: rightX + padX, y: y + 0.58, w: boxW - padX*2, h: boxH - 0.66, fontSize: bValueFit.fontSize, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center', valign: 'middle' });
                     break;
                 }
                 case 'timeline': {
@@ -733,14 +921,7 @@ export const createPowerpointTool = createTool({
 
             // Background: prioritize title image; otherwise themed flat color.
             if (index === 0) {
-                if ((context as any).titleSlideImageBuffer) {
-                    const rawBg = (context as any).titleSlideImageBuffer as Buffer | string;
-                    const dataBg = typeof rawBg === 'string' && rawBg.startsWith('data:')
-                      ? rawBg
-                      : `data:image/png;base64,${(rawBg as Buffer).toString('base64')}`;
-                    slide.background = { data: dataBg } as any;
-                    logger.info('Set title slide background image from buffer.');
-                } else if (titleSlideImagePath) {
+                if (titleSlideImagePath) {
                     try {
                     await fs.access(titleSlideImagePath);
                     slide.background = { path: titleSlideImagePath };
@@ -773,7 +954,7 @@ export const createPowerpointTool = createTool({
                 case 'title_slide':
                     // Auto-fit title
                     const fittedTitle = fitTextToLines(slideData.title, /*initial*/44, /*min*/30, /*baseWrap*/22, /*lines*/2, /*hard*/26);
-                    slide.addText(fittedTitle.text, { 
+                    slide.addText(toBoldRunsFromMarkdown(fittedTitle.text) as any, { 
                         x: 0, y: 0, w: '100%', h: '55%', // Move title up by adjusting the bounding box height
                         align: 'center', valign: 'middle', 
                         fontSize: fittedTitle.fontSize, bold: true, fontFace: JPN_FONT,
@@ -784,7 +965,7 @@ export const createPowerpointTool = createTool({
                         // Format multiple colon-separated entries across lines for readability
                         const subtitle = preventLeadingPunctuation(formatBulletsForColonSeparation(slideData.bullets, 24, 4));
                         const fittedSub = fitTextToLines(subtitle, /*initial*/18, /*min*/14, /*baseWrap*/36, /*lines*/3, /*hard*/32);
-                        slide.addText(fittedSub.text, {
+                        slide.addText(toBoldRunsFromMarkdown(fittedSub.text) as any, {
                             x: 0, y: '70%', w: '100%', // Move subtitle down
                             align: 'center', valign: 'top', 
                             fontSize: fittedSub.fontSize, fontFace: JPN_FONT,
@@ -796,7 +977,7 @@ export const createPowerpointTool = createTool({
                 case 'section_header':
                     {
                         const fitted = fitTextToLines(slideData.title, /*initial*/36, /*min*/20, /*baseWrap*/28, /*lines*/1, /*hard*/24);
-                        slide.addText(fitted.text, {
+                        slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, {
                         x: 0, y: 0, w: '100%', h: '100%',
                         align: 'center', valign: 'middle',
                             fontSize: fitted.fontSize, bold: true, fontFace: JPN_FONT
@@ -807,7 +988,7 @@ export const createPowerpointTool = createTool({
                     if (slideData.special_content) {
                         const formatted = formatQuoteLines(slideData.special_content, 18);
                         const fittedQuote = fitTextToLines(formatted, /*initial*/32, /*min*/22, /*baseWrap*/30, /*lines*/4, /*hard*/38, { suppressEllipsis: true, minFontFloor: 20 });
-                        slide.addText(fittedQuote.text, {
+                        slide.addText(toBoldRunsFromMarkdown(fittedQuote.text) as any, {
                             x: 0.8, y: 1.2, w: '88%', h: 3.2,
                             align: 'center', valign: 'middle',
                             fontSize: fittedQuote.fontSize, italic: true, fontFace: JPN_FONT
@@ -815,7 +996,7 @@ export const createPowerpointTool = createTool({
                     }
                     {
                         const fitted = fitTextToLines(slideData.title, /*initial*/18, /*min*/14, /*baseWrap*/30, /*lines*/1, /*hard*/24);
-                        slide.addText(fitted.text, { 
+                        slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, { 
                         x: 0, y: '80%', w: '100%', 
                             align: 'center', fontSize: fitted.fontSize, fontFace: JPN_FONT
                     });
@@ -824,39 +1005,84 @@ export const createPowerpointTool = createTool({
                 case 'content_with_visual':
                     {
                         const fitted = fitTextToLines(slideData.title, /*initial*/32, /*min*/22, /*baseWrap*/36, /*lines*/1, /*hard*/24);
-                        slide.addText(fitted.text, { x: 0.5, y: 0.25, w: '90%', h: 0.6, fontSize: fitted.fontSize, bold: true, fontFace: JPN_FONT });
+                        const bgColor = lightenHex(primary, 70);
+                        const textColor = pickTextColorForBackground(bgColor).toString();
+                        slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, { 
+                            x: twoColTextX, y: contentTopY - 0.35, w: contentW, h: 0.6, 
+                            fontSize: fitted.fontSize, bold: true, fontFace: JPN_FONT,
+                            color: textColor,
+                            fill: { color: bgColor }, line: { color: bgColor, width: 0 }
+                        });
                     }
-                    // Dynamically fit bullets to max 3 lines per bullet, reducing font size if needed
-                    const fittedCv = fitBulletsToLines(slideData.bullets, /*initial*/18, /*min*/16, /*baseWrap*/22, /*indent*/4, /*targetLines*/3, /*hard*/22);
-                    slide.addText(fittedCv.text, { 
-                        x: (isBottomVisual ? 0.8 : 0.5), y: 1.0, w: (isBottomVisual ? '88%' : '45%'), h: (isBottomVisual ? 3.2 : 3.6), 
-                        fontSize: fittedCv.fontSize, bullet: { type: 'bullet' }, fontFace: JPN_FONT,
+                    // Shift text down to avoid overlapping title
+                    const textYWithVisual = contentTopY + 0.5;
+                    const textHWithVisual = Math.max(2.5, twoColTextH - 0.5);
+                    // Render bullets without intentional line breaks; rely on textbox auto-wrapping
+                    const cleanedBulletsCv = (slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim());
+                    const bulletTextCv = cleanedBulletsCv.join('\n');
+                    slide.addText(toBoldRunsFromMarkdown(bulletTextCv) as any, { 
+                        x: twoColTextX, y: textYWithVisual, w: twoColTextW, h: textHWithVisual, 
+                        fontSize: 18, bullet: { type: 'bullet' }, fontFace: JPN_FONT,
                         valign: 'top', paraSpaceAfter: 12,
                     });
-                    // Prefer in-memory buffer if provided; fallback to file path
-                    if (!isBottomVisual && (slideData as any).imageBuffer) {
-                        const raw = (slideData as any).imageBuffer as Buffer | string;
-                        const dataUrl = typeof raw === 'string' && raw.startsWith('data:')
-                          ? raw
-                          : bufferToDataUrl(raw as Buffer);
-                        slide.addImage({ data: dataUrl, x: 5.25, y: 1.0, w: 4.2, h: 3.0 });
-                    } else if (!isBottomVisual && slideData.imagePath) {
-                        slide.addImage({ path: slideData.imagePath, x: 5.25, y: 1.0, w: 4.2, h: 3.0 });
+                    // Image: keep aspect by specifying width only; auto height (moved below title)
+                    if (!isBottomVisual && slideData.imagePath) {
+                        const imageYWithVisual = contentTopY + 0.6;
+                        // Allocate more vertical space: prefer height to 3.4 while keeping width cap
+                        slide.addImage({
+                            path: slideData.imagePath,
+                            x: twoColVisualX,
+                            y: imageYWithVisual,
+                            w: twoColVisualW,
+                            h: 3.4,
+                            sizing: { type: 'contain', w: twoColVisualW, h: 3.4 } as any,
+                            shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any
+                        });
                     }
                     break;
                 case 'content_only':
                 default:
                     {
                         const fitted = fitTextToLines(slideData.title, /*initial*/32, /*min*/20, /*baseWrap*/40, /*lines*/1, /*hard*/24);
-                        slide.addText(fitted.text, { x: 0.5, y: 0.25, w: '90%', h: 0.6, fontSize: fitted.fontSize, bold: true, fontFace: JPN_FONT });
+                        const bgColor = lightenHex(primary, 70);
+                        const textColor = pickTextColorForBackground(bgColor).toString();
+                        slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, { 
+                            x: twoColTextX, y: contentTopY - 0.35, w: contentW, h: 0.6, 
+                            fontSize: fitted.fontSize, bold: true, fontFace: JPN_FONT,
+                            color: textColor,
+                            fill: { color: bgColor }, line: { color: bgColor, width: 0 }
+                        });
                     }
                     // Allow a bit more content on content-only slides: target 4 lines per bullet
-                    const fittedCo = fitBulletsToLines(slideData.bullets, /*initial*/20, /*min*/19, /*baseWrap*/30, /*indent*/3, /*targetLines*/4, /*hard*/22);
-                    slide.addText(fittedCo.text, { 
-                        x: (isBottomVisual ? 0.8 : (perSlideRecipeHere ? 0.5 : 0.8)), y: 1.0, w: (isBottomVisual ? '88%' : (perSlideRecipeHere ? '45%' : '88%')), h: (isBottomVisual ? 3.2 : 4.0), 
-                        fontSize: fittedCo.fontSize, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT,
-                        valign: 'top', paraSpaceAfter: 12,
-                    });
+                    const cleanedBulletsCo = (slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim());
+                    const bulletTextCo = cleanedBulletsCo.join('\n');
+                    // Shift text down to avoid overlapping title
+                    const textYContentOnly = contentTopY + 0.5;
+                    const textHContentOnly = 4.0;
+                    if (perSlideRecipeHere) {
+                        // If the recipe is of bottom-band type, use full-width text
+                        if (isBottomVisual) {
+                            slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { 
+                                x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, 
+                                fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT,
+                                valign: 'top', paraSpaceAfter: 12,
+                            });
+                        } else {
+                            // Right-panel recipe → two-column
+                            slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { 
+                                x: twoColTextX, y: textYContentOnly, w: twoColTextW, h: twoColTextH, 
+                                fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT,
+                                valign: 'top', paraSpaceAfter: 12,
+                            });
+                        }
+                    } else {
+                        // No recipe → full-width text
+                        slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { 
+                            x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, 
+                            fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT,
+                            valign: 'top', paraSpaceAfter: 12,
+                        });
+                    }
                     break;
             }
 
@@ -867,9 +1093,14 @@ export const createPowerpointTool = createTool({
                 const typeStr = String(perSlideRecipeHere.type || '');
                 const isBottom = isBottomVisual || typeStr === 'gantt' || typeStr === 'timeline';
                 const useUpperBand = (typeStr === 'roadmap' || typeStr === 'timeline');
-                const region = isBottom
-                  ? { x: 0.8, y: (useUpperBand ? 3.2 : 3.6), w: 8.4, h: 2.2 }
-                  : { x: 5.25, y: 1.0, w: 4.2, h: 3.0 };
+                // If an image chart exists on the right panel for content_with_visual,
+                // move recipe to bottom band to avoid overlap.
+                const hasImageForSlide = !!(slideData as any).imagePath;
+                const forceBottomForRecipe = (layout === 'content_with_visual') && hasImageForSlide;
+                // Right panel and bottom band regions (absolute, 16:9)
+                const region = (isBottom || forceBottomForRecipe)
+                  ? { x: marginX, y: bottomBandY, w: contentW, h: bottomBandH }
+                  : { x: twoColVisualX, y: contentTopY + 0.7, w: twoColVisualW, h: twoColVisualH };
                 drawInfographic(slide as any, String(perSlideRecipeHere.type || ''), perSlideRecipeHere, region);
             }
         }

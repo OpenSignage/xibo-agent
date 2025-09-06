@@ -147,7 +147,7 @@ type ChartData = z.infer<typeof chartDataSchema>;
 const successOutputSchema = z.object({
     success: z.literal(true),
     data: z.object({
-        powerpointPath: z.string(),
+        fileName: z.string(),
         googleSlidesLink: z.string().optional(),
     }),
 });
@@ -370,7 +370,6 @@ export const intelligentPresenterWorkflow = createWorkflow({
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
-        titleSlideImageBuffer: z.any().optional(),
         errorMessage: z.string().optional(),
     }),
     outputSchema: z.object({
@@ -383,13 +382,12 @@ export const intelligentPresenterWorkflow = createWorkflow({
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
-        titleSlideImageBuffer: z.any().optional(),
         errorMessage: z.string().optional(),
     }),
     execute: async (params) => {
-        const { presentationDesign, reportContent, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, titleSlideImageBuffer } = params.inputData;
+        const { presentationDesign, reportContent, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath } = params.inputData;
         if (errorMessage) {
-            return { enrichedSlides: [], fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, titleSlideImageBuffer };
+            return { enrichedSlides: [], fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath } as any;
         }
 
         logger.info("✍️ [Analyst & Speechwriter AIs] Generating content in batch...");
@@ -413,10 +411,10 @@ export const intelligentPresenterWorkflow = createWorkflow({
                 const prompt = `An abstract, professional background image representing the following themes: ${keywords}. High resolution, clean, and visually appealing.`;
                 const negativePrompt = 'text, words, letters, numbers, writing, typography, signatures, logos, people, faces';
                 const { generateImage } = await import('../../tools/xibo-agent/generateImage/imageGeneration');
-                const imageResult = await generateImage.execute({ ...params, context: { prompt, aspectRatio: '16:9', negativePrompt, returnBuffer: true } });
+                // Force disk mode: save image to file and pass only the path
+                const imageResult = await generateImage.execute({ ...params, context: { prompt, aspectRatio: '16:9', negativePrompt, returnBuffer: false } });
                 if (imageResult.success && imageResult.data) {
                     const d: any = imageResult.data as any;
-                    if (d.buffer) return { buffer: d.buffer as any, imagePath: undefined };
                     if (d.imagePath) return { buffer: undefined as any, imagePath: d.imagePath as string };
                 }
                 return { buffer: undefined as any, imagePath: undefined };
@@ -425,11 +423,12 @@ export const intelligentPresenterWorkflow = createWorkflow({
             }
         })();
 
-        const batchObjective = `You are a presentation content generator. Given an array of slides and the report body, output a JSON object strictly in the following format (no extra commentary):
+        const batchObjective = `You are a senior presentation designer and content generator. Produce visually rich slides using structured visuals. Given an array of slides and the report body, output a JSON object strictly in the following format (no extra commentary):
 {
   "slides": [
     { "idx": number, "speech": string, "chartData": null | { "chart_type": "bar"|"pie"|"line", "title": string, "labels": string[], "data": number[] }, "visual_recipe": null | (
       { "type": "kpi", "items": [{"label": string, "value": string, "icon"?: string}] } |
+      { "type": "checklist", "items": [{"label": string}] } |
       { "type": "comparison", "a": {"label": string, "value": string}, "b": {"label": string, "value": string} } |
       { "type": "timeline", "steps": [{"label": string}, ...] } |
       { "type": "matrix", "axes": { "xLabels": [string,string], "yLabels": [string,string] }, "items"?: [{"x":0|1, "y":0|1, "label": string}] } |
@@ -448,12 +447,14 @@ export const intelligentPresenterWorkflow = createWorkflow({
     ) }
   ]
 }
-Rules:
+Rules (Design & Content):
 - The speech should be ~150 Japanese characters, readable and presenter-friendly. Do not include markdown fences.
 - If a slide's visual_suggestion is 'none', set chartData to null.
 - If chartData is provided, labels.length must equal data.length and data values must be numbers.
 - Use the slide's context_for_visual only when chartData is required.
-- If chartData is null but a visual is useful, propose a simple visual_recipe such as KPI cards or a short timeline. Keep it minimal and structured.
+- If chartData is null but a visual is useful, propose a simple visual_recipe such as KPI cards, checklist, or a short timeline. Keep it minimal and structured.
+- Prefer diverse visuals across the deck (KPI / comparison / checklist / timeline / process). Avoid repeating the same visual style consecutively.
+- Titles and section headers should be concise; bullets should be scannable and benefit from colon-separated formatting (e.g., "課題：説明").
 Shortening and style constraints (Japanese):
 - Titles and section headers must be noun phrases, no verbs like "〜する". 1 line only. Title max 26 chars, section max 24 chars.
 - Content titles must also be noun phrases, 1 line, max 24 chars.
@@ -510,9 +511,8 @@ Shortening and style constraints (Japanese):
             return { design: { ...design, visual_recipe: normalizedVr }, chartData, speech } as any;
         });
 
-        const finalTitleBuffer = (titleGen && (titleGen as any).buffer) ? (titleGen as any).buffer : titleSlideImageBuffer;
         const finalTitlePath = (titleGen && (titleGen as any).imagePath) ? (titleGen as any).imagePath : titleSlideImagePath;
-        return { enrichedSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath: finalTitlePath, titleSlideImageBuffer: finalTitleBuffer };
+        return { enrichedSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath: finalTitlePath } as any;
     },
 }))
 .then(createStep({
@@ -534,7 +534,6 @@ Shortening and style constraints (Japanese):
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
-        titleSlideImageBuffer: z.any().optional(),
         errorMessage: z.string().optional(),
     }),
     outputSchema: z.object({
@@ -550,7 +549,6 @@ Shortening and style constraints (Japanese):
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
-        titleSlideImageBuffer: z.any().optional(),
         visualRecipes: z.array(z.any()).optional(),
         errorMessage: z.string().optional(),
     }),
@@ -563,16 +561,14 @@ Shortening and style constraints (Japanese):
         logger.info("🖼️ [Chart Generator] Creating chart images...");
         const finalSlidesPromises = enrichedSlides.map(async (slide, index) => {
             let imagePath: string | undefined = undefined;
-            let imageBuffer: Buffer | undefined = undefined;
             // Attempt to generate a chart if data is present
             if (slide.chartData) {
                 const { chart_type, ...restOfChartData } = slide.chartData;
-                const chartResult = await generateChartTool.execute({ ...params, context: { ...restOfChartData, chartType: chart_type, fileName: `chart_${fileNameBase}_${index}`, returnBuffer: true, themeColor1, themeColor2 }});
+                // Force disk mode to avoid passing large buffers between steps
+                const chartResult = await generateChartTool.execute({ ...params, context: { ...restOfChartData, chartType: chart_type, fileName: `chart_${fileNameBase}_${index}`, returnBuffer: false, themeColor1, themeColor2 }});
                 if (chartResult.success) {
                     const d: any = chartResult.data as any;
-                    if (d?.buffer) {
-                        imageBuffer = d.buffer as Buffer;
-                    } else if (d?.imagePath) {
+                    if (d?.imagePath) {
                         imagePath = d.imagePath as string;
                     }
                 } else {
@@ -596,15 +592,12 @@ Shortening and style constraints (Japanese):
                 notes: slide.speech,
                 layout: finalLayout,
                 special_content: slide.design.special_content,
-                // Non-schema field for buffer-based images (consumed by createPowerpointTool if supported)
-                ...(imageBuffer ? { imageBuffer } : {}),
             };
         });
 
         const finalSlides = await Promise.all(finalSlidesPromises);
-        const titleBuffer = (params.inputData as any).titleSlideImageBuffer;
         const visualRecipes = enrichedSlides.map(s => (s as any).design?.visual_recipe ?? null);
-        return { finalSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, titleSlideImageBuffer: titleBuffer, visualRecipes };
+        return { finalSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, visualRecipes } as any;
     },
 }))
 .then(createStep({
@@ -627,13 +620,12 @@ Shortening and style constraints (Japanese):
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
-        titleSlideImageBuffer: z.any().optional(),
         visualRecipes: z.array(z.any()).optional(),
         errorMessage: z.string().optional(),
     }),
     outputSchema: finalOutputSchema,
     execute: async (params) => {
-        const { finalSlides, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, titleSlideImageBuffer, visualRecipes } = params.inputData as any;
+        const { finalSlides, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, visualRecipes } = params.inputData as any;
         if (errorMessage) {
             return { success: false, message: errorMessage } as const;
         }
@@ -645,7 +637,6 @@ Shortening and style constraints (Japanese):
             themeColor1,
             themeColor2,
             titleSlideImagePath,
-            titleSlideImageBuffer,
             styleTokens: { primary: themeColor1, secondary: themeColor2, accent: '#FFC107', cornerRadius: 12, outlineColor: '#FFFFFF' },
             visualRecipes,
         }});
@@ -671,10 +662,11 @@ Shortening and style constraints (Japanese):
         //     }
         // } catch {}
 
+        const fileName = path.parse(pptResult.data.filePath).base;
         return {
             success: true,
             data: {
-                powerpointPath: pptResult.data.filePath,
+                fileName,
                 ...(googleSlidesLink ? { googleSlidesLink } : {}),
             },
         } as const;

@@ -117,7 +117,7 @@ export const saveReportTool = createTool({
       try {
         const { mdToPdf } = await import('md-to-pdf');
         await mdToPdf({ path: filePath }, { dest: pdfPath });
-        logger.info({ pdfPath }, 'Successfully generated PDF report');
+        logger.info({ pdfPath }, 'Saved report to file.');
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         logger.error({ error: msg, filePath }, 'Failed to generate PDF from markdown');
@@ -128,7 +128,7 @@ export const saveReportTool = createTool({
         } as const;
       }
 
-      logger.info(`Successfully saved report to ${filePath}`);
+      logger.info({ filePath }, 'Saved report to file.');
       return {
         success: true,
         data: { filePath, pdfFileName }

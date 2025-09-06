@@ -32,6 +32,7 @@ export const marketingAgent = new Agent({
   id: 'marketing-agent',
   name: 'Marketing Agent',
   description: 'An AI agent that performs market research, analyzes trends, and gathers competitive intelligence.',
+  // Use a lighter model to reduce post-workflow quota pressure
   model: google('gemini-1.5-pro-latest'),
   instructions: marketingAgentInstructions,
   workflows: {
