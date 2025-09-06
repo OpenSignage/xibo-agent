@@ -57,7 +57,7 @@ function sanitizeSpokenText(text: string, options?: { laughterMode?: 'replace' |
 
 const successOutput = z.object({
   scriptMarkdown: z.string(),
-  filePath: z.string(),
+  fileName: z.string(),
 });
 const errorOutput = z.object({ success: z.literal(false), message: z.string(), error: z.any().optional() });
 const finalSchema = z.union([successOutput.extend({ success: z.literal(true) }), errorOutput]);
@@ -70,7 +70,7 @@ export const podcastPlannerWorkflow = createWorkflow({
     title: z.string().optional().describe('Title of the program. Defaults to the report base filename when omitted.'),
     casterA: z.object({ name: z.string() }).describe('Caster A name (host).'),
     casterB: z.object({ name: z.string() }).describe('Caster B name (co-host/presenter).'),
-    programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
+    programType: z.enum(['podcast','presentation','quiz']).describe('Program type: podcast, presentation, or quiz.'),
     pronunciationDictFileName: z.string().optional().default('pronunciation-ja.json'),
     // Script persistence options
     saveScriptJson: z.boolean().optional().default(false).describe('If true, save drafted script to JSON.'),
@@ -91,7 +91,7 @@ export const podcastPlannerWorkflow = createWorkflow({
     title: z.string().optional(),
     casterA: z.object({ name: z.string() }),
     casterB: z.object({ name: z.string() }),
-    programType: z.enum(['podcast','presentation','quiz']).optional().default('podcast'),
+    programType: z.enum(['podcast','presentation','quiz']),
     pronunciationDictFileName: z.string().optional().default('pronunciation-ja.json'),
     saveScriptJson: z.boolean().optional().default(false),
     loadScriptJson: z.boolean().optional().default(false),
@@ -275,6 +275,7 @@ export const podcastPlannerWorkflow = createWorkflow({
 - 終了時に [ENDING_BGM] を1回
 - クイズ形式の場合、司会の出題直後に [COUNTDOWN] を1行で挿入
 括弧や記号での表現（例： （♪ ジングル））は使わず、上記の角括弧トークンのみを使ってください。`;
+    logger.info({ programType, title, reportBaseName }, 'Drafting dialogue script...');
     const objective = programType === 'presentation'
       ? `以下のレポート内容を基に、${casterA.name}（司会者） と ${casterB.name}（プレゼンター） による「プレゼンテーション番組」台本をMarkdownで作成してください。冒頭で司会者がプレゼンターの紹介とプレゼンタイトル（${title || reportBaseName}）を紹介し、その後プレゼンターがレポート内容を分かりやすく構造的に説明、最後に司会者がまとめと締めを行います。5〜8分程度を想定し、必要に応じてセクション見出しや小休止を含めてください。各発話は「${casterA.name}: 〜」「${casterB.name}: 〜」の形式で、1発話は80〜160字程度。発話の行頭は必ず「話者名: 」で開始してください。
 
@@ -289,6 +290,7 @@ ${baseRules}`;
     const combined = `# Report\n\n${reportText}`;
     const res = await summarizeAndAnalyzeTool.execute({ context: { text: combined, objective, temperature: 0.7, topP: 0.9 }, runtimeContext });
     if (!res.success) {
+      logger.warn({ reportBaseName, reason: res.message }, 'Dialogue drafting failed. Using fallback script.');
       const fallback = `${casterA.name}: レポートの読み込みに失敗しました。\n${casterB.name}: 別のファイルで試してみましょう。`;
       return { scriptMarkdown: fallback, lines: [{ speaker: casterA.name, text: 'レポートの読み込みに失敗しました。' }], reportBaseName, title, casterA, casterB, languageCode, speakingRate, pitch, insertOpeningBgm, insertEndingBgm, insertJingles, insertContinuousBgm, laughterMode, programType, pronunciationDictPath, saveScriptJson, loadScriptJson, scriptJsonFileName: jsonFile };
     }
@@ -335,6 +337,7 @@ ${baseRules}`;
       }
     }
     if (current) { lines.push(current); }
+    logger.info({ reportBaseName, lines: lines.length }, 'Dialogue lines parsed.');
     if (lines.length === 0) {
       lines.push({ speaker: casterA.name, text: '本日はレポートの要点をカジュアルに解説していきます。' });
       lines.push({ speaker: casterB.name, text: 'よろしくお願いします。まずは背景から見ていきましょう。' });
@@ -439,6 +442,10 @@ ${baseRules}`;
     const countdownPathResolved = assets.countdown ? resolveAudioAssetPath(assets.countdown) : undefined;
     const laughSfxPathResolved = resolveAudioAssetPath(path.join('persistent_data','assets','sfx','laugh.mp3'));
     const continuousBgmPathResolved = assets.continuous ? resolveAudioAssetPath(assets.continuous) : undefined;
+    try {
+      const brief = (p?: string) => (p ? path.basename(p) : 'none');
+      logger.info({ opening: brief(openingBgmPathResolved), ending: brief(endingBgmPathResolved), jingle: brief(jinglePathResolved), countdown: brief(countdownPathResolved), continuous: brief(continuousBgmPathResolved) }, 'Audio assets resolved.');
+    } catch {}
     return { ...inputData, openingBgmPathResolved, endingBgmPathResolved, jinglePathResolved, laughSfxPathResolved, continuousBgmPathResolved, countdownPathResolved };
   },
 }))
@@ -488,6 +495,7 @@ ${baseRules}`;
   }),
   execute: async ({ inputData, runtimeContext }) => {
     const { scriptMarkdown, lines, reportBaseName, casterA, casterB, languageCode, speakingRate, pitch } = inputData;
+    logger.info({ reportBaseName, lineCount: lines.length }, 'Rendering WAV master...');
     // format removed
     const openingBgm = (inputData as any).openingBgmPathResolved;
     const endingBgm = (inputData as any).endingBgmPathResolved;
@@ -627,6 +635,7 @@ ${baseRules}`;
       const segs = perLineSegments[i];
       for (const s of segs) segmentItems.push(s);
     }
+    logger.info({ segments: segmentItems.length }, 'Audio segments prepared.');
     if ((inputData as any).insertEndingBgm) {
       await pushExternal(endingBgm, { muteBgm: true });
     }
@@ -711,7 +720,7 @@ ${baseRules}`;
             outChunks = mixed;
           }
         }
-      } catch {}
+      } catch { logger.warn({ bgm: bgmAbsResolved }, 'Continuous BGM mixing skipped.'); }
     }
     // Write WAV header
     const header = Buffer.alloc(44);
@@ -752,7 +761,7 @@ ${baseRules}`;
       execute: async ({ inputData }) => {
     const { combinedFileWav, scriptMarkdown } = inputData as any;
         logger.info({ combinedFile: combinedFileWav }, 'WAV finalized.');
-    return { success: true, scriptMarkdown, filePath: combinedFileWav } as const;
+    return { success: true, scriptMarkdown, fileName: path.parse(combinedFileWav).base } as const;
       },
 }))
 .commit();

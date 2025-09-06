@@ -65,7 +65,7 @@ export const marketResearchWorkflow = createWorkflow({
       maxWebsites: z.number() 
     }),
     execute: async ({ inputData }) => {
-      logger.info({ topic: inputData.topic }, 'Step 1: Preparing search query...');
+      logger.info({ topic: inputData.topic }, 'Preparing search query');
       const lang = process.env.LANG || '';
       const suffix = lang.startsWith('ja') ? '市場 分析' : 'market analysis';
       const maxWebsites = inputData.maxWebsites ?? 20;
@@ -86,7 +86,7 @@ export const marketResearchWorkflow = createWorkflow({
         maxWebsites: z.number(),
     }),
     execute: async (params) => {
-        logger.info({ query: params.inputData.query }, 'Step 2: Executing web search...');
+        logger.info({ query: params.inputData.query }, 'Executing web search');
         const searchResults = await searchStep.execute({ 
           ...params, 
           inputData: { 
@@ -95,10 +95,10 @@ export const marketResearchWorkflow = createWorkflow({
           } 
         });
         if (!searchResults.success) {
-            logger.error(`Web Search Tool Failed: ${searchResults.message}`);
+            logger.error({ message: searchResults.message }, 'Web search failed');
             return { results: [], topic: params.inputData.topic, searchSuccess: false, maxWebsites: params.inputData.maxWebsites };
         }
-        logger.info(`Step 2: Web search successful, found ${searchResults.data.results.length} results.`);
+        logger.info({ count: searchResults.data.results.length }, 'Web search completed');
         return { ...searchResults.data, topic: params.inputData.topic, searchSuccess: true, maxWebsites: params.inputData.maxWebsites };
     },
 }))
@@ -120,11 +120,11 @@ export const marketResearchWorkflow = createWorkflow({
     }),
     execute: async ({ inputData, runtimeContext }) => {
         if (!inputData.searchSuccess) {
-            logger.warn('Skipping scrape due to search failure.');
+            logger.warn('Skipping scrape due to search failure');
             return { scrapedData: [], topic: inputData.topic };
         }
         const { results, topic, maxWebsites } = inputData;
-        logger.info(`Step 3: Scraping up to ${maxWebsites} articles for topic "${topic}"...`);
+        logger.info({ topic, maxWebsites }, 'Starting content scrape');
         const topResults = results.slice(0, maxWebsites);
         const scrapedData: { url: string; title: string; content: string; }[] = [];
 
@@ -154,7 +154,7 @@ export const marketResearchWorkflow = createWorkflow({
                 } catch (err) {
                     if (attempt === maxRetries) throw err;
                     const backoff = baseDelayMs * Math.pow(2, attempt) + Math.floor(Math.random() * 200);
-                    logger.warn({ url, attempt, backoff }, 'Scrape failed, retrying with backoff');
+                    logger.warn({ url, attempt, backoff }, 'Scrape failed, retrying');
                     await sleep(backoff);
                 }
             }
@@ -172,12 +172,11 @@ export const marketResearchWorkflow = createWorkflow({
                 if (s.status === 'fulfilled') {
                     scrapedData.push(s.value);
                 } else {
-                    logger.warn({ error: s.reason instanceof Error ? s.reason.message : String(s.reason) }, 'Skipping URL due to scraping failure.');
+                    logger.warn({ error: s.reason instanceof Error ? s.reason.message : String(s.reason) }, 'Skipping URL due to scraping failure');
                 }
             }
         }
-
-        logger.info(`Step 3: Finished scraping. Scraped ${scrapedData.length} articles.`);
+        logger.info({ scrapedCount: scrapedData.length }, 'Content scrape finished');
         return { scrapedData, topic };
     },
 }))
@@ -199,7 +198,7 @@ export const marketResearchWorkflow = createWorkflow({
         const { scrapedData, topic } = params.inputData;
         
         if (scrapedData.length === 0) {
-            logger.warn("No content to generate report from.");
+            logger.warn('No content to generate report from');
             return { reportText: '', topic };
         }
 
@@ -220,12 +219,11 @@ export const marketResearchWorkflow = createWorkflow({
         });
 
         if (!finalReportResult.success) {
-            const message = `Failed to generate the final report. Reason: ${finalReportResult.message}`;
-            logger.error({ error: finalReportResult }, message);
+            logger.error({ reason: finalReportResult.message }, 'Failed to generate the final report');
             // Even on failure, return empty text to allow the workflow to proceed if needed
-            return { reportText: `レポート生成に失敗しました: ${message}`, topic };
+            return { reportText: `レポート生成に失敗しました: ${finalReportResult.message}`, topic };
         }
-        
+        logger.info({ length: (finalReportResult.data.summary || '').length }, 'Report text generated');
         return { reportText: finalReportResult.data.summary, topic };
     },
 }))
@@ -240,17 +238,18 @@ export const marketResearchWorkflow = createWorkflow({
         const { reportText, topic } = params.inputData;
 
         if (!reportText) {
-            return { success: false, message: "レポートが空のため、ファイルに保存できませんでした。" } as const;
+            logger.warn('Report text empty; skipping save');
+            return { success: false, message: 'レポートが空のため、ファイルに保存できませんでした。' } as const;
         }
 
         const saveResult = await saveReportStep.execute({ ...params, inputData: { title: topic, content: reportText } });
 
         if (!saveResult.success) {
             // If saving fails, still return the report text to the user.
-            logger.error({ error: saveResult.message }, 'Failed to save the report to a file.');
+            logger.error({ error: saveResult.message }, 'Failed to save report files');
             return { success: false, message: `レポートのファイル保存に失敗しました: ${saveResult.message}` } as const;
         }
-
+        logger.info({ mdFileName: require('path').basename(saveResult.data.filePath), pdfFileName: (saveResult.data.pdfFileName) }, 'Report files saved');
         return {
             success: true,
             data: {

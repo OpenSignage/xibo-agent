@@ -42,12 +42,15 @@ const putCache = (k: string, v: { content: string; ts: number }) => {
 import { summarizeAndAnalyzeTool } from '../../tools/market-research/summarizeAndAnalyze';
 import { webSearchTool } from '../../tools/market-research/webSearch';
 import { saveReportTool } from '../../tools/util/saveReport';
+import { getProductAnalysisInstructions } from './reportInstructions';
 import { config } from '../../tools/xibo-agent/config';
 
 const finalOutputSchema = z.object({
   report: z.string().describe('The final analysis report.'),
   sources: z.array(z.string()).describe('List of sources used for the analysis.'),
   filePath: z.string().describe('The absolute path to the saved report file.'),
+  mdFileName: z.string().describe('The saved report file name (e.g., "xxxx.md").'),
+  pdfFileName: z.string().describe('The saved PDF file name (e.g., "xxxx.pdf").'),
 });
 
 /**
@@ -58,8 +61,7 @@ export const productAnalysisWorkflow = createWorkflow({
   id: 'product-analysis-workflow',
   description: 'Analyzes product information from a directory of files (.pdf, .pptx, .txt with URLs).',
   inputSchema: z.object({
-    filePath: z.string().describe('Directory path where uploaded files are stored. Absolute or project-root relative.'),
-    productName: z.string().optional().describe('Optional product name. If omitted, it will be inferred from the provided materials.'),
+    productName: z.string().describe('Target product name (required). Files will be read from persistent_data/products_info/<productName>.'),
   }),
   outputSchema: finalOutputSchema,
 })
@@ -70,8 +72,7 @@ export const productAnalysisWorkflow = createWorkflow({
    */
   id: 'gather-files',
   inputSchema: z.object({ 
-    productName: z.string().optional(),
-    filePath: z.string(),
+    productName: z.string(),
   }),
   outputSchema: z.object({
     pdfFiles: z.array(z.string()),
@@ -88,9 +89,7 @@ export const productAnalysisWorkflow = createWorkflow({
     productName: z.string(),
   }),
   execute: async ({ inputData }) => {
-    const productNameInput: string | undefined = (inputData as any).productName;
-    const baseDirInput: string = (inputData as any).filePath;
-    const toAbs = (p: string): string => (path.isAbsolute(p) ? p : path.join(config.projectRoot, p));
+    const productNameInput: string = (inputData as any).productName;
 
     let directoryPath: string;
     let pdfFiles: string[] = [];
@@ -104,8 +103,8 @@ export const productAnalysisWorkflow = createWorkflow({
     let compMdFiles: string[] = [];
     let compUrlFiles: string[] = [];
 
-    directoryPath = toAbs(baseDirInput);
-    logger.info({ directoryPath }, 'Gathering files from provided directory...');
+    directoryPath = path.join(config.projectRoot, 'persistent_data', 'products_info', productNameInput);
+    logger.info({ directoryPath }, 'Gathering files from product info directory');
     const allFiles = await fs.readdir(directoryPath, { recursive: true, withFileTypes: true });
 
     const toFull = (f: any) => path.join(f.path, f.name);
@@ -126,7 +125,7 @@ export const productAnalysisWorkflow = createWorkflow({
       compUrlFiles = compEntries.filter(f => f.isFile() && f.name.endsWith('.url')).map(toComp);
     } catch { /* optional */ }
 
-    logger.info({ pdfs: pdfFiles.length, ppt: pptxFiles.length, txt: textFiles.length, md: mdFiles.length, url: urlFiles.length, compPdfs: compPdfFiles.length, compPpt: compPptxFiles.length, compTxt: compTextFiles.length, compMd: compMdFiles.length, compUrl: compUrlFiles.length }, 'File gathering complete.');
+    logger.info({ pdfs: pdfFiles.length, ppt: pptxFiles.length, txt: textFiles.length, md: mdFiles.length, url: urlFiles.length, compPdfs: compPdfFiles.length, compPpt: compPptxFiles.length, compTxt: compTextFiles.length, compMd: compMdFiles.length, compUrl: compUrlFiles.length }, 'File gathering complete');
     return { pdfFiles, pptxFiles, textFiles, mdFiles, urlFiles, directoryPath, compPdfFiles, compPptxFiles, compTextFiles, compMdFiles, compUrlFiles, productName: productNameInput ?? '' };
   }
 }))
@@ -154,6 +153,7 @@ export const productAnalysisWorkflow = createWorkflow({
   execute: async ({ inputData, runtimeContext }) => {
     const { pdfFiles, pptxFiles, textFiles, mdFiles, urlFiles, compPdfFiles, compPptxFiles, compTextFiles, compMdFiles, compUrlFiles, productName } = inputData;
     const items: { kind: 'pdf'|'pptx'|'url'|'md'|'comp_pdf'|'comp_pptx'|'comp_url'|'comp_md'; value: string }[] = [];
+    logger.info({ productName, pdfs: pdfFiles.length, pptx: pptxFiles.length, md: mdFiles.length, urls: urlFiles.length }, 'Building extraction items');
 
     for (const filePath of pdfFiles) items.push({ kind: 'pdf', value: filePath });
     for (const filePath of pptxFiles) items.push({ kind: 'pptx', value: filePath });
@@ -282,7 +282,7 @@ export const productAnalysisWorkflow = createWorkflow({
         try {
           const expanded = await expandWildcard(pattern);
           for (const u of expanded) urlSet.add(u);
-        } catch {}
+        } catch { logger.warn({ pattern }, 'Wildcard expansion failed'); }
       }
     }
 
@@ -318,11 +318,11 @@ export const productAnalysisWorkflow = createWorkflow({
         try {
           const expanded = await expandWildcard(pattern);
           for (const u of expanded) compUrlSet.add(u);
-        } catch {}
+        } catch { logger.warn({ pattern }, 'Competitor wildcard expansion failed'); }
       }
     }
 
-    logger.info({ items: items.length, urls: urlSet.size, urlPatterns: patternSet.size, compUrls: compUrlSet.size, compUrlPatterns: compPatternSet.size }, 'Built extraction items.');
+    logger.info({ items: items.length, urls: urlSet.size, urlPatterns: patternSet.size, compUrls: compUrlSet.size, compUrlPatterns: compPatternSet.size }, 'Extraction items built');
     return items.map(i => ({ ...i, productName }));
   }
 }))
@@ -520,27 +520,7 @@ export const productAnalysisWorkflow = createWorkflow({
 
     const sources = [...extractedTexts.map(t => t.source), ...competitorTexts.map(t => t.source)];
 
-    const objective = `以下の情報に基づき、製品「${productName}」の詳細分析および競合分析レポートを作成してください。出力は日本語で、見出しを用いて論理的に構成してください。
-
-必須セクション:
-- 製品概要: 本製品の目的、主要ユースケース、想定ユーザー。
-- 主な機能と特徴: 機能一覧（箇条書き）と差別化要素。
-- 強み/弱み（SWOTのS/W）: 技術・価格・導入/運用・サポートの観点。
-- ターゲット顧客層: ペルソナ/セグメント、導入要件。
-- 競合分析（詳細）:
-  - 競合候補: ${competitorNames.join(', ') || 'N/A'}
-  - 競合各社プロフィール: 会社/製品概要、主な機能、対応プラットフォーム、価格情報（分かる範囲）、サポート体制。
-  - 機能比較表: 本製品と競合（行=項目、列=製品）で「有/無/限定」等の記述。
-  - TCO観点: 初期費用/運用費、導入容易性、拡張性、ベンダーロックイン等。
-  - リスク/制約: セキュリティ、スケーラビリティ、依存関係、サポート範囲。
-- ポジショニング: 2軸（例: 価格×機能充実度）での相対位置と差別化戦略。
-- 推奨事項: 製品改善提案、勝ち筋、次アクション。
-- 総括: 主要な結論と意思決定の示唆。
-
-注意:
-- 競合の具体名や機能は引用元テキストの根拠に基づいて記載してください。根拠が弱い場合は推測と明示してください。
-- 表示できる価格情報が無い場合は「不明」と記載。
-- テーブルはMarkdownで簡易表現して構いません。`;
+    const objective = getProductAnalysisInstructions(productName, competitorNames);
 
     // Provide both product and competitor materials to the model as input text
     const combinedForModel = `${combinedText}\n\n---\n\n${competitorCombinedText}`;
@@ -573,11 +553,13 @@ export const productAnalysisWorkflow = createWorkflow({
     const saveResult = await saveReportTool.execute({ ...params, context: { title: productName, content: report } });
     if (saveResult.success) {
       logger.info({ filePath: saveResult.data.filePath }, 'Saved report to file.');
-      return { report, sources, filePath: saveResult.data.filePath };
+      const mdFileName = path.basename(saveResult.data.filePath);
+      const pdfFileName = saveResult.data.pdfFileName;
+      return { report, sources, filePath: saveResult.data.filePath, mdFileName, pdfFileName };
     }
     // If saving fails, still return the report and sources with empty filePath
     logger.info('Report saving failed; returning report without file path.');
-    return { report, sources, filePath: '' };
+    return { report, sources, filePath: '', mdFileName: '', pdfFileName: '' };
   }
 }))
 .commit(); 

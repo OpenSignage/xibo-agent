@@ -47,7 +47,8 @@ const successResponseSchema = z.object({ success: z.literal(true), data: z.union
 let singletonCanvas: ChartJSNodeCanvas | null = null;
 const getCanvas = () => {
   if (!singletonCanvas) {
-    singletonCanvas = new ChartJSNodeCanvas({ width: 800, height: 450, backgroundColour: 'white' });
+    // Render at higher resolution for clearer display in PPTX (16:9)
+    singletonCanvas = new ChartJSNodeCanvas({ width: 1280, height: 720, backgroundColour: 'white' });
   }
   return singletonCanvas;
 };
@@ -105,18 +106,18 @@ export const generateChartTool = createTool({
         options: {
           responsive: false,
           maintainAspectRatio: false,
-          layout: { padding: 16 },
+          layout: { padding: 28 },
           plugins: {
-            title: { display: true, text: title, font: { size: 18, family: 'Yu Gothic' }, color: '#111' },
-            legend: { display: chartType === 'pie', position: 'bottom', labels: { font: { family: 'Yu Gothic' } } },
+            title: { display: true, text: title, font: { size: 26, family: 'Noto Sans JP', weight: 'bold' as any }, color: '#111', padding: { top: 10, bottom: 16 } as any },
+            legend: { display: chartType === 'pie', position: 'bottom', labels: { font: { family: 'Noto Sans JP' } } },
           },
         },
       };
 
       if (chartType !== 'pie') {
         chartConfig.options!.scales = {
-          x: { grid: { display: false }, ticks: { font: { family: 'Yu Gothic' } } },
-          y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.08)' }, ticks: { font: { family: 'Yu Gothic' } } },
+          x: { grid: { display: false }, ticks: { font: { family: 'Noto Sans JP', size: 14 } } },
+          y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.10)' }, ticks: { font: { family: 'Noto Sans JP', size: 14 } } },
         } as any;
       }
 
@@ -126,13 +127,13 @@ export const generateChartTool = createTool({
       const buffer = hit || await canvas.renderToBuffer(chartConfig, 'image/png');
       if (!hit) cachePut(key, buffer);
 
-      // Prefer buffer mode by default
-      if (returnBuffer !== false) {
+      // Prefer disk mode by default to avoid large payloads in workflow states
+      if (returnBuffer === true) {
         logger.info({ bytes: buffer.length }, 'Generated chart PNG in-memory.');
         return { success: true, data: { buffer, bufferSize: buffer.length } } as const;
       }
 
-      // Legacy fallback: write to disk only if explicitly requested (returnBuffer === false)
+      // Write to disk (default path under temp/charts)
       const { config } = await import('../xibo-agent/config');
       const path = await import('path');
       const chartDir = path.join(config.tempDir, 'charts');

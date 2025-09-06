@@ -5,6 +5,7 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import fs from 'node:fs';
 import { google } from 'googleapis';
+import { logger } from '../../logger';
 
 const outputSchema = z.object({ id: z.string(), webViewLink: z.string().optional() });
 const errorResponseSchema = z.object({ success: z.literal(false), message: z.string(), error: z.any().optional() });
@@ -23,8 +24,10 @@ export const uploadToGoogleSlidesTool = createTool({
   execute: async ({ context }) => {
     try {
       const { pptxPath, name, folderId, serviceAccountJson } = context as any;
+      logger.info({ pptxPath, name, hasFolderId: !!folderId }, 'Preparing Google Slides upload');
       const credentials = JSON.parse(serviceAccountJson || process.env.GSA_KEY_JSON || '{}');
       if (!credentials || !credentials.client_email) {
+        logger.warn('Service account JSON missing or invalid');
         return { success: false, message: 'Missing service account JSON (GSA_KEY_JSON).' } as const;
       }
       const auth = new google.auth.GoogleAuth({
@@ -43,11 +46,14 @@ export const uploadToGoogleSlidesTool = createTool({
         body: fs.createReadStream(pptxPath),
       } as any;
 
-      const res = await drive.files.create({ requestBody: fileMetadata, media, fields: 'id, webViewLink' });
+      logger.info({ targetFolder: folderId || '(root)' }, 'Uploading file to Drive');
+      const res = await drive.files.create({ requestBody: fileMetadata, media, fields: 'id, webViewLink', supportsAllDrives: true });
+      logger.info({ fileId: res.data.id, hasWebViewLink: !!res.data.webViewLink }, 'Drive upload finished');
       const link: string | undefined = res.data.webViewLink ?? undefined;
       return { success: true, data: { id: res.data.id!, webViewLink: link } } as const;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to upload to Google Slides';
+      logger.error({ error }, 'Google Slides upload error');
       return { success: false, message, error } as const;
     }
   },
