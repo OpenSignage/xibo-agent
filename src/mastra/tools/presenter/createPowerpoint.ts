@@ -32,6 +32,19 @@ function lightenHex(hex: string, amount: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
+// Attention colors to give stronger impression when appropriate
+const ATTENTION_YELLOW = '#FFC107';
+const ATTENTION_RED = '#E53935';
+
+function chooseTitleBarColor(_title: string, defaultPrimary: string, slideAccent?: string): string {
+  if (slideAccent && /^#?[0-9a-fA-F]{6}$/.test(slideAccent)) {
+    const hex = slideAccent.startsWith('#') ? slideAccent : `#${slideAccent}`;
+    return hex;
+  }
+  // No heuristics based on title text; use theme primary lightened
+  return lightenHex(defaultPrimary, 70);
+}
+
 // Compute readable text color (black or white) based on background luminance
 function pickTextColorForBackground(hex: string): '000000' | 'FFFFFF' {
   const h = (hex || '').replace('#', '');
@@ -85,8 +98,8 @@ function wrapTextAtWordBoundaries(text: string, maxCharsPerLine: number): string
         }
         // If we couldn't find a safe boundary inside the token, keep the original split
         if (splitPos <= 1 || splitPos >= line.length) {
-          lines.push(line);
-          line = '';
+        lines.push(line);
+        line = '';
         } else {
           lines.push(line.slice(0, splitPos));
           line = line.slice(splitPos);
@@ -174,26 +187,58 @@ function formatBulletsForColonSeparation(bullets: string[], maxContentLineChars:
 }
 
 /**
+ * Merge consecutive bullets that are continuations within Japanese quotes.
+ * Example: ["「AAA。", "BBB。」"] -> ["「AAA。BBB。」"]
+ */
+function mergeQuotedContinuations(items: string[]): string[] {
+  const out: string[] = [];
+  let buffer: string | null = null;
+  let open = false;
+  for (const s of (items || [])) {
+    const t = String(s || '').trim();
+    if (!t) continue;
+    if (buffer !== null) {
+      // Append continuation without inserting extra spaces for JA
+      buffer = buffer + t;
+      const opens = (buffer.match(/「/g) || []).length;
+      const closes = (buffer.match(/」/g) || []).length;
+      open = opens > closes;
+      if (!open) {
+        out.push(buffer);
+        buffer = null;
+      }
+      continue;
+    }
+    const opens = (t.match(/「/g) || []).length;
+    const closes = (t.match(/」/g) || []).length;
+    if (opens > closes && t.includes('「') && !t.includes('」')) {
+      buffer = t;
+      open = true;
+    } else {
+      out.push(t);
+    }
+  }
+  if (buffer) out.push(buffer);
+  return out;
+}
+
+/**
  * Prevents lines from starting with forbidden leading punctuation (simple kinsoku shori).
  * Moves leading punctuation to the previous line when detected.
  */
 function preventLeadingPunctuation(text: string): string {
-  const forbid = /[、。，．,，。・;；:：)/）】』〉》”’]/;
-  const lines = text.split('\n');
-  for (let i = 1; i < lines.length; i++) {
-    // Preserve existing indent (half/full width spaces)
-    const match = lines[i].match(/^([ \t　]*)/);
-    const indent = match ? match[1] : '';
-    let rest = lines[i].slice(indent.length);
-    if (rest.length === 0) continue;
-    // If first visible character is forbidden punctuation, move it to previous line end
-    while (rest.length > 0 && forbid.test(rest[0])) {
-      lines[i - 1] = (lines[i - 1] || '').replace(/\s+$/, '') + rest[0];
-      rest = rest.slice(1);
-    }
-    lines[i] = indent + rest;
-  }
-  return lines.join('\n');
+  if (!text) return '';
+  // Clean each line's leading/trailing forbidden punctuation and rejoin
+  const cleaned = String(text)
+    .split('\n')
+    .map((p) => p
+      .replace(/^[、。，．,，。・;；:：)）】』〉》"』」\s]+/, '')
+      .replace(/[”"』」\s]+$/, '')
+      .trim()
+    )
+    .filter(Boolean)
+    .join('\n');
+  return cleaned;
 }
 
 /**
@@ -217,6 +262,41 @@ function toBoldRunsFromMarkdown(text: string): Array<{ text: string; options?: {
     if (i < parts.length - 1) bold = !bold;
   }
   return runs.length ? runs : [{ text: text }];
+}
+
+// Read image dimensions (PNG/JPEG minimal). Returns undefined on failure.
+async function readImageDimensions(filePath: string): Promise<{ width: number; height: number } | undefined> {
+  try {
+    const buf = await fs.readFile(filePath);
+    if (buf.length < 24) return undefined;
+    // PNG signature
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
+      const width = buf.readUInt32BE(16);
+      const height = buf.readUInt32BE(20);
+      if (width > 0 && height > 0) return { width, height };
+    }
+    // JPEG: scan for SOF0/2 markers for dimensions
+    let off = 2; // skip FF D8
+    while (off + 9 < buf.length) {
+      if (buf[off] !== 0xFF) { off++; continue; }
+      const marker = buf[off + 1];
+      // SOF0..SOF3, SOF5..SOF7, SOF9..SOF11, SOF13..SOF15
+      if ((marker >= 0xC0 && marker <= 0xC3) || (marker >= 0xC5 && marker <= 0xC7) || (marker >= 0xC9 && marker <= 0xCB) || (marker >= 0xCD && marker <= 0xCF)) {
+        const blockLen = buf.readUInt16BE(off + 2);
+        const height = buf.readUInt16BE(off + 5);
+        const width = buf.readUInt16BE(off + 7);
+        if (width > 0 && height > 0) return { width, height };
+        off += 2 + blockLen;
+        continue;
+      }
+      if (marker === 0xDA || marker === 0xD9) break; // SOS or EOI
+      const len = buf.readUInt16BE(off + 2);
+      off += 2 + len;
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
 }
 
 /**
@@ -258,18 +338,35 @@ function formatQuoteLines(raw: string, maxCharsPerLine: number): string {
     .replace(/\n+/g, '\n')
     .trim();
   // Strip surrounding quotes (Japanese and Latin)
-  text = text.replace(/^[“”"『「\s]+/, '').replace(/[””"』」\s]+$/, '');
+  text = text.replace(/^["」"『「\s]+/, '').replace(/["」"』」\s]+$/, '');
   // If content still contains line breaks, respect them as hard breaks
   const paragraphs = text.split('\n').map((p) => p.trim()).filter(Boolean);
   const source = paragraphs.length > 0 ? paragraphs.join(' ') : text;
-  // Tokenize by punctuation to keep natural breaks
-  const tokens = source.split(/(?<=[。．！!？?、,，])/);
+  // Tokenize by punctuation to keep natural breaks (avoid breaking right after opening quotes or before closing quotes)
+  const tokens = source
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[。．！!？?、,，])/);
   const lines: string[] = [];
   let current = '';
   for (const t of tokens) {
     const chunk = t.trim();
     if (!chunk) continue;
+    // Avoid starting lines with closing punctuation or quotes
+    const startsWithBad = /^[、。，．,，。・;；:：)）】』〉》”"\]]/.test(chunk);
+    // Prefer to keep quoted segments together
+    const containsOpenQuote = chunk.includes('「');
+    const containsCloseQuote = chunk.includes('」');
+    const preferKeep = containsOpenQuote || containsCloseQuote || startsWithBad;
     if ((current + (current ? '' : '') + chunk).length > maxCharsPerLine) {
+      if (preferKeep && current && current.length <= Math.floor(maxCharsPerLine * 0.9)) {
+        // If near the limit, allow slight overflow to keep phrase intact
+        const merged = current + chunk;
+        if (merged.length <= Math.floor(maxCharsPerLine * 1.15)) {
+          lines.push(merged);
+          current = '';
+          continue;
+        }
+      }
       if (current) lines.push(current);
       current = chunk;
     } else {
@@ -431,6 +528,20 @@ const inputSchema = z.object({
     outlineColor: z.string().optional(),
   }).optional(),
   visualRecipes: z.array(z.any()).optional().describe('Per-slide visual recipe list aligned by index.'),
+  // Company branding (optional)
+  companyLogoPath: z.string().optional().describe('Optional absolute path to company logo image (PNG). When provided, logo will be shown top-right on each slide.'),
+  companyCopyright: z.string().optional().describe('Optional copyright text to place at the bottom of each slide.'),
+  companyAbout: z.string().optional().describe('Optional company overview text to be added as a final slide.'),
+  companyOverview: z.object({
+    company_name: z.string().optional(),
+    address: z.string().optional(),
+    founded: z.string().optional(),
+    representative: z.string().optional(),
+    business: z.array(z.string()).optional(),
+    homepage: z.string().optional(),
+    contact: z.string().optional(),
+    vision: z.string().optional(),
+  }).optional(),
 });
 
 const outputSchema = z.object({
@@ -455,6 +566,10 @@ export const createPowerpointTool = createTool({
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
     const { fileName, slides, themeColor1, themeColor2, titleSlideImagePath } = context;
+    const companyLogoPath: string | undefined = (context as any).companyLogoPath;
+    const companyCopyright: string | undefined = (context as any).companyCopyright;
+    const companyAbout: string | undefined = (context as any).companyAbout;
+    logger.info({ hasLogo: !!companyLogoPath, hasCopyright: !!companyCopyright, hasAbout: !!companyAbout }, 'Branding options received for PowerPoint generation.');
     const styleTokens = (context as any).styleTokens || {};
     const primary = typeof styleTokens.primary === 'string' ? styleTokens.primary : (themeColor1 || '#0B5CAB');
     const secondary = typeof styleTokens.secondary === 'string' ? styleTokens.secondary : (themeColor2 || '#00B0FF');
@@ -497,21 +612,12 @@ export const createPowerpointTool = createTool({
         const bottomBandY = 4.6;
         const bottomBandH = 2.3;
 
-        // 1. Define the Master Slide (now for footer only)
+        // 1. Define the Master Slide (no static footer; branding handled per-slide)
         pres.defineSlideMaster({
             title: MASTER_SLIDE,
             // Background is now handled on each slide individually
             objects: [
-                {
-                    text: {
-                        text: `Copyright (C) ${new Date().getFullYear()} Your Company. All Rights Reserved.`,
-                        options: { 
-                            x: 0.5, y: '95%', w: '90%', 
-                            align: 'center', fontSize: 10, color: '666666',
-                            fontFace: JPN_FONT,
-                        },
-                    },
-                },
+                
             ],
         });
 
@@ -672,8 +778,10 @@ export const createPowerpointTool = createTool({
                     for (let i = 0; i < layers; i++) {
                         const y = ry + i * (rh / layers);
                         const width = rw * (1 - i * 0.15);
-                        targetSlide.addShape(pres.ShapeType.triangle, { x: rx + (rw - width)/2, y, w: width, h: rh / layers - 0.05, fill: { color: i % 2 ? secondary : primary }, line: { color: '#FFFFFF', width: 0.5 } });
-                        targetSlide.addText(String(steps[i]?.label ?? ''), { x: rx, y: y + 0.02, w: rw, h: rh / layers - 0.09, fontSize: 11, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: JPN_FONT });
+                        const layerBg = i % 2 ? secondary : primary;
+                        targetSlide.addShape(pres.ShapeType.triangle, { x: rx + (rw - width)/2, y, w: width, h: rh / layers - 0.05, fill: { color: layerBg }, line: { color: '#FFFFFF', width: 0.5 } });
+                        const pyrTextColor = pickTextColorForBackground(layerBg).toString();
+                        targetSlide.addText(String(steps[i]?.label ?? ''), { x: rx, y: y + 0.02, w: rw, h: rh / layers - 0.09, fontSize: 11, color: pyrTextColor, align: 'center', valign: 'middle', fontFace: JPN_FONT });
                     }
                     break;
                 }
@@ -747,10 +855,12 @@ export const createPowerpointTool = createTool({
                     items.slice(0, 4).forEach((it: any, i: number) => {
                         const x = rx + (i % 2) * (rw/2) + 0.1;
                         const y = ry + Math.floor(i/2) * (rh/2) + 0.1;
-                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: rw/2 - 0.2, h: rh/2 - 0.2, fill: { color: lightenHex(secondary, 60) }, rectRadius: cornerRadius, line: { color: secondary, width: 0.5 }, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
-                        targetSlide.addText(String(it?.label ?? ''), { x: x + 0.1, y: y + 0.1, w: rw/2 - 0.4, h: 0.4, fontSize: 12, bold: true, fontFace: JPN_FONT });
+                        const calloutBg = lightenHex(secondary, 60);
+                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: rw/2 - 0.2, h: rh/2 - 0.2, fill: { color: calloutBg }, rectRadius: cornerRadius, line: { color: secondary, width: 0.5 }, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
+                        const calloutColor = pickTextColorForBackground(calloutBg).toString();
+                        targetSlide.addText(String(it?.label ?? ''), { x: x + 0.1, y: y + 0.1, w: rw/2 - 0.4, h: 0.4, fontSize: 12, bold: true, fontFace: JPN_FONT, color: calloutColor });
                         if (it?.value) {
-                            targetSlide.addText(String(it.value), { x: x + 0.1, y: y + 0.55, w: rw/2 - 0.4, h: 0.4, fontSize: 14, fontFace: JPN_FONT });
+                            targetSlide.addText(String(it.value), { x: x + 0.1, y: y + 0.55, w: rw/2 - 0.4, h: 0.4, fontSize: 14, fontFace: JPN_FONT, color: calloutColor });
                         }
                     });
                     break;
@@ -916,6 +1026,8 @@ export const createPowerpointTool = createTool({
         }
 
         // 2. Create slides using the Master Slide
+        let appliedLogoCount = 0;
+        let appliedCopyrightCount = 0;
         for (const [index, slideData] of slides.entries()) {
             const slide = pres.addSlide({ masterName: MASTER_SLIDE });
 
@@ -937,6 +1049,11 @@ export const createPowerpointTool = createTool({
                 slide.background = { color: lightenHex(secondary, 80).replace('#', '') } as any;
             }
 
+            // Determine background-based text color for bullets
+            const flatBgHex: string | undefined = (index === 0)
+                ? (titleSlideImagePath ? undefined : lightenHex(primary, 80))
+                : lightenHex(secondary, 80);
+            const bgTextColor: string = flatBgHex ? pickTextColorForBackground(flatBgHex).toString() : '000000';
 
             // Add speaker notes if provided
             if (slideData.notes) {
@@ -947,7 +1064,26 @@ export const createPowerpointTool = createTool({
             // Accent band at top for visual hierarchy
             slide.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.18, fill: { color: lightenHex(primary, 40) }, line: { color: lightenHex(primary, 40), width: 0 } });
 
-            const perSlideRecipeHere = Array.isArray((context as any).visualRecipes) ? (context as any).visualRecipes[index] : null;
+            // Company logo (bottom-right, keep aspect ratio)
+            if (companyLogoPath) {
+                try {
+                    const maxW = 1.2;
+                    const dim = await readImageDimensions(companyLogoPath);
+                    const ratio = dim && dim.width > 0 ? (dim.height / dim.width) : (0.6 / 1.2);
+                    const h = Math.min(0.9, Math.max(0.3, maxW * ratio));
+                    const x = pageW - marginX - maxW;
+                    const y = pageH - h - 0.25;
+                    slide.addImage({ path: companyLogoPath, x, y, w: maxW, h, sizing: { type: 'contain', w: maxW, h } as any, shadow: { type: 'outer', color: '000000', opacity: 0.3, blur: 6, offset: 2, angle: 45 } as any });
+                    appliedLogoCount++;
+                } catch (e) {
+                    logger.warn({ error: e }, 'Failed to add company logo on a slide.');
+                }
+            }
+
+            // (top-right logo removed)
+
+            const ctxRecipe = Array.isArray((context as any).visualRecipes) ? (context as any).visualRecipes[index] : null;
+            const perSlideRecipeHere = (slideData as any).visual_recipe || ctxRecipe || null;
             const isBottomVisual = perSlideRecipeHere && (['process','roadmap','gantt','timeline'].includes(String(perSlideRecipeHere.type)));
 
             switch (slideData.layout) {
@@ -980,32 +1116,38 @@ export const createPowerpointTool = createTool({
                         slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, {
                         x: 0, y: 0, w: '100%', h: '100%',
                         align: 'center', valign: 'middle',
-                            fontSize: fitted.fontSize, bold: true, fontFace: JPN_FONT
+                            fontSize: fitted.fontSize, bold: true, fontFace: JPN_FONT, color: bgTextColor
                     });
                     }
                     break;
                 case 'quote':
+                    // Title bar at the standard position (like other layouts)
+                    {
+                        const fitted = fitTextToLines(slideData.title, /*initial*/28, /*min*/20, /*baseWrap*/36, /*lines*/1, /*hard*/24);
+                        const bgColor = chooseTitleBarColor(slideData.title, primary, (slideData as any).accent_color);
+                        const textColor = pickTextColorForBackground(bgColor).toString();
+                        slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, {
+                            x: twoColTextX, y: contentTopY - 0.35, w: contentW, h: 0.6,
+                            fontSize: fitted.fontSize, bold: true, fontFace: JPN_FONT,
+                            color: textColor,
+                            fill: { color: bgColor }, line: { color: bgColor, width: 0 }
+                        });
+                    }
                     if (slideData.special_content) {
                         const formatted = formatQuoteLines(slideData.special_content, 18);
                         const fittedQuote = fitTextToLines(formatted, /*initial*/32, /*min*/22, /*baseWrap*/30, /*lines*/4, /*hard*/38, { suppressEllipsis: true, minFontFloor: 20 });
                         slide.addText(toBoldRunsFromMarkdown(fittedQuote.text) as any, {
                             x: 0.8, y: 1.2, w: '88%', h: 3.2,
                             align: 'center', valign: 'middle',
-                            fontSize: fittedQuote.fontSize, italic: true, fontFace: JPN_FONT
+                            fontSize: fittedQuote.fontSize, italic: true, fontFace: JPN_FONT, color: bgTextColor
                         });
                     }
-                    {
-                        const fitted = fitTextToLines(slideData.title, /*initial*/18, /*min*/14, /*baseWrap*/30, /*lines*/1, /*hard*/24);
-                        slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, { 
-                        x: 0, y: '80%', w: '100%', 
-                            align: 'center', fontSize: fitted.fontSize, fontFace: JPN_FONT
-                    });
-                    }
+                    // Title already shown at top bar; omit bottom title
                     break;
                 case 'content_with_visual':
                     {
                         const fitted = fitTextToLines(slideData.title, /*initial*/32, /*min*/22, /*baseWrap*/36, /*lines*/1, /*hard*/24);
-                        const bgColor = lightenHex(primary, 70);
+                        const bgColor = chooseTitleBarColor(slideData.title, primary, (slideData as any).accent_color);
                         const textColor = pickTextColorForBackground(bgColor).toString();
                         slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, { 
                             x: twoColTextX, y: contentTopY - 0.35, w: contentW, h: 0.6, 
@@ -1044,7 +1186,7 @@ export const createPowerpointTool = createTool({
                 default:
                     {
                         const fitted = fitTextToLines(slideData.title, /*initial*/32, /*min*/20, /*baseWrap*/40, /*lines*/1, /*hard*/24);
-                        const bgColor = lightenHex(primary, 70);
+                        const bgColor = chooseTitleBarColor(slideData.title, primary, (slideData as any).accent_color);
                         const textColor = pickTextColorForBackground(bgColor).toString();
                         slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, { 
                             x: twoColTextX, y: contentTopY - 0.35, w: contentW, h: 0.6, 
@@ -1054,7 +1196,7 @@ export const createPowerpointTool = createTool({
                         });
                     }
                     // Allow a bit more content on content-only slides: target 4 lines per bullet
-                    const cleanedBulletsCo = (slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim());
+                    const cleanedBulletsCo = mergeQuotedContinuations((slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim()));
                     const bulletTextCo = cleanedBulletsCo.join('\n');
                     // Shift text down to avoid overlapping title
                     const textYContentOnly = contentTopY + 0.5;
@@ -1065,14 +1207,14 @@ export const createPowerpointTool = createTool({
                             slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { 
                                 x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, 
                                 fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT,
-                                valign: 'top', paraSpaceAfter: 12,
+                                valign: 'top', paraSpaceAfter: 12, color: bgTextColor,
                             });
                         } else {
                             // Right-panel recipe → two-column
                             slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { 
                                 x: twoColTextX, y: textYContentOnly, w: twoColTextW, h: twoColTextH, 
                                 fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT,
-                                valign: 'top', paraSpaceAfter: 12,
+                                valign: 'top', paraSpaceAfter: 12, color: bgTextColor,
                             });
                         }
                     } else {
@@ -1080,7 +1222,7 @@ export const createPowerpointTool = createTool({
                         slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { 
                             x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, 
                             fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT,
-                            valign: 'top', paraSpaceAfter: 12,
+                            valign: 'top', paraSpaceAfter: 12, color: bgTextColor,
                         });
                     }
                     break;
@@ -1098,10 +1240,81 @@ export const createPowerpointTool = createTool({
                 const hasImageForSlide = !!(slideData as any).imagePath;
                 const forceBottomForRecipe = (layout === 'content_with_visual') && hasImageForSlide;
                 // Right panel and bottom band regions (absolute, 16:9)
+                // For content_only, place band under bullets area to avoid overlap
+                const bulletsBottomY = contentTopY + 0.5 + 4.0; // textYContentOnly + textHContentOnly
+                const dynamicBottomY = layout === 'content_only' ? Math.max(bottomBandY, bulletsBottomY + 0.2) : bottomBandY;
                 const region = (isBottom || forceBottomForRecipe)
-                  ? { x: marginX, y: bottomBandY, w: contentW, h: bottomBandH }
+                  ? { x: marginX, y: dynamicBottomY, w: contentW, h: bottomBandH }
                   : { x: twoColVisualX, y: contentTopY + 0.7, w: twoColVisualW, h: twoColVisualH };
                 drawInfographic(slide as any, String(perSlideRecipeHere.type || ''), perSlideRecipeHere, region);
+            }
+            // Add per-slide copyright if provided
+            if (companyCopyright) {
+                try {
+                    slide.addText(companyCopyright, { x: 0.4, y: pageH - 0.35, w: pageW - 0.8, h: 0.3, align: 'center', fontSize: 10, color: '666666', fontFace: JPN_FONT });
+                    appliedCopyrightCount++;
+                } catch (e) {
+                    logger.warn({ error: e }, 'Failed to add copyright text on a slide.');
+                }
+            }
+        }
+        logger.info({ appliedLogoCount, appliedCopyrightCount }, 'Applied branding to slides.');
+        
+        // Add company about slide at the end if available
+        if (companyAbout || (context as any).companyOverview) {
+            try {
+                const aboutSlide = pres.addSlide({ masterName: MASTER_SLIDE });
+                aboutSlide.background = { color: lightenHex(secondary, 85).replace('#', '') } as any;
+                const titleRuns = toBoldRunsFromMarkdown('会社概要') as any;
+                const titleFit = fitTextToLines('会社概要', /*initial*/28, /*min*/20, /*baseWrap*/16, /*lines*/1, /*hard*/22);
+                // Title background like other slides
+                {
+                    const bgColor = lightenHex(primary, 70);
+                    const textColor = pickTextColorForBackground(bgColor).toString();
+                    aboutSlide.addText(titleRuns, { x: marginX, y: 0.6, w: contentW, h: 0.6, fontSize: titleFit.fontSize, bold: true, fontFace: JPN_FONT, color: textColor, fill: { color: bgColor }, line: { color: bgColor, width: 0 } });
+                }
+                const ov = (context as any).companyOverview as any;
+                if (ov && typeof ov === 'object') {
+                    const rows: Array<{label: string; value: string}> = [];
+                    if (ov.company_name) rows.push({ label: '会社名', value: String(ov.company_name) });
+                    if (ov.address) rows.push({ label: '所在地', value: String(ov.address) });
+                    if (ov.founded) rows.push({ label: '設立', value: String(ov.founded) });
+                    if (ov.representative) rows.push({ label: '代表者', value: String(ov.representative) });
+                    if (ov.vision) rows.push({ label: 'ビジョン', value: String(ov.vision) });
+                    if (Array.isArray(ov.business) && ov.business.length) rows.push({ label: '事業内容', value: ov.business.join(' / ') });
+                    if (ov.homepage) rows.push({ label: 'HomePage', value: String(ov.homepage) });
+                    if (ov.contact) rows.push({ label: '問い合わせ', value: String(ov.contact) });
+                    const col1W = Math.min(2.2, contentW * 0.22);
+                    const col2W = contentW - col1W - 0.4;
+                    let y = 1.8;
+                    const rowH = 0.45;
+                    for (const r of rows) {
+                        aboutSlide.addShape(pres.ShapeType.rect, { x: marginX, y, w: col1W, h: rowH, fill: { color: lightenHex(primary, 60) }, line: { color: '#FFFFFF', width: 0 } });
+                        aboutSlide.addText(r.label, { x: marginX + 0.1, y: y + 0.08, w: col1W - 0.2, h: rowH - 0.16, fontSize: 14, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, valign: 'middle' });
+                        aboutSlide.addShape(pres.ShapeType.rect, { x: marginX + col1W + 0.2, y, w: col2W, h: rowH, fill: { color: 'FFFFFF' }, line: { color: '#E6E6E6', width: 1 } });
+                        aboutSlide.addText(r.value, { x: marginX + col1W + 0.3, y: y + 0.08, w: col2W - 0.2, h: rowH - 0.16, fontSize: 14, color: '333333', fontFace: JPN_FONT, valign: 'middle' });
+                        y += rowH + 0.08;
+                    }
+                } else {
+                    const body = String(companyAbout || '').replace(/\r?\n/g, '\n');
+                    const bodyFit = fitTextToLines(body, /*initial*/18, /*min*/14, /*baseWrap*/46, /*lines*/10, /*hard*/60, { suppressEllipsis: true, minFontFloor: 12 });
+                    aboutSlide.addText(toBoldRunsFromMarkdown(bodyFit.text) as any, { x: marginX, y: 1.3, w: contentW, h: pageH - 2.0, fontSize: bodyFit.fontSize, fontFace: JPN_FONT, valign: 'top' });
+                }
+                if (companyLogoPath) {
+                    const maxW = 1.2;
+                    const dim = await readImageDimensions(companyLogoPath);
+                    const ratio = dim && dim.width > 0 ? (dim.height / dim.width) : (0.6 / 1.2);
+                    const h = Math.min(0.9, Math.max(0.3, maxW * ratio));
+                    const x = pageW - marginX - maxW;
+                    const y = pageH - h - 0.25;
+                    aboutSlide.addImage({ path: companyLogoPath, x, y, w: maxW, h, sizing: { type: 'contain', w: maxW, h } as any });
+                }
+                if (companyCopyright) {
+                    aboutSlide.addText(companyCopyright, { x: 0.4, y: pageH - 0.35, w: pageW - 0.8, h: 0.3, align: 'center', fontSize: 10, color: '666666', fontFace: JPN_FONT });
+                }
+                logger.info('Added company about slide.');
+            } catch (e) {
+                logger.warn({ error: e }, 'Failed to add company about slide.');
             }
         }
         // drawInfographic defined earlier; ensure not duplicated here
