@@ -13,6 +13,7 @@ import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
 import { logger } from '../../logger';
 import { summarizeAndAnalyzeTool } from '../../tools/market-research/summarizeAndAnalyze';
+import { contentScrapeTool } from '../../tools/market-research/contentScrape';
 import { generateChartTool, createPowerpointTool } from '../../tools/presenter';
 import { parseJsonStrings } from '../../tools/xibo-agent/utility/jsonParser';
 import { promises as fs } from 'fs';
@@ -130,6 +131,7 @@ const slideDesignSchema = z.object({
   context_for_visual: z.string().describe("The specific topic or data context from the report needed to create the visual."),
   special_content: z.string().optional().describe("Special content for layouts like 'quote'."),
   visual_recipe: visualRecipeSchema.optional().nullable().describe("Optional infographic recipe for shapes/icons/timelines/etc."),
+  accent_color: hexColorSchema.optional().describe("Optional per-slide accent color (e.g. for title bar), 6-digit hex."),
 });
 type SlideDesign = z.infer<typeof slideDesignSchema>;
 
@@ -176,6 +178,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
   inputSchema: z.object({
     reportFileName: z.string().describe('The name of the report file located in persistent_data/reports.'),
     fileNameBase: z.string().optional().describe('The base name for the output files. Defaults to the report file name.'),
+    companyName: z.string().optional().describe('Optional company name to load info from persistent_data/companies_info/<companyName>')
   }),
   outputSchema: finalOutputSchema,
 })
@@ -189,14 +192,16 @@ export const intelligentPresenterWorkflow = createWorkflow({
     inputSchema: z.object({
         reportFileName: z.string(),
         fileNameBase: z.string().optional(),
+        companyName: z.string().optional(),
     }),
     outputSchema: z.object({
         reportContent: z.string(),
         fileNameBase: z.string(),
+        companyName: z.string().optional(),
         errorMessage: z.string().optional(),
     }),
     execute: async (params) => {
-        const { reportFileName, fileNameBase } = params.inputData;
+        const { reportFileName, fileNameBase, companyName } = params.inputData;
         const resolvedFileNameBase = fileNameBase || path.parse(reportFileName).name;
         const filePath = path.join(config.reportsDir, reportFileName);
         logger.info({ filePath, resolvedFileNameBase }, "📄 Reading report file...");
@@ -204,11 +209,11 @@ export const intelligentPresenterWorkflow = createWorkflow({
         try {
             await fs.access(filePath);
             const reportContent = await fs.readFile(filePath, 'utf-8');
-            return { reportContent, fileNameBase: resolvedFileNameBase };
+            return { reportContent, fileNameBase: resolvedFileNameBase, companyName };
         } catch (error) {
             const message = `Report file not found or could not be read: ${filePath}`;
             logger.error({ filePath, error }, message);
-            return { reportContent: '', fileNameBase: resolvedFileNameBase, errorMessage: message };
+            return { reportContent: '', fileNameBase: resolvedFileNameBase, companyName, errorMessage: message };
         }
     },
 }))
@@ -223,6 +228,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
     inputSchema: z.object({
         reportContent: z.string(),
         fileNameBase: z.string(),
+        companyName: z.string().optional(),
         errorMessage: z.string().optional(),
     }),
     outputSchema: z.object({
@@ -231,12 +237,13 @@ export const intelligentPresenterWorkflow = createWorkflow({
         fileNameBase: z.string(),
         themeColor1: z.string().describe("The primary theme color for the presentation background gradient."),
         themeColor2: z.string().describe("The secondary theme color for the presentation background gradient."),
+        companyName: z.string().optional(),
         errorMessage: z.string().optional(),
     }),
     execute: async (params) => {
-        const { reportContent, fileNameBase, errorMessage } = params.inputData;
+        const { reportContent, fileNameBase, errorMessage, companyName } = params.inputData;
         if (errorMessage) {
-            return { presentationDesign: [], reportContent, fileNameBase, errorMessage, themeColor1: '#F1F1F1', themeColor2: '#CCCCCC' };
+            return { presentationDesign: [], reportContent, fileNameBase, companyName, errorMessage, themeColor1: '#F1F1F1', themeColor2: '#CCCCCC' };
         }
         
         logger.info("🤖 [Designer AI] Analyzing report and designing presentation structure...");
@@ -256,6 +263,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
             - "context_for_visual": string (グラフ作成に必要な文脈)
             - "special_content": string (任意。引用レイアウトの場合の引用文など)
             - "visual_recipe": object (任意。以下のいずれかの厳密スキーマで返してください)
+            - "accent_color": "#RRGGBB" (任意。タイトル等で強調したい時のアクセントカラー)
                 1) KPI: { "type": "kpi", "items": [{"label": string, "value": string, "icon"?: string}] }
                 2) 比較: { "type": "comparison", "a": {"label": string, "value": string}, "b": {"label": string, "value": string} }
                 3) タイムライン: { "type": "timeline", "steps": [{"label": string}, ...] }
@@ -318,14 +326,14 @@ export const intelligentPresenterWorkflow = createWorkflow({
             let objectParseResult = expectedObjectSchema.safeParse(designData);
             if (objectParseResult.success) {
                 const { slides, theme_colors } = objectParseResult.data;
-                return { presentationDesign: slides, reportContent, fileNameBase, themeColor1: theme_colors.color1, themeColor2: theme_colors.color2 };
+                return { presentationDesign: slides, reportContent, fileNameBase, companyName, themeColor1: theme_colors.color1, themeColor2: theme_colors.color2 };
             }
 
             // 2. Try parsing a direct array of slides (if theme is missing).
             let arrayParseResult = arrayOnlySchema.safeParse(designData);
             if (arrayParseResult.success) {
                 logger.warn("AI returned an array instead of an object. Using default theme colors.");
-                return { presentationDesign: arrayParseResult.data, reportContent, fileNameBase, themeColor1: '#F1F1F1', themeColor2: '#CCCCCC' };
+                return { presentationDesign: arrayParseResult.data, reportContent, fileNameBase, companyName, themeColor1: '#F1F1F1', themeColor2: '#CCCCCC' };
             }
             
             // 3. Try parsing a wrapped array, e.g., { "slides": [...] }.
@@ -344,12 +352,12 @@ export const intelligentPresenterWorkflow = createWorkflow({
             // If all parsing attempts fail, forward an error.
             const message = `AI output did not match any expected schema. Zod error: ${objectParseResult.error.message}`;
             logger.error({ error: objectParseResult.error, aiOutput: designData }, message);
-            return { presentationDesign: [], reportContent, fileNameBase, errorMessage: message, themeColor1: '#F1F1F1', themeColor2: '#CCCCCC' };
+            return { presentationDesign: [], reportContent, fileNameBase, companyName, errorMessage: message, themeColor1: '#F1F1F1', themeColor2: '#CCCCCC' };
 
         } catch (error) {
             const message = error instanceof Error ? error.message : "An unknown error occurred during presentation design.";
             logger.error({ error, aiOutput: (designResult && designResult.success) ? designResult.data.summary : 'AI output not available.' }, message);
-            return { presentationDesign: [], reportContent, fileNameBase, errorMessage: message, themeColor1: '#F1F1F1', themeColor2: '#CCCCCC' };
+            return { presentationDesign: [], reportContent, fileNameBase, companyName, errorMessage: message, themeColor1: '#F1F1F1', themeColor2: '#CCCCCC' };
         }
     },
 }))
@@ -370,6 +378,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
+        companyName: z.string().optional(),
         errorMessage: z.string().optional(),
     }),
     outputSchema: z.object({
@@ -382,12 +391,13 @@ export const intelligentPresenterWorkflow = createWorkflow({
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
+        companyName: z.string().optional(),
         errorMessage: z.string().optional(),
     }),
     execute: async (params) => {
-        const { presentationDesign, reportContent, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath } = params.inputData;
+        const { presentationDesign, reportContent, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, companyName } = params.inputData;
         if (errorMessage) {
-            return { enrichedSlides: [], fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath } as any;
+            return { enrichedSlides: [], fileNameBase, companyName, errorMessage, themeColor1, themeColor2, titleSlideImagePath } as any;
         }
 
         logger.info("✍️ [Analyst & Speechwriter AIs] Generating content in batch...");
@@ -512,7 +522,137 @@ Shortening and style constraints (Japanese):
         });
 
         const finalTitlePath = (titleGen && (titleGen as any).imagePath) ? (titleGen as any).imagePath : titleSlideImagePath;
-        return { enrichedSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath: finalTitlePath } as any;
+        return { enrichedSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath: finalTitlePath, companyName } as any;
+    },
+}))
+.then(createStep({
+    /**
+     * @step enrich-company-info
+     * Optionally appends a company overview slide by scraping about.url and extracting info via AI.
+     */
+    id: 'enrich-company-info',
+    inputSchema: z.object({
+        enrichedSlides: z.array(z.object({
+            design: slideDesignSchema,
+            chartData: chartDataSchema.nullable(),
+            speech: z.string(),
+        })),
+        fileNameBase: z.string(),
+        themeColor1: z.string(),
+        themeColor2: z.string(),
+        titleSlideImagePath: z.string().optional(),
+        companyName: z.string().optional(),
+        errorMessage: z.string().optional(),
+    }),
+    outputSchema: z.object({
+        finalSlides: z.array(z.object({
+            title: z.string(),
+            bullets: z.array(z.string()),
+            imagePath: z.string().optional(),
+            notes: z.string(),
+            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote']),
+            special_content: z.string().optional(),
+            visual_recipe: z.any().optional(),
+        })),
+        fileNameBase: z.string(),
+        themeColor1: z.string(),
+        themeColor2: z.string(),
+        titleSlideImagePath: z.string().optional(),
+        companyLogoPath: z.string().optional(),
+        companyCopyright: z.string().optional(),
+        companyAbout: z.string().optional(),
+        companyOverview: z.object({
+            company_name: z.string().optional(),
+            address: z.string().optional(),
+            founded: z.string().optional(),
+            representative: z.string().optional(),
+            business: z.array(z.string()).optional(),
+            homepage: z.string().optional(),
+            contact: z.string().optional(),
+        }).optional(),
+    }),
+    execute: async (params) => {
+        const { enrichedSlides, companyName, fileNameBase, themeColor1, themeColor2, titleSlideImagePath } = params.inputData as any;
+        if (!companyName) {
+            logger.info('No companyName provided. Skipping company info enrichment.');
+            // Pass-through: convert enrichedSlides->finalSlides without change
+            const passthrough = (enrichedSlides || []).map((slide: any) => ({
+                title: slide.design.title,
+                bullets: slide.design.bullets,
+                imagePath: undefined,
+                notes: slide.speech,
+                layout: slide.design.layout,
+                special_content: slide.design.special_content,
+                visual_recipe: slide.design.visual_recipe,
+            }));
+            return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath } as any;
+        }
+        const baseDir = path.join(config.projectRoot, 'persistent_data', 'companies_info', companyName);
+        try { await fs.access(baseDir); } catch { logger.info({ baseDir }, 'Company dir not found. Skipping.'); return params.inputData as any; }
+        // Prefer about.url
+        let urlStr: string | undefined;
+        const aboutUrlPath = path.join(baseDir, 'about.url');
+        try { const raw = await fs.readFile(aboutUrlPath, 'utf-8'); urlStr = String(raw||'').trim(); logger.info({ aboutUrlPath, urlStr }, 'Read about.url'); } catch {
+            try { const rawJ = await fs.readFile(path.join(baseDir, 'about.json'), 'utf-8'); const j = JSON.parse(rawJ); if (j && typeof j.url === 'string') urlStr = j.url; logger.info({ urlStr }, 'Read about.json'); } catch {}
+        }
+        if (!urlStr) { logger.info('No about URL found. Skipping.');
+            const passthrough = (enrichedSlides || []).map((slide: any) => ({
+                title: slide.design.title,
+                bullets: slide.design.bullets,
+                imagePath: undefined,
+                notes: slide.speech,
+                layout: slide.design.layout,
+                special_content: slide.design.special_content,
+                visual_recipe: slide.design.visual_recipe,
+            }));
+            return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath } as any; }
+        // Scrape
+        let scraped = '';
+        try {
+            const res = await contentScrapeTool.execute({ ...params, context: { url: urlStr } });
+            if (res.success) scraped = res.data.content;
+            logger.info({ bytes: scraped.length }, 'Scraped company page for AI extraction.');
+        } catch (e) { logger.warn({ e }, 'Scrape failed.'); }
+        if (!scraped) {
+            const passthrough = (enrichedSlides || []).map((slide: any) => ({
+                title: slide.design.title,
+                bullets: slide.design.bullets,
+                imagePath: undefined,
+                notes: slide.speech,
+                layout: slide.design.layout,
+                special_content: slide.design.special_content,
+            }));
+            return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath } as any;
+        }
+        // AI extract (structured)
+        const objective = `以下のテキストから会社情報を抽出し、次のJSON形式のみで出力してください（余計な文字列は禁止）。日本語で簡潔に。\n{\n  "company_name": string,\n  "address": string,\n  "founded": string,\n  "representative": string,\n  "business": string[],\n  "homepage": string,\n  "contact": string,\n  "vision": string\n}`;
+        const ai = await summarizeAndAnalyzeTool.execute({ ...params, context: { text: scraped.slice(0, 20000), objective, temperature: 0.2, topP: 0.9 } });
+        if (!ai.success) { logger.warn('AI extraction failed.'); return params.inputData as any; }
+        const parsed = parseJsonStrings(ai.data.summary) as any;
+        const name = typeof parsed?.company_name === 'string' && parsed.company_name.trim() ? parsed.company_name.trim() : companyName;
+        const year = new Date().getFullYear();
+        const copyrightLine = `© ${year} ${name}. All Rights Reserved.`;
+        // Detect logo.png
+        let companyLogoPath: string | undefined;
+        try {
+            const logoPath = path.join(baseDir, 'logo.png');
+            await fs.access(logoPath);
+            companyLogoPath = logoPath;
+            logger.info({ logoPath }, 'Detected company logo for PPTX.');
+        } catch {}
+        const passthrough = (enrichedSlides || []).map((s: any) => ({ title: s.design.title, bullets: s.design.bullets, imagePath: undefined, notes: s.speech, layout: s.design.layout, special_content: s.design.special_content, visual_recipe: s.design.visual_recipe }));
+        const companyOverview = {
+            company_name: name,
+            address: typeof parsed?.address === 'string' ? parsed.address : undefined,
+            founded: typeof parsed?.founded === 'string' ? parsed.founded : undefined,
+            representative: typeof parsed?.representative === 'string' ? parsed.representative : undefined,
+            business: Array.isArray(parsed?.business) ? parsed.business.slice(0, 8).map((x:any)=>String(x)) : undefined,
+            homepage: typeof parsed?.homepage === 'string' ? parsed.homepage : (urlStr || undefined),
+            contact: typeof parsed?.contact === 'string' ? parsed.contact : undefined,
+            vision: typeof parsed?.vision === 'string' ? parsed.vision : undefined,
+        };
+        logger.info({ name }, 'Prepared structured company overview.');
+        return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, companyLogoPath, companyCopyright: copyrightLine, companyAbout: '', companyOverview } as any;
     },
 }))
 .then(createStep({
@@ -525,16 +665,32 @@ Shortening and style constraints (Japanese):
      */
     id: 'generate-visuals',
     inputSchema: z.object({
-        enrichedSlides: z.array(z.object({
-            design: slideDesignSchema,
-            chartData: chartDataSchema.nullable(),
-            speech: z.string(),
+        finalSlides: z.array(z.object({
+            title: z.string(),
+            bullets: z.array(z.string()),
+            imagePath: z.string().optional(),
+            notes: z.string(),
+            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote']),
+            special_content: z.string().optional(),
+            visual_recipe: z.any().optional(),
         })),
         fileNameBase: z.string(),
         themeColor1: z.string(),
         themeColor2: z.string(),
         titleSlideImagePath: z.string().optional(),
         errorMessage: z.string().optional(),
+        companyLogoPath: z.string().optional(),
+        companyCopyright: z.string().optional(),
+        companyAbout: z.string().optional(),
+        companyOverview: z.object({
+            company_name: z.string().optional(),
+            address: z.string().optional(),
+            founded: z.string().optional(),
+            representative: z.string().optional(),
+            business: z.array(z.string()).optional(),
+            homepage: z.string().optional(),
+            contact: z.string().optional(),
+        }).optional(),
     }),
     outputSchema: z.object({
         finalSlides: z.array(z.object({
@@ -544,6 +700,7 @@ Shortening and style constraints (Japanese):
             notes: z.string(),
             layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote']),
             special_content: z.string().optional(),
+            visual_recipe: z.any().optional(),
         })),
         fileNameBase: z.string(),
         themeColor1: z.string(),
@@ -551,19 +708,36 @@ Shortening and style constraints (Japanese):
         titleSlideImagePath: z.string().optional(),
         visualRecipes: z.array(z.any()).optional(),
         errorMessage: z.string().optional(),
+        companyLogoPath: z.string().optional(),
+        companyCopyright: z.string().optional(),
+        companyAbout: z.string().optional(),
+        companyOverview: z.object({
+            company_name: z.string().optional(),
+            address: z.string().optional(),
+            founded: z.string().optional(),
+            representative: z.string().optional(),
+            business: z.array(z.string()).optional(),
+            homepage: z.string().optional(),
+            contact: z.string().optional(),
+        }).optional(),
     }),
     execute: async (params) => {
-        const { enrichedSlides, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath } = params.inputData;
+        const { finalSlides: inputSlides, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath } = params.inputData as any;
+        const inCompanyLogoPath = (params.inputData as any).companyLogoPath as (string|undefined);
+        const inCompanyCopyright = (params.inputData as any).companyCopyright as (string|undefined);
+        const inCompanyAbout = (params.inputData as any).companyAbout as (string|undefined);
+        const inCompanyOverview = (params.inputData as any).companyOverview as (any|undefined);
         if (errorMessage) {
             return { finalSlides: [], fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath };
         }
 
         logger.info("🖼️ [Chart Generator] Creating chart images...");
-        const finalSlidesPromises = enrichedSlides.map(async (slide, index) => {
+        const finalSlidesPromises = (inputSlides as any[]).map(async (slide, index) => {
             let imagePath: string | undefined = undefined;
-            // Attempt to generate a chart if data is present
-            if (slide.chartData) {
-                const { chart_type, ...restOfChartData } = slide.chartData;
+            // Attempt to generate a chart if data is present (chartData no longer present here)
+            const chartData = null as any;
+            if (chartData && chartData.chart_type) {
+                const { chart_type, ...restOfChartData } = chartData;
                 // Force disk mode to avoid passing large buffers between steps
                 const chartResult = await generateChartTool.execute({ ...params, context: { ...restOfChartData, chartType: chart_type, fileName: `chart_${fileNameBase}_${index}`, returnBuffer: false, themeColor1, themeColor2 }});
                 if (chartResult.success) {
@@ -572,32 +746,34 @@ Shortening and style constraints (Japanese):
                         imagePath = d.imagePath as string;
                     }
                 } else {
-                    logger.warn({ slideTitle: slide.design.title }, "Chart generation failed, proceeding without an image.");
+                    logger.warn({ slideIndex: index }, "Chart generation failed, proceeding without an image.");
                 }
             }
 
             // (reverted) do not generate special image for section headers
 
             // Fallback logic: If layout requires a visual but we don't have one, change layout.
-            let finalLayout = slide.design.layout;
+            let finalLayout = slide.layout;
             if (finalLayout === 'content_with_visual' && !imagePath) {
-                logger.info({ slideTitle: slide.design.title }, "Visual not available for 'content_with_visual' layout. Switching to 'content_only'.");
+                logger.info({ slideTitle: slide.title }, "Visual not available for 'content_with_visual' layout. Switching to 'content_only'.");
                 finalLayout = 'content_only';
             }
 
             return {
-                title: slide.design.title,
-                bullets: slide.design.bullets,
+                title: slide.title,
+                bullets: slide.bullets,
                 imagePath: imagePath,
-                notes: slide.speech,
+                notes: slide.notes,
                 layout: finalLayout,
-                special_content: slide.design.special_content,
+                special_content: slide.special_content,
+                visual_recipe: slide.visual_recipe,
             };
         });
 
         const finalSlides = await Promise.all(finalSlidesPromises);
-        const visualRecipes = enrichedSlides.map(s => (s as any).design?.visual_recipe ?? null);
-        return { finalSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, visualRecipes } as any;
+        const visualRecipes: any[] = [];
+        // Carry forward branding fields from input if present (already in scope)
+        return { finalSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, visualRecipes, companyLogoPath: inCompanyLogoPath, companyCopyright: inCompanyCopyright, companyAbout: inCompanyAbout, companyOverview: inCompanyOverview } as any;
     },
 }))
 .then(createStep({
@@ -615,6 +791,7 @@ Shortening and style constraints (Japanese):
             notes: z.string(),
             layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote']),
             special_content: z.string().optional(),
+            visual_recipe: z.any().optional(),
         })),
         fileNameBase: z.string(),
         themeColor1: z.string(),
@@ -622,15 +799,29 @@ Shortening and style constraints (Japanese):
         titleSlideImagePath: z.string().optional(),
         visualRecipes: z.array(z.any()).optional(),
         errorMessage: z.string().optional(),
+        companyLogoPath: z.string().optional(),
+        companyCopyright: z.string().optional(),
+        companyAbout: z.string().optional(),
+        companyOverview: z.object({
+            company_name: z.string().optional(),
+            address: z.string().optional(),
+            founded: z.string().optional(),
+            representative: z.string().optional(),
+            business: z.array(z.string()).optional(),
+            homepage: z.string().optional(),
+            contact: z.string().optional(),
+        }).optional(),
     }),
     outputSchema: finalOutputSchema,
     execute: async (params) => {
-        const { finalSlides, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, visualRecipes } = params.inputData as any;
+        const { finalSlides, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, visualRecipes, companyLogoPath, companyCopyright, companyAbout, companyOverview } = params.inputData as any;
         if (errorMessage) {
             return { success: false, message: errorMessage } as const;
         }
 
         logger.info("📦 [Assembler] Creating final PowerPoint file with notes...");
+        // Build visualRecipes from slides as a compatibility path for the PPT generator
+        const visualRecipesFromSlides = Array.isArray(finalSlides) ? finalSlides.map((s: any) => (s && (s as any).visual_recipe) || null) : [];
         const pptResult = await createPowerpointTool.execute({ ...params, context: { 
             fileName: fileNameBase,
             slides: finalSlides,
@@ -638,7 +829,11 @@ Shortening and style constraints (Japanese):
             themeColor2,
             titleSlideImagePath,
             styleTokens: { primary: themeColor1, secondary: themeColor2, accent: '#FFC107', cornerRadius: 12, outlineColor: '#FFFFFF' },
-            visualRecipes,
+            visualRecipes: (visualRecipes && visualRecipes.length ? visualRecipes : visualRecipesFromSlides),
+            companyLogoPath,
+            companyCopyright,
+            companyAbout,
+            companyOverview,
         }});
 
         if (!pptResult.success) {
