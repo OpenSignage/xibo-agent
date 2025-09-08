@@ -160,7 +160,7 @@ export const updateImage = createTool({
       let textResponse = '';
       
       if (!response.candidates?.[0]?.content?.parts) {
-        logger.error('Invalid response structure from Gemini API', { response });
+        logger.error({ response }, 'Invalid response structure from Gemini API');
         throw new Error("Invalid response from Gemini API");
       }
 
@@ -173,7 +173,7 @@ export const updateImage = createTool({
           logger.info('Found image data in response');
           const imageData = part.inlineData.data;
           if (typeof imageData !== 'string') {
-            logger.error('Invalid image data format', { type: typeof imageData });
+            logger.error({ type: typeof imageData }, 'Invalid image data format');
             throw new Error("Invalid image data format");
           }
           
@@ -260,14 +260,15 @@ export const updateImage = createTool({
       };
 
     } catch (error) {
-      logger.error(`updateImage: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { 
-        error,
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      logger.error({
+        error: errMsg,
         originalImageId: originalImage?.id,
         context: {
           prompt: context.prompt,
           generatorId: context.generatorId,
         }
-      });
+      }, 'updateImage: An error occurred');
       return {
         success: false,
         data: {

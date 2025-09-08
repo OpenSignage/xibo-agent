@@ -3,12 +3,12 @@
     "images": [
       {
         "id": 1,
-        "filename": "image-48b96b88-dff8-4d23-ad39-95e5ce35004a.png",
-        "prompt": "An abstract, professional background image representing the following themes: Glowing, Digital, Network, Future, Data, Blue, Vibrant. High resolution, clean, and visually appealing. (Aspect ratio: 16:9, Dimensions: 1024x576) --no text, words, letters, numbers, writing, typography, signatures, logos, people, faces",
+        "filename": "image-dc39b805-15d6-4b9f-a19f-afa8a05d0163.png",
+        "prompt": "A friendly 40s small restaurant owner standing proudly in front of his shop, which has a bright LED sign showing the daily special. The style should be a clean, modern illustration. (Aspect ratio: 16:9, Dimensions: 1024x576)",
         "aspectRatio": "16:9",
         "width": 1024,
         "height": 576,
-        "createdAt": "2025-09-07T08:23:35.918Z"
+        "createdAt": "2025-09-07T15:52:04.610Z"
       }
     ]
   },
