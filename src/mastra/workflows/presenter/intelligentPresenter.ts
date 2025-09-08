@@ -13,6 +13,7 @@ import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
 import { logger } from '../../logger';
 import { summarizeAndAnalyzeTool } from '../../tools/market-research/summarizeAndAnalyze';
+import { presenterTemplateDesignInstruction } from './designInstructions.template';
 import { contentScrapeTool } from '../../tools/market-research/contentScrape';
 import { generateChartTool, createPowerpointTool } from '../../tools/presenter';
 import { parseJsonStrings } from '../../tools/xibo-agent/utility/jsonParser';
@@ -23,12 +24,31 @@ import { config } from '../../tools/xibo-agent/config';
 // --- Helper Functions and Schemas ---
 
 const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid 6-digit hex color code (e.g., #RRGGBB)");
+const styleColorSchema = z.union([
+  // 6-digit hex with optional '#'
+  z.string().regex(/^#?[0-9a-fA-F]{6}$/),
+  // 3-digit hex with optional '#'
+  z.string().regex(/^#?[0-9a-fA-F]{3}$/),
+  // 8-digit hex (ARGB/RGBA) with optional '#'
+  z.string().regex(/^#?[0-9a-fA-F]{8}$/),
+  // rgb()/rgba() CSS-like colors
+  z.string().regex(/^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/i),
+  // simple named colors
+  z.string().regex(/^[a-zA-Z]+$/),
+  // transparent / none sentinel values
+  z.literal('transparent'),
+  z.literal('none'),
+]);
 
 /**
  * Defines the structure for a single slide's design, as determined by the design AI.
  */
 const visualRecipeKpiSchema = z.object({
   type: z.literal('kpi'),
+  items: z.array(z.object({ label: z.string(), value: z.string(), icon: z.string().optional() })).min(1),
+});
+const visualRecipeKpiGridSchema = z.object({
+  type: z.literal('kpi_grid'),
   items: z.array(z.object({ label: z.string(), value: z.string(), icon: z.string().optional() })).min(1),
 });
 const visualRecipeComparisonSchema = z.object({
@@ -43,7 +63,7 @@ const visualRecipeTimelineSchema = z.object({
 const visualRecipeMatrixSchema = z.object({
   type: z.literal('matrix'),
   axes: z.object({ xLabels: z.tuple([z.string(), z.string()]), yLabels: z.tuple([z.string(), z.string()]) }),
-  items: z.array(z.object({ x: z.number().int().min(0).max(1), y: z.number().int().min(0).max(1), label: z.string() })).optional(),
+  items: z.array(z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), label: z.string() })).optional(),
 });
 const visualRecipeFunnelSchema = z.object({
   type: z.literal('funnel'),
@@ -102,14 +122,37 @@ const visualRecipeCalloutsSchema = z.object({
   items: z.array(z.object({ label: z.string(), value: z.string().optional(), icon: z.string().optional() })).min(1),
 });
 
-const visualRecipeSchema = z.union([
+// Simple flexible schema for line charts
+const visualRecipeLineChartSchema = z.object({
+  type: z.literal('line_chart'),
+  labels: z.array(z.string()).optional(),
+  series: z.array(z.object({ name: z.string().optional(), data: z.array(z.number()) })).optional(),
+});
+const visualRecipeBarChartSchema = z.object({
+  type: z.literal('bar_chart'),
+  labels: z.array(z.string()).optional(),
+  series: z.array(z.object({ name: z.string().optional(), data: z.array(z.number()) })).optional(),
+  values: z.array(z.number()).optional(),
+});
+const visualRecipePieChartSchema = z.object({
+  type: z.literal('pie_chart'),
+  items: z.array(z.object({ label: z.string(), value: z.number() })).optional(),
+  labels: z.array(z.string()).optional(),
+  values: z.array(z.number()).optional(),
+});
+
+const visualRecipeStrictSchema = z.union([
   visualRecipeKpiSchema,
+  visualRecipeKpiGridSchema,
   visualRecipeComparisonSchema,
   visualRecipeTimelineSchema,
   visualRecipeMatrixSchema,
   visualRecipeFunnelSchema,
   visualRecipeProcessSchema,
   visualRecipeRoadmapSchema,
+  visualRecipeLineChartSchema,
+  visualRecipeBarChartSchema,
+  visualRecipePieChartSchema,
   visualRecipeKpiDonutSchema,
   visualRecipeProgressSchema,
   visualRecipeGanttSchema,
@@ -122,9 +165,32 @@ const visualRecipeSchema = z.union([
   visualRecipeCalloutsSchema,
 ]);
 
+// Fallback: accept unknown recipe shapes to avoid hard-failing template slides; renderer will noop safely
+const visualRecipeSchema = visualRecipeStrictSchema.or(z.object({ type: z.string().optional() }).passthrough());
+
+const freeformElementSchema = z.object({
+  type: z.enum([
+    'title','text','bullets','image','shape','quote',
+    // infographic primitives allowed in freeform elements
+    'kpi','kpi_grid','comparison','timeline','matrix','funnel','process','roadmap','kpi_donut','progress','gantt','heatmap','venn2','pyramid','waterfall','bullet','map_markers','callouts','line_chart','bar_chart','pie_chart','checklist','visual_recipe'
+  ]).describe('Element kind'),
+  bbox: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).describe('Absolute inches within 16:9 slide'),
+  z: z.number().optional(),
+  content: z.any().optional(),
+  style: z.object({
+    fontSize: z.number().optional(),
+    color: styleColorSchema.optional(),
+    bg: styleColorSchema.optional(),
+    cornerRadius: z.number().optional(),
+    shadow: z.enum(['none','soft','strong']).optional(),
+    align: z.enum(['left','center','right']).optional(),
+    sizing: z.enum(['cover','contain']).optional(),
+  }).optional(),
+});
+
 const slideDesignSchema = z.object({
   title: z.string().describe("The main title of the slide."),
-  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote'])
+  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote', 'freeform'])
     .describe("The layout type for the slide."),
   bullets: z.array(z.string()).describe("A list of key bullet points for the slide."),
   visual_suggestion: z.enum(['bar_chart', 'pie_chart', 'line_chart', 'none']).describe("The suggested type of visual for the slide."),
@@ -132,6 +198,11 @@ const slideDesignSchema = z.object({
   special_content: z.string().optional().describe("Special content for layouts like 'quote'."),
   visual_recipe: visualRecipeSchema.optional().nullable().describe("Optional infographic recipe for shapes/icons/timelines/etc."),
   accent_color: hexColorSchema.optional().describe("Optional per-slide accent color (e.g. for title bar), 6-digit hex."),
+  slide_style: z.object({
+    title_bar_variant: z.enum(['solid','underline','none']).optional(),
+    density: z.enum(['compact','normal','airy']).optional(),
+  }).optional().describe("Optional per-slide style directives for title bar rendering and content density."),
+  elements: z.array(freeformElementSchema).optional().describe('When layout is freeform, render these elements instead of template.'),
 });
 type SlideDesign = z.infer<typeof slideDesignSchema>;
 
@@ -205,7 +276,6 @@ export const intelligentPresenterWorkflow = createWorkflow({
         const resolvedFileNameBase = fileNameBase || path.parse(reportFileName).name;
         const filePath = path.join(config.reportsDir, reportFileName);
         logger.info({ filePath, resolvedFileNameBase }, "📄 Reading report file...");
-        
         try {
             await fs.access(filePath);
             const reportContent = await fs.readFile(filePath, 'utf-8');
@@ -250,6 +320,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
         let designResult;
         try {
             // Prompt for the Designer AI to create the presentation structure and theme.
+            const creativeNote = presenterTemplateDesignInstruction;
             const prompt = `あなたは一流のプレゼンテーション設計者です。以下のレポートを分析し、最適なプレゼン構成案とテーマカラーをJSONで出力してください。
             返却するJSONは、必ず以下のキーを持つオブジェクトです:
             - "theme_colors": { "color1": "#HEXCODE", "color2": "#HEXCODE" } (レポートの雰囲気に合うグラデーション用のテーマカラー2色。必ず6桁の16進数カラーコードで指定してください)
@@ -264,6 +335,8 @@ export const intelligentPresenterWorkflow = createWorkflow({
             - "special_content": string (任意。引用レイアウトの場合の引用文など)
             - "visual_recipe": object (任意。以下のいずれかの厳密スキーマで返してください)
             - "accent_color": "#RRGGBB" (任意。タイトル等で強調したい時のアクセントカラー)
+            - "slide_style": { "title_bar_variant"?: "solid"|"underline"|"none", "density"?: "compact"|"normal"|"airy" } (任意)
+            - 重要: 本ワークフローでは "layout": "freeform" は使用しません。"elements" キーは出力しないでください。
                 1) KPI: { "type": "kpi", "items": [{"label": string, "value": string, "icon"?: string}] }
                 2) 比較: { "type": "comparison", "a": {"label": string, "value": string}, "b": {"label": string, "value": string} }
                 3) タイムライン: { "type": "timeline", "steps": [{"label": string}, ...] }
@@ -281,6 +354,9 @@ export const intelligentPresenterWorkflow = createWorkflow({
                 15) バレット: { "type": "bullet", "items": [{"label": string, "value": number, "target": number}] }
                 16) ロケーション(地図風): { "type": "map_markers", "markers": [{"label": string, "x": number(0-1), "y": number(0-1)}] }
                 17) コールアウト/バッジ: { "type": "callouts", "items": [{"label": string, "value"?: string, "icon"?: string}] }
+
+            クリエイティブ設定:\n${creativeNote}
+            追加で、デッキ全体のデザイントークン（任意）を返しても良い: theme_tokens { "palette"?: {"primary":"#RRGGBB","secondary":"#RRGGBB","accent":"#RRGGBB"}, "shape"?: {"cornerRadius": number(0-16)}, "spacing"?: {"baseUnit": number(0.1-1.0)}, "shadow"?: {"preset":"none"|"soft"|"strong"} }
 
             重要な表記ルール（短文化/名詞化/非会話体）:
             - タイトル: 名詞句/1行/最大26文字。動詞「〜する」等を避ける。絵文字・過度な記号を避ける。
@@ -395,13 +471,13 @@ export const intelligentPresenterWorkflow = createWorkflow({
         errorMessage: z.string().optional(),
     }),
     execute: async (params) => {
-        const { presentationDesign, reportContent, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, companyName } = params.inputData;
+        const { presentationDesign, reportContent, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, companyName } = params.inputData as any;
         if (errorMessage) {
             return { enrichedSlides: [], fileNameBase, companyName, errorMessage, themeColor1, themeColor2, titleSlideImagePath } as any;
         }
 
         logger.info("✍️ [Analyst & Speechwriter AIs] Generating content in batch...");
-        const slidesInput = presentationDesign.map((s, idx) => ({
+        const slidesInput = presentationDesign.map((s: any, idx: number) => ({
             idx,
             title: s.title,
             bullets: s.bullets,
@@ -420,13 +496,9 @@ export const intelligentPresenterWorkflow = createWorkflow({
                 const keywords = (keywordResult.data.summary || '').trim();
                 const prompt = `An abstract, professional background image representing the following themes: ${keywords}. High resolution, clean, and visually appealing.`;
                 const negativePrompt = 'text, words, letters, numbers, writing, typography, signatures, logos, people, faces';
-                const { generateImage } = await import('../../tools/xibo-agent/generateImage/imageGeneration');
-                // Force disk mode: save image to file and pass only the path
-                const imageResult = await generateImage.execute({ ...params, context: { prompt, aspectRatio: '16:9', negativePrompt, returnBuffer: false } });
-                if (imageResult.success && imageResult.data) {
-                    const d: any = imageResult.data as any;
-                    if (d.imagePath) return { buffer: undefined as any, imagePath: d.imagePath as string };
-                }
+                const { genarateImage } = await import('../../tools/presenter/genarateImage');
+                const imageResult = await genarateImage({ prompt, aspectRatio: '16:9', negativePrompt });
+                if (imageResult.success && imageResult.path) return { buffer: undefined as any, imagePath: imageResult.path };
                 return { buffer: undefined as any, imagePath: undefined };
             } catch {
                 return { buffer: undefined as any, imagePath: undefined };
@@ -510,7 +582,7 @@ Shortening and style constraints (Japanese):
             logger.warn('Batch generation failed; falling back to empty results.');
         }
 
-        const enrichedSlides = presentationDesign.map((design, idx) => {
+        const enrichedSlides = presentationDesign.map((design: any, idx: number) => {
             const got = idxToResult.get(idx);
             const speech = got?.speech || '（原稿の生成に失敗しました）';
             let chartData: ChartData | null = null;
@@ -525,10 +597,10 @@ Shortening and style constraints (Japanese):
         return { enrichedSlides, fileNameBase, themeColor1, themeColor2, titleSlideImagePath: finalTitlePath, companyName } as any;
     },
 }))
+
 .then(createStep({
     /**
      * @step enrich-company-info
-     * Optionally appends a company overview slide by scraping about.url and extracting info via AI.
      */
     id: 'enrich-company-info',
     inputSchema: z.object({
@@ -550,9 +622,10 @@ Shortening and style constraints (Japanese):
             bullets: z.array(z.string()),
             imagePath: z.string().optional(),
             notes: z.string(),
-            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote']),
+            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote', 'freeform']),
             special_content: z.string().optional(),
             visual_recipe: z.any().optional(),
+            elements: z.array(z.any()).optional(),
         })),
         fileNameBase: z.string(),
         themeColor1: z.string(),
@@ -584,6 +657,7 @@ Shortening and style constraints (Japanese):
                 layout: slide.design.layout,
                 special_content: slide.design.special_content,
                 visual_recipe: slide.design.visual_recipe,
+                elements: slide.design.elements,
             }));
             return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath } as any;
         }
@@ -603,7 +677,7 @@ Shortening and style constraints (Japanese):
                 notes: slide.speech,
                 layout: slide.design.layout,
                 special_content: slide.design.special_content,
-                visual_recipe: slide.design.visual_recipe,
+                elements: slide.design.elements,
             }));
             return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath } as any; }
         // Scrape
@@ -621,9 +695,9 @@ Shortening and style constraints (Japanese):
                 notes: slide.speech,
                 layout: slide.design.layout,
                 special_content: slide.design.special_content,
+                elements: slide.design.elements,
             }));
-            return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath } as any;
-        }
+            return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath } as any; }
         // AI extract (structured)
         const objective = `以下のテキストから会社情報を抽出し、次のJSON形式のみで出力してください（余計な文字列は禁止）。日本語で簡潔に。\n{\n  "company_name": string,\n  "address": string,\n  "founded": string,\n  "representative": string,\n  "business": string[],\n  "homepage": string,\n  "contact": string,\n  "vision": string\n}`;
         const ai = await summarizeAndAnalyzeTool.execute({ ...params, context: { text: scraped.slice(0, 20000), objective, temperature: 0.2, topP: 0.9 } });
@@ -640,7 +714,7 @@ Shortening and style constraints (Japanese):
             companyLogoPath = logoPath;
             logger.info({ logoPath }, 'Detected company logo for PPTX.');
         } catch {}
-        const passthrough = (enrichedSlides || []).map((s: any) => ({ title: s.design.title, bullets: s.design.bullets, imagePath: undefined, notes: s.speech, layout: s.design.layout, special_content: s.design.special_content, visual_recipe: s.design.visual_recipe }));
+        const passthrough = (enrichedSlides || []).map((s: any) => ({ title: s.design.title, bullets: s.design.bullets, imagePath: undefined, notes: s.speech, layout: s.design.layout, special_content: s.design.special_content, visual_recipe: s.design.visual_recipe, elements: s.design.elements }));
         const companyOverview = {
             company_name: name,
             address: typeof parsed?.address === 'string' ? parsed.address : undefined,
@@ -652,16 +726,13 @@ Shortening and style constraints (Japanese):
             vision: typeof parsed?.vision === 'string' ? parsed.vision : undefined,
         };
         logger.info({ name }, 'Prepared structured company overview.');
-        return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, companyLogoPath, companyCopyright: copyrightLine, companyAbout: '', companyOverview } as any;
+        return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, companyLogoPath, 
+            companyCopyright: copyrightLine, companyAbout: '', companyOverview } as any;
     },
 }))
 .then(createStep({
     /**
      * @step generate-visuals
-     * Creates PNG images for any charts defined in the previous step.
-     * It also includes fallback logic: if a slide is supposed to have a visual but
-     * chart generation fails, it changes the slide's layout to 'content_only'
-     * to avoid an empty space in the presentation.
      */
     id: 'generate-visuals',
     inputSchema: z.object({
@@ -670,9 +741,10 @@ Shortening and style constraints (Japanese):
             bullets: z.array(z.string()),
             imagePath: z.string().optional(),
             notes: z.string(),
-            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote']),
+            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote', 'freeform']),
             special_content: z.string().optional(),
             visual_recipe: z.any().optional(),
+            elements: z.array(z.any()).optional(),
         })),
         fileNameBase: z.string(),
         themeColor1: z.string(),
@@ -698,7 +770,7 @@ Shortening and style constraints (Japanese):
             bullets: z.array(z.string()),
             imagePath: z.string().optional(),
             notes: z.string(),
-            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote']),
+            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote', 'freeform']),
             special_content: z.string().optional(),
             visual_recipe: z.any().optional(),
         })),
@@ -767,6 +839,7 @@ Shortening and style constraints (Japanese):
                 layout: finalLayout,
                 special_content: slide.special_content,
                 visual_recipe: slide.visual_recipe,
+                elements: (slide as any).elements,
             };
         });
 
@@ -779,8 +852,6 @@ Shortening and style constraints (Japanese):
 .then(createStep({
     /**
      * @step assemble-outputs
-     * Takes all the generated components (slide designs, text, image paths)
-     * and uses the `createPowerpointTool` to assemble the final .pptx file.
      */
     id: 'assemble-outputs',
     inputSchema: z.object({
@@ -789,7 +860,7 @@ Shortening and style constraints (Japanese):
             bullets: z.array(z.string()),
             imagePath: z.string().optional(),
             notes: z.string(),
-            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote']),
+            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote', 'freeform']),
             special_content: z.string().optional(),
             visual_recipe: z.any().optional(),
         })),
@@ -818,17 +889,18 @@ Shortening and style constraints (Japanese):
         if (errorMessage) {
             return { success: false, message: errorMessage } as const;
         }
-
         logger.info("📦 [Assembler] Creating final PowerPoint file with notes...");
-        // Build visualRecipes from slides as a compatibility path for the PPT generator
-        const visualRecipesFromSlides = Array.isArray(finalSlides) ? finalSlides.map((s: any) => (s && (s as any).visual_recipe) || null) : [];
+        const slidesForPpt = Array.isArray(finalSlides)
+          ? finalSlides
+          : finalSlides;
+        const visualRecipesFromSlides = Array.isArray(slidesForPpt) ? slidesForPpt.map((s: any) => (s && (s as any).visual_recipe) || null) : [];
         const pptResult = await createPowerpointTool.execute({ ...params, context: { 
             fileName: fileNameBase,
-            slides: finalSlides,
+            slides: slidesForPpt,
             themeColor1,
             themeColor2,
             titleSlideImagePath,
-            styleTokens: { primary: themeColor1, secondary: themeColor2, accent: '#FFC107', cornerRadius: 12, outlineColor: '#FFFFFF' },
+            styleTokens: { primary: themeColor1, secondary: themeColor2, accent: '#FFC107', cornerRadius: 12, outlineColor: '#FFFFFF', spacingBaseUnit: 0.9, shadowPreset: 'soft' as any },
             visualRecipes: (visualRecipes && visualRecipes.length ? visualRecipes : visualRecipesFromSlides),
             companyLogoPath,
             companyCopyright,

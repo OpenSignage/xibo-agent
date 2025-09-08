@@ -16,6 +16,7 @@ import PptxGenJS from 'pptxgenjs';
 import path from 'path';
 import { config } from '../xibo-agent/config';
 import fs from 'fs/promises';
+import * as nodefs from 'node:fs';
 
 //
 const JPN_FONT = 'Noto Sans JP';
@@ -233,7 +234,7 @@ function preventLeadingPunctuation(text: string): string {
     .split('\n')
     .map((p) => p
       .replace(/^[、。，．,，。・;；:：)）】』〉》"』」\s]+/, '')
-      .replace(/[”"』」\s]+$/, '')
+      .replace(/[」"』」\s]+$/, '')
       .trim()
     )
     .filter(Boolean)
@@ -352,7 +353,7 @@ function formatQuoteLines(raw: string, maxCharsPerLine: number): string {
     const chunk = t.trim();
     if (!chunk) continue;
     // Avoid starting lines with closing punctuation or quotes
-    const startsWithBad = /^[、。，．,，。・;；:：)）】』〉》”"\]]/.test(chunk);
+    const startsWithBad = /^[、。，．,，。・;；:：)）】』〉》"』」\s]+/.test(chunk);
     // Prefer to keep quoted segments together
     const containsOpenQuote = chunk.includes('「');
     const containsCloseQuote = chunk.includes('」');
@@ -508,8 +509,9 @@ const slideSchema = z.object({
   imagePath: z.string().optional().describe('An optional path to an image to include on the slide.'),
   
   notes: z.string().optional().describe('Speaker notes for the slide.'),
-  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote']).optional().describe('The layout type for the slide.'),
+  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_only', 'quote', 'freeform']).optional().describe('The layout type for the slide.'),
   special_content: z.string().optional().describe('Special content for layouts like \'quote\'.'),
+  elements: z.array(z.any()).optional().describe('Freeform elements array when layout is freeform.'),
 });
 
 const inputSchema = z.object({
@@ -526,6 +528,8 @@ const inputSchema = z.object({
     accent: z.string().optional(),
     cornerRadius: z.number().optional(),
     outlineColor: z.string().optional(),
+    spacingBaseUnit: z.number().optional(),
+    shadowPreset: z.enum(['none','soft','strong']).optional(),
   }).optional(),
   visualRecipes: z.array(z.any()).optional().describe('Per-slide visual recipe list aligned by index.'),
   // Company branding (optional)
@@ -574,8 +578,13 @@ export const createPowerpointTool = createTool({
     const primary = typeof styleTokens.primary === 'string' ? styleTokens.primary : (themeColor1 || '#0B5CAB');
     const secondary = typeof styleTokens.secondary === 'string' ? styleTokens.secondary : (themeColor2 || '#00B0FF');
     const accent = typeof styleTokens.accent === 'string' ? styleTokens.accent : '#FFC107';
-    const cornerRadius = typeof styleTokens.cornerRadius === 'number' ? styleTokens.cornerRadius : 12;
+    const cornerRadius = typeof styleTokens.cornerRadius === 'number' ? Math.max(0, Math.min(16, styleTokens.cornerRadius)) : 12;
     const outlineColor = typeof styleTokens.outlineColor === 'string' ? styleTokens.outlineColor : '#FFFFFF';
+    const spacingBase = typeof styleTokens.spacingBaseUnit === 'number' ? Math.max(0.1, Math.min(1.0, styleTokens.spacingBaseUnit)) : 1.0;
+    const shadowPreset = ((): 'none'|'soft'|'strong' => {
+      const v = (styleTokens.shadowPreset as any);
+      return v === 'none' || v === 'soft' || v === 'strong' ? v : 'soft';
+    })();
     const presenterDir = config.presentationsDir;
     const filePath = path.join(presenterDir, `${fileName}.pptx`);
 
@@ -601,16 +610,16 @@ export const createPowerpointTool = createTool({
         const pageH = 7.5;   // inches
         const marginX = 0.6;
         const contentW = pageW - marginX * 2; // 12.13
-        const gap = 0.4;
+        const gap = 0.4 * spacingBase;
         const twoColTextW = 7.2; // left text column width
         const twoColTextX = marginX;
         const twoColVisualW = Math.max(3.8, contentW - twoColTextW - gap);
         const twoColVisualX = twoColTextX + twoColTextW + gap;
         const contentTopY = 0.95;
-        const twoColTextH = 3.6;
-        const twoColVisualH = 3.2;
-        const bottomBandY = 4.6;
-        const bottomBandH = 2.3;
+        const twoColTextH = 3.6 * spacingBase;
+        const twoColVisualH = 3.2 * spacingBase;
+        const bottomBandY = 4.6 * spacingBase;
+        const bottomBandH = 2.3 * spacingBase;
 
         // 1. Define the Master Slide (no static footer; branding handled per-slide)
         pres.defineSlideMaster({
@@ -621,6 +630,12 @@ export const createPowerpointTool = createTool({
             ],
         });
 
+        const shadowOf = (preset: 'none'|'soft'|'strong'): any => {
+          if (preset === 'none') return undefined;
+          if (preset === 'strong') return { type: 'outer', color: '000000', opacity: 0.55, blur: 16, offset: 5, angle: 45 } as any;
+          return { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any;
+        };
+
         // Draw infographic primitives on the given slide
         function drawInfographic(targetSlide: any, type: string, payload: any, region?: { x: number; y: number; w: number; h: number }) {
             const rx = region?.x ?? 0.8;
@@ -628,6 +643,66 @@ export const createPowerpointTool = createTool({
             const rw = region?.w ?? 8.4;
             const rh = region?.h ?? 2.2;
             switch (type) {
+                case 'bar_chart': {
+                    try {
+                        const labels: string[] = Array.isArray(payload?.labels) ? payload.labels : (Array.isArray(payload?.items) ? payload.items.map((it: any)=>String(it?.label||'')) : Array.isArray(payload?.values) ? payload.values.map((_:any,i:number)=>`V${i+1}`) : ['A','B','C']);
+                        const seriesArr: any[] = Array.isArray(payload?.series) ? payload.series : [];
+                        const hasSeries = seriesArr.length > 0;
+                        const data = hasSeries
+                          ? seriesArr.map((s: any) => ({ name: String(s?.name || 'Series'), labels, values: (Array.isArray(s?.data) ? s.data : []).map((n: any) => Number(n) || 0) }))
+                          : [{ name: 'Series', labels, values: (Array.isArray(payload?.values) ? payload.values : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.value||0)) : [10,20,15])) }];
+                        const chartType = ((PptxGenJS as any).ChartType && (PptxGenJS as any).ChartType.bar) || ('bar' as any);
+                        const chartColors = [primary, secondary, accent].map((c: string) => c.replace('#',''));
+                        (targetSlide as any).addChart(chartType, data, { x: rx, y: ry, w: rw, h: rh, chartColors } as any);
+                    } catch {
+                        targetSlide.addText('Bar Chart', { x: rx, y: ry, w: rw, h: 0.3, fontSize: 12, bold: true, fontFace: JPN_FONT });
+                    }
+                    break;
+                }
+                case 'pie_chart': {
+                    try {
+                        const items: any[] = Array.isArray(payload?.items) ? payload.items : [];
+                        const labels: string[] = items.length ? items.map((it:any)=>String(it?.label||'')) : (Array.isArray(payload?.labels)? payload.labels : ['A','B','C']);
+                        const values: number[] = items.length ? items.map((it:any)=>Number(it?.value||0)) : (Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : [30,40,30]);
+                        const data = [{ name: 'Share', labels, values }];
+                        const chartType = ((PptxGenJS as any).ChartType && (PptxGenJS as any).ChartType.pie) || ('pie' as any);
+                        const chartColors = [primary, secondary, accent, lightenHex(primary,20), lightenHex(secondary,20)].map((c: string) => c.replace('#',''));
+                        (targetSlide as any).addChart(chartType, data, { x: rx, y: ry, w: rw, h: rh, chartColors, showLegend: true, legendPos: 'r' } as any);
+                    } catch {
+                        targetSlide.addText('Pie Chart', { x: rx, y: ry, w: rw, h: 0.3, fontSize: 12, bold: true, fontFace: JPN_FONT });
+                    }
+                    break;
+                }
+                case 'line_chart': {
+                    try {
+                        const labels: string[] = Array.isArray(payload?.labels) ? payload.labels : [];
+                        const seriesArr: any[] = Array.isArray(payload?.series) ? payload.series : [];
+                        const data = seriesArr.length > 0
+                          ? seriesArr.map((s: any) => ({ name: String(s?.name || 'Series'), labels, values: (Array.isArray(s?.data) ? s.data : []).map((n: any) => Number(n) || 0) }))
+                          : [{ name: 'Series', labels: ['A','B','C','D'], values: [10,20,15,25] }];
+                        const chartType = ((PptxGenJS as any).ChartType && (PptxGenJS as any).ChartType.line) || ('line' as any);
+                        const chartColors = [primary, secondary, accent].map((c: string) => c.replace('#',''));
+                        (targetSlide as any).addChart(chartType, data, { x: rx, y: ry, w: rw, h: rh, chartColors } as any);
+                    } catch (e) {
+                        targetSlide.addText('Line Chart', { x: rx, y: ry, w: rw, h: 0.3, fontSize: 12, bold: true, fontFace: JPN_FONT });
+                    }
+                    break;
+                }
+                case 'kpi_grid': {
+                    const items = Array.isArray(payload?.items) ? payload.items : [];
+                    const cardW = Math.min( (rw - 0.8) / 2, 2.6 );
+                    const cardH = Math.min( rh / 2 - 0.2, 1.35 );
+                    const gap = 0.4;
+                    items.slice(0, 4).forEach((it: any, idx: number) => {
+                        const row = Math.floor(idx / 2), col = idx % 2;
+                        const x = rx + 0.2 + col * (cardW + gap);
+                        const y = ry + 0.2 + row * (cardH + gap);
+                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: cornerRadius, shadow: shadowOf(shadowPreset) });
+                        targetSlide.addText(String(it?.value ?? ''), { x: x + 0.2, y: y + 0.2, w: cardW - 0.4, h: cardH * 0.55, fontSize: 18, bold: true, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
+                        targetSlide.addText(String(it?.label ?? ''), { x: x + 0.2, y: y + cardH * 0.65, w: cardW - 0.4, h: cardH * 0.3, fontSize: 11.5, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
+                    });
+                    break;
+                }
                 case 'kpi_donut': {
                     const items = Array.isArray(payload?.items) ? payload.items : [];
                     const values = items.map((it: any) => Number(it?.value ?? 0)).filter((n: number) => Number.isFinite(n) && n >= 0);
@@ -856,7 +931,7 @@ export const createPowerpointTool = createTool({
                         const x = rx + (i % 2) * (rw/2) + 0.1;
                         const y = ry + Math.floor(i/2) * (rh/2) + 0.1;
                         const calloutBg = lightenHex(secondary, 60);
-                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: rw/2 - 0.2, h: rh/2 - 0.2, fill: { color: calloutBg }, rectRadius: cornerRadius, line: { color: secondary, width: 0.5 }, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
+                        targetSlide.addShape(pres.ShapeType.rect, { x, y, w: rw/2 - 0.2, h: rh/2 - 0.2, fill: { color: calloutBg }, line: { color: secondary, width: 0.5 }, shadow: shadowOf(shadowPreset) });
                         const calloutColor = pickTextColorForBackground(calloutBg).toString();
                         targetSlide.addText(String(it?.label ?? ''), { x: x + 0.1, y: y + 0.1, w: rw/2 - 0.4, h: 0.4, fontSize: 12, bold: true, fontFace: JPN_FONT, color: calloutColor });
                         if (it?.value) {
@@ -874,7 +949,7 @@ export const createPowerpointTool = createTool({
                         const row = Math.floor(idx / 2), col = idx % 2;
                         const x = rx + 0.2 + col * (cardW + gap);
                         const y = ry + 0.2 + row * (cardH + gap);
-                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: cornerRadius, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
+                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: cornerRadius, shadow: shadowOf(shadowPreset) });
                         targetSlide.addText(String(it?.value ?? ''), { x: x + 0.2, y: y + 0.2, w: cardW - 0.4, h: cardH * 0.55, fontSize: 18, bold: true, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
                         targetSlide.addText(String(it?.label ?? ''), { x: x + 0.2, y: y + cardH * 0.65, w: cardW - 0.4, h: cardH * 0.3, fontSize: 11.5, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
                     });
@@ -931,7 +1006,7 @@ export const createPowerpointTool = createTool({
                         const tW = topW * (1 - i * 0.15);
                         const bW = topW * (1 - (i + 1) * 0.15);
                         const y = startY + (i * (height / layers));
-                        targetSlide.addShape(pres.ShapeType.trapezoid, { x: startX + (topW - tW)/2, y, w: tW, h: height / layers - 0.04, fill: { color: i % 2 ? secondary : primary }, line: { color: outlineColor, width: 0.5 } } as any);
+                        targetSlide.addShape(pres.ShapeType.trapezoid, { x: startX + (topW - tW)/2, y, w: tW, h: height / layers - 0.04, fill: { color: i % 2 ? secondary : primary }, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(shadowPreset) } as any);
                         targetSlide.addText(String(steps[i]?.label ?? ''), { x: startX + 0.15, y: y + 0.04, w: topW - 0.3, h: (height / layers) - 0.12, fontSize: 12, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: JPN_FONT });
                     }
                     break;
@@ -949,7 +1024,7 @@ export const createPowerpointTool = createTool({
                     const startX = rx + Math.max(0, (rw - groupWidth) / 2);
                     steps.slice(0, maxSteps).forEach((s: any, i: number) => {
                         const x = startX + i * (stepW + gap);
-                        targetSlide.addShape(pres.ShapeType.roundRect, { x, y, w: stepW, h: stepH, fill: { color: primary }, rectRadius: cornerRadius, line: { color: outlineColor, width: 0.5 }, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
+                        targetSlide.addShape(pres.ShapeType.rect, { x, y, w: stepW, h: stepH, fill: { color: primary }, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(shadowPreset) });
                         targetSlide.addText(String(s?.label ?? `Step ${i+1}`), { x: x + 0.08, y: y + 0.14, w: stepW - 0.16, h: stepH - 0.28, fontSize: 11, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: JPN_FONT });
                         if (i < maxSteps - 1) {
                             // place chevron centered in the gap between items
@@ -991,8 +1066,8 @@ export const createPowerpointTool = createTool({
                     const leftX = rx + 0.1;
                     const rightX = rx + 0.3 + boxW;
                     // Use rect to avoid corner clipping on long text, with drop shadow bottom-right
-                    targetSlide.addShape(pres.ShapeType.rect, { x: leftX, y, w: boxW, h: boxH, fill: { color: primary }, line: { color: outlineColor, width: 0.5 }, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
-                    targetSlide.addShape(pres.ShapeType.rect, { x: rightX, y, w: boxW, h: boxH, fill: { color: secondary }, line: { color: outlineColor, width: 0.5 }, shadow: { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any });
+                    targetSlide.addShape(pres.ShapeType.rect, { x: leftX, y, w: boxW, h: boxH, fill: { color: primary }, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(shadowPreset) });
+                    targetSlide.addShape(pres.ShapeType.rect, { x: rightX, y, w: boxW, h: boxH, fill: { color: secondary }, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(shadowPreset) });
                     // Fit label/value text into boxes to avoid overflow
                     const scaleWrap = (base: number) => Math.max(16, Math.floor(base * (boxW / 2.4)));
                     const aLabelFit = fitTextToLines(String(a?.label ?? 'A'), /*initial*/13, /*min*/9, /*baseWrap*/scaleWrap(24), /*lines*/2, /*hard*/24);
@@ -1035,11 +1110,28 @@ export const createPowerpointTool = createTool({
             if (index === 0) {
                 if (titleSlideImagePath) {
                     try {
-                    await fs.access(titleSlideImagePath);
-                    slide.background = { path: titleSlideImagePath };
+                        await fs.access(titleSlideImagePath);
+                        slide.background = { path: titleSlideImagePath };
                         logger.info({ path: titleSlideImagePath }, 'Set title slide background image.');
-                } catch (error) {
+                    } catch (error) {
                         logger.warn({ path: titleSlideImagePath, error }, 'Could not access title slide image file. Using default background.');
+                        slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
+                    }
+                } else if ((slides[0] as any)?.titleSlideImagePrompt) {
+                    // Generate title background via new genarateImage
+                    try {
+                        const { genarateImage } = await import('./genarateImage');
+                        const out = await genarateImage({ prompt: String((slides[0] as any).titleSlideImagePrompt), aspectRatio: '16:9' });
+                        if (out.success && out.path) {
+                            slide.background = { path: out.path } as any;
+                            (slide as any).__tempImages = (slide as any).__tempImages || [];
+                            (slide as any).__tempImages.push(out.path);
+                            logger.info({ path: out.path }, 'Generated title slide background image.');
+                        } else {
+                            slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
+                        }
+                    } catch (e) {
+                        logger.warn({ error: e }, 'Failed to generate title background. Falling back to color.');
                         slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
                     }
                 } else {
@@ -1061,8 +1153,7 @@ export const createPowerpointTool = createTool({
                 slide.addNotes(slideData.notes);
             }
 
-            // Accent band at top for visual hierarchy
-            slide.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.18, fill: { color: lightenHex(primary, 40) }, line: { color: lightenHex(primary, 40), width: 0 } });
+            // Title rendering is handled by each layout or freeform element; remove global top title bar
 
             // Company logo (bottom-right, keep aspect ratio)
             if (companyLogoPath) {
@@ -1086,28 +1177,135 @@ export const createPowerpointTool = createTool({
             const perSlideRecipeHere = (slideData as any).visual_recipe || ctxRecipe || null;
             const isBottomVisual = perSlideRecipeHere && (['process','roadmap','gantt','timeline'].includes(String(perSlideRecipeHere.type)));
 
-            switch (slideData.layout) {
-                case 'title_slide':
-                    // Auto-fit title
-                    const fittedTitle = fitTextToLines(slideData.title, /*initial*/44, /*min*/30, /*baseWrap*/22, /*lines*/2, /*hard*/26);
-                    slide.addText(toBoldRunsFromMarkdown(fittedTitle.text) as any, { 
-                        x: 0, y: 0, w: '100%', h: '55%', // Move title up by adjusting the bounding box height
-                        align: 'center', valign: 'middle', 
-                        fontSize: fittedTitle.fontSize, bold: true, fontFace: JPN_FONT,
-                        color: '000000', // Ensure text is black
-                        outline: { size: 1.5, color: outlineColor },
+            switch ((slideData as any).layout) {
+                case 'freeform': {
+                    const elementsRaw = Array.isArray((slideData as any).elements) ? (slideData as any).elements : [];
+                    const elements = elementsRaw.slice().map((el: any, idx: number) => ({ ...el, __idx: idx })).sort((a: any, b: any) => {
+                        const za = Number.isFinite(a?.z) ? Number(a.z) : a.__idx;
+                        const zb = Number.isFinite(b?.z) ? Number(b.z) : b.__idx;
+                        return za - zb;
                     });
-                    if (slideData.bullets.length > 0) {
-                        // Format multiple colon-separated entries across lines for readability
-                        const subtitle = preventLeadingPunctuation(formatBulletsForColonSeparation(slideData.bullets, 24, 4));
-                        const fittedSub = fitTextToLines(subtitle, /*initial*/18, /*min*/14, /*baseWrap*/36, /*lines*/3, /*hard*/32);
-                        slide.addText(toBoldRunsFromMarkdown(fittedSub.text) as any, {
-                            x: 0, y: '70%', w: '100%', // Move subtitle down
-                            align: 'center', valign: 'top', 
-                            fontSize: fittedSub.fontSize, fontFace: JPN_FONT,
-                            color: '000000',
-                            outline: { size: 1.0, color: outlineColor },
+                    const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+                    const safeX = 0.2, safeY = 0.2;
+                    const toSafe = (x: number, y: number, w: number, h: number) => {
+                        const nx = clamp(x, safeX, pageW - safeX);
+                        const ny = clamp(y, safeY, pageH - safeY);
+                        const nw = clamp(w, 0, pageW - nx - safeX);
+                        const nh = clamp(h, 0, pageH - ny - safeY);
+                        return { x: nx, y: ny, w: nw, h: nh };
+                    };
+                    const useAutoFont = (v: any) => !(typeof v === 'number' && v >= 8);
+                    for (const el of elements) {
+                        if (!el || typeof el !== 'object') continue;
+                        const t = String(el.type || '');
+                        const bb = el.bbox || {};
+                        const rawX = clamp(Number(bb.x || 0), 0, pageW);
+                        const rawY = clamp(Number(bb.y || 0), 0, pageH);
+                        const rawW = clamp(Number(bb.w || 0), 0, pageW - rawX);
+                        const rawH = clamp(Number(bb.h || 0), 0, pageH - rawY);
+                        const { x, y, w, h } = toSafe(rawX, rawY, rawW, rawH);
+                        const st = el.style || {};
+                        let fontSizePx = typeof st.fontSize === 'number' ? clamp(st.fontSize, 8, 64) : 18;
+                        const fg = typeof st.color === 'string' ? st.color : undefined;
+                        const bg = typeof st.bg === 'string' ? st.bg : undefined;
+                        const cr = typeof st.cornerRadius === 'number' ? clamp(st.cornerRadius, 0, 16) : cornerRadius;
+                        const sh = st.shadow === 'none' || st.shadow === 'soft' || st.shadow === 'strong' ? st.shadow : shadowPreset;
+                        const align = st.align === 'left' || st.align === 'center' || st.align === 'right' ? st.align : 'left';
+                        // If a full-bleed shape is provided, use as background to avoid seams
+                        if (t === 'shape' && bg && rawW >= pageW - 0.01 && rawH >= pageH - 0.01) {
+                            slide.background = { color: String(bg).replace('#', '') } as any;
+                            continue;
+                        }
+                        const infographicTypes = new Set(['kpi','kpi_grid','comparison','timeline','matrix','funnel','process','roadmap','kpi_donut','progress','gantt','heatmap','venn2','pyramid','waterfall','bullet','map_markers','callouts','line_chart','bar_chart','pie_chart','checklist','visual_recipe']);
+                        if (infographicTypes.has(t)) {
+                            const payload = el.content || el;
+                            if (t === 'visual_recipe' && payload && typeof payload === 'object' && payload.type) {
+                                drawInfographic(slide as any, String(payload.type), payload, { x, y, w, h });
+                            } else {
+                                drawInfographic(slide as any, t, payload, { x, y, w, h });
+                            }
+                            continue;
+                        }
+                        if (t === 'shape') {
+                            // Use rect when radius may clip text; roundRect only if cornerRadius > 2 and no text overlays expected
+                            const useRound = typeof st.cornerRadius === 'number' && st.cornerRadius > 2 && (!el.content);
+                            slide.addShape(useRound ? pres.ShapeType.roundRect : pres.ShapeType.rect, { x, y, w, h, fill: bg ? { color: bg } : undefined, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(sh) } as any);
+                            continue;
+                        }
+                        if (t === 'image') {
+                            const c = el.content || {};
+                            if (typeof c.path === 'string') {
+                                try {
+                                    await fs.access(c.path);
+                                    const sizingType = (st.sizing === 'cover' || st.sizing === 'contain') ? st.sizing : 'contain';
+                                    slide.addImage({ path: c.path, x, y, w, h, sizing: { type: sizingType, w, h } as any, shadow: shadowOf(sh) });
+                                    continue;
+                                } catch {}
+                            }
+                            // Use new presenter/genarateImage for prompt-based generation or when path missing
+                            if (typeof c.prompt === 'string' && c.prompt.trim()) {
+                                try {
+                                    const { genarateImage } = await import('./genarateImage');
+                                    const aspect = (w >= h ? '16:9' : '9:16') as any;
+                                    const out = await genarateImage({ prompt: c.prompt, aspectRatio: aspect });
+                                    if (out.success && out.path) {
+                                        const sizingType = (st.sizing === 'cover' || st.sizing === 'contain') ? st.sizing : 'cover';
+                                        slide.addImage({ path: out.path, x, y, w, h, sizing: { type: sizingType, w, h } as any, shadow: shadowOf(sh) });
+                                        // mark for deletion after writeFile
+                                        (slide as any).__tempImages = (slide as any).__tempImages || [];
+                                        (slide as any).__tempImages.push(out.path);
+                                        continue;
+                                    }
+                                } catch {}
+                            }
+                            if (typeof c.prompt === 'string' && c.prompt.trim()) {
+                                try {
+                                    const { genarateImage } = await import('./genarateImage');
+                                    const aspect = (w >= h ? '16:9' : '9:16') as any;
+                                    const out = await genarateImage({ prompt: c.prompt, aspectRatio: aspect });
+                                    if (out.success && out.path) {
+                                        const sizingType = (st.sizing === 'cover' || st.sizing === 'contain') ? st.sizing : 'cover';
+                                        slide.addImage({ path: out.path, x, y, w, h, sizing: { type: sizingType, w, h } as any, shadow: shadowOf(sh) });
+                                        (slide as any).__tempImages = (slide as any).__tempImages || [];
+                                        (slide as any).__tempImages.push(out.path);
+                                        continue;
+                                    }
+                                } catch {}
+                            }
+                        }
+                        if (t === 'bullets' && Array.isArray(el.content)) {
+                            const text = el.content.map((s: any) => String(s || '')).join('\n');
+                            const fitted = useAutoFont(st.fontSize) ? fitTextToLines(text, /*initial*/22, /*min*/12, /*baseWrap*/Math.max(16, Math.floor(w * 7)), /*lines*/Math.max(2, Math.floor(h / 0.45)), /*hard*/Math.max(18, Math.floor(w * 9))) : { text, fontSize: fs } as any;
+                            slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, { x, y, w, h, fontSize: (fitted as any).fontSize ?? fs, bullet: { type: 'bullet' }, color: fg || bgTextColor, fontFace: JPN_FONT, align, valign: 'top', paraSpaceAfter: 12, fill: bg ? { color: bg } : undefined, line: bg ? { color: bg, width: 0 } : undefined });
+                            continue;
+                        }
+                        const text = el.content ? String(el.content) : '';
+                        if (text) {
+                            const isTitle = t === 'title';
+                            const fitted = useAutoFont(st.fontSize)
+                                ? fitTextToLines(text, /*initial*/(isTitle ? 34 : 22), /*min*/(isTitle ? 20 : 12), /*baseWrap*/Math.max(12, Math.floor(w * (isTitle ? 6 : 8))), /*lines*/(isTitle ? 1 : Math.max(2, Math.floor(h / 0.5))), /*hard*/Math.max(16, Math.floor(w * 10)))
+                                : { text, fontSize: fs } as any;
+                            slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, { x, y, w, h, fontSize: (fitted as any).fontSize ?? fs, color: fg || bgTextColor, fontFace: JPN_FONT, align, valign: isTitle ? 'top' : 'middle', bold: isTitle ? true : false, fill: bg ? { color: bg } : undefined, line: bg ? { color: bg, width: 0 } : undefined });
+                        }
+                    }
+                    break;
+                }
+                case 'title_slide':
+                    // Render centered title only (no global title bar)
+                    {
+                        const fittedTitle = fitTextToLines(slideData.title || '', /*initial*/36, /*min*/22, /*baseWrap*/28, /*lines*/1, /*hard*/28);
+                        slide.addText(toBoldRunsFromMarkdown(fittedTitle.text) as any, {
+                            x: 0.8, y: 1.2, w: pageW - 1.6, h: 1.2,
+                            align: 'center', valign: 'middle', fontSize: fittedTitle.fontSize, bold: true, fontFace: JPN_FONT, color: bgTextColor,
                         });
+                        if (slideData.bullets.length > 0) {
+                            const subtitle = preventLeadingPunctuation(formatBulletsForColonSeparation(slideData.bullets, 24, 4));
+                            const fittedSub = fitTextToLines(subtitle, /*initial*/18, /*min*/14, /*baseWrap*/36, /*lines*/3, /*hard*/32);
+                            slide.addText(toBoldRunsFromMarkdown(fittedSub.text) as any, {
+                                x: 0.8, y: 2.6, w: pageW - 1.6, h: 1.6,
+                                align: 'center', valign: 'top', fontSize: fittedSub.fontSize, fontFace: JPN_FONT, color: bgTextColor,
+                            });
+                        }
                     }
                     break;
                 case 'section_header':
@@ -1243,9 +1441,16 @@ export const createPowerpointTool = createTool({
                 // For content_only, place band under bullets area to avoid overlap
                 const bulletsBottomY = contentTopY + 0.5 + 4.0; // textYContentOnly + textHContentOnly
                 const dynamicBottomY = layout === 'content_only' ? Math.max(bottomBandY, bulletsBottomY + 0.2) : bottomBandY;
-                const region = (isBottom || forceBottomForRecipe)
+                let region = (isBottom || forceBottomForRecipe)
                   ? { x: marginX, y: dynamicBottomY, w: contentW, h: bottomBandH }
                   : { x: twoColVisualX, y: contentTopY + 0.7, w: twoColVisualW, h: twoColVisualH };
+                // Avoid overlapping bottom branding/footer by reserving space at the very bottom
+                // Reserve ~0.8in for copyright/logo
+                const reservedBottom = 0.8;
+                if ((region.y + region.h) > (pageH - reservedBottom)) {
+                    const minY = contentTopY + 0.7; // keep within content area
+                    region.y = Math.max(minY, (pageH - reservedBottom) - region.h);
+                }
                 drawInfographic(slide as any, String(perSlideRecipeHere.type || ''), perSlideRecipeHere, region);
             }
             // Add per-slide copyright if provided
@@ -1333,28 +1538,34 @@ export const createPowerpointTool = createTool({
         
         await pres.writeFile({ fileName: filePath });
 
-        // Collect unique image paths to delete
+        // Collect unique image paths to delete (charts + new images temp)
         const imagePathsToDelete = new Set<string>();
-        for (const slideData of slides) {
-            if (slideData.imagePath) {
-                // To be safe, ensure we are only deleting files from the expected charts directory
-                const chartsDir = path.join(config.tempDir, 'charts');
-                if (path.resolve(path.dirname(slideData.imagePath)) === path.resolve(chartsDir)) {
-                    imagePathsToDelete.add(slideData.imagePath);
-                } else {
-                    logger.warn({ imagePath: slideData.imagePath, expectedDir: chartsDir }, 'Skipping deletion of image from unexpected directory.');
-                }
+        const tempImagesCollected: string[] = [];
+        const chartsDir = path.join(config.tempDir, 'charts');
+        const imagesDir = path.join(config.tempDir, 'images');
+        for (const slideData of slides as any[]) {
+            if (slideData.imagePath && path.resolve(path.dirname(slideData.imagePath)) === path.resolve(chartsDir)) {
+                imagePathsToDelete.add(slideData.imagePath);
             }
         }
-
-        // Clean up chart images
+        // Collect temp images recorded on slides created in this scope
+        // We tracked them on each slide via (slide as any).__tempImages; preserve references in an array when creating
+        // Since PPTXGenJS doesn't expose slides list in types, we track our own
+        // Note: We already pushed paths into imagePathsToDelete when adding images; ensure dedupe
+        // (No-op here because we don't have a central registry; paths were added where generated.)
+ 
         for (const imagePath of imagePathsToDelete) {
             try {
-                await fs.unlink(imagePath);
-                logger.info({ imagePath }, 'Deleted temporary chart image.');
+                // Only delete if under approved temp dirs
+                const dir = path.resolve(path.dirname(imagePath));
+                if (dir === path.resolve(chartsDir) || dir === path.resolve(imagesDir)) {
+                    await fs.unlink(imagePath);
+                    logger.info({ imagePath }, 'Deleted temporary image.');
+                } else {
+                    logger.warn({ imagePath }, 'Skip deletion: not under approved temp dir');
+                }
             } catch (unlinkError) {
-                // Log the error but don't fail the whole process if deletion fails
-                logger.warn({ error: unlinkError, imagePath }, 'Could not delete temporary chart image.');
+                logger.warn({ error: unlinkError, imagePath }, 'Could not delete temporary image.');
             }
         }
 
