@@ -20,7 +20,7 @@ import { promises as fs } from 'fs';
  * @module generateChartTool
  * @description Generates a PNG chart image from data. Supports on-memory buffer return.
  */
-const chartTypeSchema = z.enum(['bar', 'pie', 'line']);
+const chartTypeSchema = z.enum(['bar', 'pie', 'line', 'doughnut']);
 const inputSchema = z.object({
   chartType: chartTypeSchema,
   title: z.string().describe('The title of the chart.'),
@@ -87,7 +87,7 @@ export const generateChartTool = createTool({
         return `rgba(${r}, ${g}, ${b}, ${a})`;
       };
       const palette = [primary, secondary, '#FFC107', '#4CAF50', '#9C27B0', '#FF7043'];
-      const bgPalette = palette.map((c, i) => alpha(c, chartType === 'pie' ? 0.9 : 0.7));
+      const bgPalette = palette.map((c, i) => alpha(c, (chartType === 'pie' || chartType === 'doughnut') ? 0.9 : 0.7));
 
       const chartConfig: ChartConfiguration = {
         type: chartType,
@@ -109,7 +109,7 @@ export const generateChartTool = createTool({
           layout: { padding: 28 },
           plugins: {
             title: { display: true, text: title, font: { size: 26, family: 'Noto Sans JP', weight: 'bold' as any }, color: '#111', padding: { top: 10, bottom: 16 } as any },
-            legend: { display: chartType === 'pie', position: 'bottom', labels: { font: { family: 'Noto Sans JP' } } },
+            legend: { display: (chartType === 'pie' || chartType === 'doughnut'), position: 'bottom', labels: { font: { family: 'Noto Sans JP' } } },
           },
         },
       };

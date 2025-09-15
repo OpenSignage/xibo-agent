@@ -22,7 +22,6 @@ import fs from 'fs/promises';
 const JPN_FONT = 'Noto Sans JP';
 
 // Define a master slide layout for a consistent look and feel
-const MASTER_SLIDE = 'MASTER_SLIDE';
 
 function lightenHex(hex: string, amount: number): string {
   const h = (hex || '#E6F7FF').replace('#', '');
@@ -78,19 +77,21 @@ function normalizeColorToPptxHex(input?: string): string | undefined {
   const s = String(input).trim();
   if (!s) return undefined;
   if (s.toLowerCase() === 'transparent' || s.toLowerCase() === 'none') return undefined;
-  // #RGB, #RRGGBB, #AARRGGBB
+  // #RGB
   if (/^#?[0-9a-fA-F]{3}$/.test(s)) {
     const h = s.replace('#', '');
     const r = h[0]; const g = h[1]; const b = h[2];
     return `${r}${r}${g}${g}${b}${b}`.toUpperCase();
   }
+  // #RRGGBB
   if (/^#?[0-9a-fA-F]{6}$/.test(s)) {
     return s.replace('#', '').toUpperCase();
   }
+  // #RRGGBBAA (we keep RGB and ignore AA)
   if (/^#?[0-9a-fA-F]{8}$/.test(s)) {
-    // drop alpha
     const h = s.replace('#', '');
-    return h.slice(2).toUpperCase();
+    // Interpret as RRGGBBAA and drop the last AA
+    return h.slice(0, 6).toUpperCase();
   }
   // rgb()/rgba()
   const m = s.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(0|1|0?\.\d+))?\s*\)$/i);
@@ -101,8 +102,10 @@ function normalizeColorToPptxHex(input?: string): string | undefined {
     const b = toHex(parseInt(m[3], 10));
     return `${r}${g}${b}`;
   }
-  // Fallback: return as-is without '#'
-  return s.replace('#', '').toUpperCase();
+  // As a last resort, try parseColorWithAlpha
+  const parsed = parseColorWithAlpha(s);
+  if (parsed) return parsed.hex;
+  return undefined;
 }
 
 // Parse color string (#RRGGBB | #RRGGBBAA | rgba()) and return hex (no '#') and alpha 0..1
@@ -597,7 +600,7 @@ const slideSchema = z.object({
   imagePath: z.string().optional().describe('An optional path to an image to include on the slide.'),
   
   notes: z.string().optional().describe('Speaker notes for the slide.'),
-  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote']).optional().describe('The layout type for the slide.'),
+  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'visual_hero_split', 'comparison_cards', 'checklist_top_bullets_bottom']).optional().describe('The layout type for the slide.'),
   special_content: z.string().optional().nullable().describe('Special content for layouts like \'quote\'.'),
   elements: z.array(z.any()).optional().describe('Freeform elements array when layout is freeform.'),
 });
@@ -666,8 +669,27 @@ export const createPowerpointTool = createTool({
     logger.info({ hasLogo: !!companyLogoPath, hasCopyright: !!companyCopyright, hasAbout: !!companyAbout }, 'Branding options received for PowerPoint generation.');
     const styleTokens = (context as any).styleTokens || {};
     const tk = templateConfig?.tokens || {};
-    const primary = typeof tk.primary === 'string' ? tk.primary : (typeof styleTokens.primary === 'string' ? styleTokens.primary : (themeColor1 || '#0B5CAB'));
-    const secondary = typeof tk.secondary === 'string' ? tk.secondary : (typeof styleTokens.secondary === 'string' ? styleTokens.secondary : (themeColor2 || '#00B0FF'));
+    const aiColorPolicy = (templateConfig?.rules && typeof templateConfig.rules.aiColorPolicy === 'string')
+      ? (templateConfig.rules.aiColorPolicy as 'template'|'prefer_ai'|'ai_overrides'|'disabled')
+      : 'template';
+    const preferAI = aiColorPolicy === 'prefer_ai' || aiColorPolicy === 'ai_overrides';
+    const allowOverride = aiColorPolicy === 'ai_overrides';
+
+    // Resolve colors based on policy
+    const resolvedPrimary = (() => {
+      if (preferAI && typeof themeColor1 === 'string' && themeColor1) return themeColor1;
+      if (typeof tk.primary === 'string') return tk.primary;
+      if (!preferAI && typeof styleTokens.primary === 'string') return styleTokens.primary;
+      return themeColor1 || '#0B5CAB';
+    })();
+    const resolvedSecondary = (() => {
+      if (preferAI && typeof themeColor2 === 'string' && themeColor2) return themeColor2;
+      if (typeof tk.secondary === 'string') return tk.secondary;
+      if (!preferAI && typeof styleTokens.secondary === 'string') return styleTokens.secondary;
+      return themeColor2 || '#00B0FF';
+    })();
+    const primary = allowOverride && typeof themeColor1 === 'string' && themeColor1 ? themeColor1 : resolvedPrimary;
+    const secondary = allowOverride && typeof themeColor2 === 'string' && themeColor2 ? themeColor2 : resolvedSecondary;
     const accent = typeof tk.accent === 'string' ? tk.accent : (typeof styleTokens.accent === 'string' ? styleTokens.accent : '#FFC107');
     const cornerRadius = typeof tk.cornerRadius === 'number' ? Math.max(0, Math.min(16, tk.cornerRadius)) : (typeof styleTokens.cornerRadius === 'number' ? Math.max(0, Math.min(16, styleTokens.cornerRadius)) : 12);
     const outlineColor = typeof tk.outlineColor === 'string' ? tk.outlineColor : (typeof styleTokens.outlineColor === 'string' ? styleTokens.outlineColor : '#FFFFFF');
@@ -686,11 +708,15 @@ export const createPowerpointTool = createTool({
         // Ensure charts support by preferring a build that includes Charts
         let Pptx: any = PptxGenJS;
         let chartsBuild: string | null = null;
-        const importCandidates = [
-          'pptxgenjs/dist/pptxgen.bundle.js',
-          'pptxgenjs/dist/pptxgen.bundle.min.js',
-          'pptxgenjs/dist/pptxgen.es.js',
-        ];
+        const importCandidates: string[] = [];
+        try {
+          // Prefer CJS build explicitly (most reliable for charts on Node)
+          const cjsPath = require.resolve('pptxgenjs/dist/pptxgen.cjs.js');
+          importCandidates.push(cjsPath);
+        } catch {}
+        importCandidates.push('pptxgenjs/dist/pptxgen.bundle.js');
+        importCandidates.push('pptxgenjs/dist/pptxgen.bundle.min.js');
+        importCandidates.push('pptxgenjs/dist/pptxgen.es.js');
         try {
           if (!(Pptx as any).ChartType) {
             for (const spec of importCandidates) {
@@ -739,14 +765,7 @@ export const createPowerpointTool = createTool({
         const bottomBandY = 4.6 * spacingBase;
         const bottomBandH = 2.3 * spacingBase;
 
-        // 1. Define the Master Slide (no static footer; branding handled per-slide)
-        pres.defineSlideMaster({
-            title: MASTER_SLIDE,
-            // Background is now handled on each slide individually
-            objects: [
-                
-            ],
-        });
+        // Master slide is no longer used; background/branding are handled per slide
 
         // Track temporary images to delete after PPTX is written
         const imagePathsToDelete = new Set<string>();
@@ -787,6 +806,31 @@ export const createPowerpointTool = createTool({
           return (s !== undefined) ? s : shadowPreset;
         };
 
+        // Resolve themed color tokens used by templates for table styling
+        const resolveThemedColorToken = (val?: string): string | undefined => {
+          if (!val) return undefined;
+          const s = String(val).trim();
+          const map = (hex: string) => hex.replace('#','').toUpperCase();
+          const toHex = (h: string) => h.startsWith('#') ? h.slice(1).toUpperCase() : h.toUpperCase();
+          const norm = normalizeColorToPptxHex(s);
+          if (norm) return norm;
+          const key = s.toLowerCase();
+          if (key === 'primary') return map(primary);
+          if (key === 'secondary') return map(secondary);
+          if (key === 'white') return 'FFFFFF';
+          if (key === 'black') return '000000';
+          if (key === 'primarylight') return map(lightenHex(primary, 60));
+          if (key === 'primarylighter') return map(lightenHex(primary, 100));
+          if (key === 'primaryultralight') return map(lightenHex(primary, 120));
+          if (key === 'secondarylight') return map(lightenHex(secondary, 60));
+          if (key === 'secondarylighter') return map(lightenHex(secondary, 100));
+          if (key === 'secondaryultralight') return map(lightenHex(secondary, 120));
+          // Fallback try parse rgba/#RRGGBBAA
+          const parsed = parseColorWithAlpha(s);
+          if (parsed) return parsed.hex;
+          return toHex(s);
+        };
+
         // --- Generic style resolution helpers ---
         const getByPath = (obj: any, pathStr?: string): any => {
           if (!obj || !pathStr || typeof pathStr !== 'string') return undefined;
@@ -811,21 +855,29 @@ export const createPowerpointTool = createTool({
           trapezoid: 'trapezoid',
           pie: 'pie',
         } as any;
-        const renderElementsFromTemplate = async (slideObj: any, layoutKey: string, elements: any[]) => {
+        const renderElementsFromTemplate = async (slideObj: any, layoutKey: string, elements: any[], areaOverrides?: Record<string, { x: number; y: number; w: number; h: number }>) => {
           if (!Array.isArray(elements) || !elements.length) return;
           for (const el of elements) {
             const areaName = String(el?.area || '');
             if (!areaName) continue;
-            const a = (templateConfig?.layouts?.[layoutKey]?.areas || {})[areaName];
-            if (!a) continue;
-            const ref = typeof a?.ref === 'string' ? a.ref : '';
+            const a = (areaOverrides && areaOverrides[areaName]) || (templateConfig?.layouts?.[layoutKey]?.areas || {})[areaName];
+            if (!a) {
+              try { logger.warn({ layout: layoutKey, area: areaName }, 'Template element skipped: area not defined in template.'); } catch {}
+              continue;
+            }
+            const ref = typeof (a as any)?.ref === 'string' ? (a as any).ref : '';
             const refSize = ref && templateConfig?.geometry?.regionDefs && templateConfig.geometry.regionDefs[ref];
-            const w = Number(a?.w) || Number(refSize?.w) || 1;
-            const h = Number(a?.h) || Number(refSize?.h) || 1;
-            const x = Number(a?.x) || 0;
-            const y = Number(a?.y) || 0;
+            const w = Number((a as any)?.w) || Number(refSize?.w) || 1;
+            const h = Number((a as any)?.h) || Number(refSize?.h) || 1;
+            const x = Number((a as any)?.x) || 0;
+            const y = Number((a as any)?.y) || 0;
             const styleRefs = Array.isArray(el?.styleRef) ? el.styleRef : (el?.styleRef ? [el.styleRef] : []);
-            const styleRefObjs = styleRefs.map((p: string) => getByPath(templateConfig, p)).filter(Boolean);
+            const styleRefObjsAll: Array<{ p: string; v: any }> = styleRefs.map((p: string) => ({ p, v: getByPath(templateConfig, p) }));
+            const styleRefObjs = styleRefObjsAll.map((o: { p: string; v: any }) => o.v).filter(Boolean);
+            const missingStyleRefs = styleRefObjsAll.filter((o: { p: string; v: any }) => !o.v).map((o: { p: string; v: any }) => o.p);
+            if (missingStyleRefs.length) {
+              try { logger.warn({ layout: layoutKey, missingStyleRefs }, 'Template styleRef paths not found.'); } catch {}
+            }
             const style = resolveStyle(...styleRefObjs, el?.style);
             const type = String(el?.type || '');
             if (type === 'shape') {
@@ -901,21 +953,31 @@ export const createPowerpointTool = createTool({
                   if (v == null) continue;
                   if (typeof v === 'string' && v.trim()) pairs.push({ label: k, value: v });
                 }
-                const labelFill = normalizeColorToPptxHex(style?.labelFill) || undefined;
-                const valueFill = normalizeColorToPptxHex(style?.valueFill) || undefined;
-                const labelColor = normalizeColorToPptxHex(style?.labelColor) || 'FFFFFF';
-                const valueColor = normalizeColorToPptxHex(style?.valueColor) || '333333';
+                const labelFill = resolveThemedColorToken(style?.labelFill) || undefined;
+                const valueFill = resolveThemedColorToken(style?.valueFill) || undefined;
+                const altRowFill = resolveThemedColorToken(style?.altRowFill) || undefined;
+                const labelColor = resolveThemedColorToken(style?.labelColor) || 'FFFFFF';
+                const valueColor = resolveThemedColorToken(style?.valueColor) || '333333';
                 const fontSize = Number(style?.fontSize) || 14;
-                rows.push(...pairs.map(p => [
-                  { text: p.label, options: { bold: style?.labelBold !== false, color: labelColor, fill: labelFill ? { color: labelFill } : undefined, fontFace: JPN_FONT, fontSize, valign: 'middle' } },
-                  { text: p.value, options: { color: valueColor, fill: valueFill ? { color: valueFill } : undefined, fontFace: JPN_FONT, fontSize, valign: 'middle' } }
-                ]));
+                rows.push(...pairs.map((p, idx) => {
+                  const isAlt = !!altRowFill && (idx % 2 === 1);
+                  const baseRowFill = valueFill || undefined;
+                  const rowFillHex = isAlt ? altRowFill : baseRowFill;
+                  const leftFill = rowFillHex ? { color: rowFillHex } : undefined;
+                  const rightFill = rowFillHex ? { color: rowFillHex } : undefined;
+                  const leftTextColor = valueColor;
+                  const rightTextColor = valueColor;
+                  return [
+                    { text: p.label, options: { bold: style?.labelBold !== false, color: leftTextColor, fill: leftFill, fontFace: JPN_FONT, fontSize, valign: 'middle' } },
+                    { text: p.value, options: { color: rightTextColor, fill: rightFill, fontFace: JPN_FONT, fontSize, valign: 'middle' } }
+                  ];
+                }));
               } else {
                 const text = data != null ? String(data) : '';
                 if (text) rows.push([{ text, options: { fontFace: JPN_FONT, fontSize: Number(style?.fontSize) || 14, color: normalizeColorToPptxHex(style?.color) || '333333', valign: 'top' } }]);
               }
               if (rows.length) {
-                const borderColor = normalizeColorToPptxHex(style?.borderColor) || 'E6E6E6';
+                const borderColor = resolveThemedColorToken(style?.borderColor) || 'E6E6E6';
                 const borderWidth = Number(style?.borderWidth) || 1;
                 const colW: number[] | undefined = Array.isArray(style?.colW) ? style.colW.map((n: any)=>Number(n)).filter((n: number)=>Number.isFinite(n)) : undefined;
                 slideObj.addTable(rows, { x, y, w, h, colW: colW && colW.length ? colW : undefined, border: { type: 'solid', color: borderColor, pt: borderWidth } as any });
@@ -923,6 +985,11 @@ export const createPowerpointTool = createTool({
               continue;
             }
             if (type === 'visual') {
+              // Quote layout intentionally avoids visuals unless explicitly provided; ignore silently
+              if (layoutKey === 'quote') {
+                try { logger.info({ layout: layoutKey, area: { x, y, w, h } }, 'Quote layout: ignoring template visual element by design.'); } catch {}
+                continue;
+              }
               const recipe = typeof el?.recipeRef === 'string' ? getByPath((slideObj as any).__data || {}, el.recipeRef) : ((slideObj as any).__data?.visual_recipe);
               // Prevent overlap with reserved bottom branding area
               let vy = y, vh = h;
@@ -936,6 +1003,8 @@ export const createPowerpointTool = createTool({
                 await drawInfographic(slideObj, String(recipe.type || ''), recipe, { x, y: vy, w, h: vh });
               } else if ((slideObj as any).__data?.imagePath) {
                 slideObj.addImage({ path: (slideObj as any).__data.imagePath, x, y: vy, w, h: vh, sizing: { type: style?.sizing || 'contain', w, h: vh } as any, shadow: shadowOf(style?.shadow, shadowPreset) });
+              } else {
+                try { logger.warn({ layout: layoutKey, area: { x, y: vy, w, h: vh } }, 'Template visual element has no recipe or image; nothing rendered.'); } catch {}
               }
               continue;
             }
@@ -1031,7 +1100,7 @@ export const createPowerpointTool = createTool({
                         const row = Math.floor(idx / 2), col = idx % 2;
                         const x = rx + 0.2 + col * (cardW + gap);
                         const y = ry + 0.2 + row * (cardH + gap);
-                        targetSlide.addShape('roundRect', { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: cornerRadius, shadow: shadowOf(resolveVisualShadow('kpi')) });
+                        targetSlide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('kpi')) });
                         targetSlide.addText(String(it?.value ?? ''), { x: x + 0.2, y: y + 0.2, w: cardW - 0.4, h: cardH * 0.55, fontSize: 18, bold: true, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
                         targetSlide.addText(String(it?.label ?? ''), { x: x + 0.2, y: y + cardH * 0.65, w: cardW - 0.4, h: cardH * 0.3, fontSize: 11.5, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
                     });
@@ -1283,7 +1352,7 @@ export const createPowerpointTool = createTool({
                         const row = Math.floor(idx / 2), col = idx % 2;
                         const x = rx + 0.2 + col * (cardW + gap);
                         const y = ry + 0.2 + row * (cardH + gap);
-                        targetSlide.addShape('roundRect', { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: cornerRadius, shadow: shadowOf(resolveVisualShadow('kpi')) });
+                        targetSlide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('kpi')) });
                         targetSlide.addText(String(it?.value ?? ''), { x: x + 0.2, y: y + 0.2, w: cardW - 0.4, h: cardH * 0.55, fontSize: 18, bold: true, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
                         targetSlide.addText(String(it?.label ?? ''), { x: x + 0.2, y: y + cardH * 0.65, w: cardW - 0.4, h: cardH * 0.3, fontSize: 11.5, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
                     });
@@ -1291,15 +1360,21 @@ export const createPowerpointTool = createTool({
                 }
                 case 'checklist': {
                     const items = Array.isArray(payload?.items) ? payload.items : [];
-                    const lineH = Math.min(0.55, rh / Math.max(1, items.length) - 0.06);
-                    const bulletW = 0.22;
-                    items.slice(0, 6).forEach((it: any, i: number) => {
-                        const y = ry + i * (lineH + 0.08);
-                        // bullet circle
-                        targetSlide.addShape('ellipse', { x: rx, y: y + (lineH - bulletW)/2, w: bulletW, h: bulletW, fill: { color: accent }, line: { color: 'FFFFFF', width: 0.5 } });
-                        // text
+                    const maxItems = 7;
+                    const gapY = 0.1;
+                    const lineH = Math.min(0.65, rh / Math.max(1, Math.min(items.length, maxItems)) - gapY);
+                    const markSize = 0.28;
+                    items.slice(0, maxItems).forEach((it: any, i: number) => {
+                        const y = ry + i * (lineH + gapY);
+                        // leading check mark (rounded rect background + tick)
+                        const boxX = rx;
+                        const boxY = y + (lineH - markSize)/2;
+                        targetSlide.addShape('rect', { x: boxX, y: boxY, w: markSize, h: markSize, fill: { color: lightenHex(primary, 10) }, line: { color: primary, width: 1 }, rectRadius: 4, shadow: shadowOf(resolveVisualShadow('callouts')) });
+                        // tick as a short chevron
+                        targetSlide.addShape('chevron', { x: boxX + 0.04, y: boxY + 0.06, w: markSize - 0.08, h: markSize - 0.12, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 } } as any);
+                        // text (larger and bold)
                         const label = String(it?.label ?? '');
-                        targetSlide.addText(label, { x: rx + bulletW + 0.15, y, w: rw - (bulletW + 0.25), h: lineH, fontSize: 14, fontFace: JPN_FONT });
+                        targetSlide.addText(label, { x: rx + markSize + 0.2, y, w: rw - (markSize + 0.3), h: lineH, fontSize: 18, bold: true, fontFace: JPN_FONT, color: '111111' });
                     });
                     break;
                 }
@@ -1467,7 +1542,7 @@ export const createPowerpointTool = createTool({
         let appliedLogoCount = 0;
         let appliedCopyrightCount = 0;
         for (const [index, slideData] of slides.entries()) {
-            const slide = pres.addSlide({ masterName: MASTER_SLIDE });
+            const slide = pres.addSlide();
             let visualRendered = false;
 
             // Background: prioritize title image; otherwise themed flat color.
@@ -1481,11 +1556,24 @@ export const createPowerpointTool = createTool({
                         logger.warn({ path: titleSlideImagePath, error }, 'Could not access title slide image file. Using default background.');
                         slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
                     }
-                } else if ((slides[0] as any)?.titleSlideImagePrompt) {
-                    // Generate title background via new genarateImage
+                } else if ((slides[0] as any)?.titleSlideImagePrompt || templateConfig?.layouts?.title_slide?.background?.source?.type === 'ai') {
+                    // Generate title background via new genarateImage using slide title and executive summary context; respect negativePrompt
                     try {
                         const { genarateImage } = await import('./genarateImage');
-                        const out = await genarateImage({ prompt: String((slides[0] as any).titleSlideImagePrompt), aspectRatio: '16:9' });
+                        const tplBgSrc: any = templateConfig?.layouts?.title_slide?.background?.source || {};
+                        const slide0: any = (slides[0] as any) || {};
+                        // Abstract, textless background prompt (no raw title/keywords)
+                        const paletteHint = (primary && secondary) ? `palette: primary=${primary}, secondary=${secondary}` : '';
+                        const composedPrompt = [
+                            'Abstract corporate background. Do not render any words, letters, numbers, symbols, or logos.',
+                            'Express the slide theme as visual metaphors using shapes, gradients, light, depth, and rhythm — not text.',
+                            'Design cues: clean geometric patterns, subtle gradient layers, soft light streaks, particle networks, depth-of-field bokeh, tasteful contrast.',
+                            paletteHint,
+                            'Minimal, elegant, high-resolution, professional. No text overlay.'
+                        ].filter(Boolean).join(' ');
+                        const negativePrompt: string | undefined = String(slide0.titleSlideImageNegativePrompt || tplBgSrc.negativePrompt || '').trim() || undefined;
+                        logger.info({ prompt: composedPrompt, negativePrompt }, 'Title background image: sending prompt to generator');
+                        const out = await genarateImage({ prompt: composedPrompt, negativePrompt, aspectRatio: '16:9' });
                         if (out.success && out.path) {
                             slide.background = { path: out.path } as any;
                             (slide as any).__tempImages = (slide as any).__tempImages || [];
@@ -1523,12 +1611,26 @@ export const createPowerpointTool = createTool({
             if (companyLogoPath) {
                 try {
                     const maxW = 1.2;
+                    const maxH = 0.9;
+                    const minH = 0.3;
                     const dim = await readImageDimensions(companyLogoPath);
-                    const ratio = dim && dim.width > 0 ? (dim.height / dim.width) : (0.6 / 1.2);
-                    const h = Math.min(0.9, Math.max(0.3, maxW * ratio));
-                    const x = pageW - marginX - maxW;
+                    const naturalW = Math.max(1, Number(dim?.width) || 1);
+                    const naturalH = Math.max(1, Number(dim?.height) || 1);
+                    const aspect = naturalW > 0 ? (naturalH / naturalW) : 1;
+                    // First fit to maxW, then clamp by maxH
+                    let w = maxW;
+                    let h = w * aspect;
+                    if (h > maxH) {
+                        h = maxH;
+                        w = h / aspect;
+                    }
+                    if (h < minH) {
+                        h = minH;
+                        w = h / aspect;
+                    }
+                    const x = pageW - marginX - w;
                     const y = pageH - h - 0.25;
-                    slide.addImage({ path: companyLogoPath, x, y, w: maxW, h, sizing: { type: 'contain', w: maxW, h } as any, shadow: { type: 'outer', color: '000000', opacity: 0.3, blur: 6, offset: 2, angle: 45 } as any });
+                    slide.addImage({ path: companyLogoPath, x, y, w, h, shadow: { type: 'outer', color: '000000', opacity: 0.3, blur: 6, offset: 2, angle: 45 } as any });
                     appliedLogoCount++;
                 } catch (e) {
                     logger.warn({ error: e }, 'Failed to add company logo on a slide.');
@@ -1561,12 +1663,17 @@ export const createPowerpointTool = createTool({
             };
             const titleBarAreaStyle = (templateConfig?.areaStyles?.titleBar || {}) as any;
 
+            // Track template usage for this layout to decide on global fallbacks later
+            let __templateHasElementsForLayout = false;
+            let __templateHasVisualElForLayout = false;
             switch (layout) {
                 case 'title_slide':
                     // Render centered title only (no global title bar)
                     {
                         const tmplElements = templateConfig?.layouts?.title_slide?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
+                            __templateHasElementsForLayout = true;
+                            try { logger.info({ layout: 'title_slide' }, 'Template elements present: skipping code-rendered defaults for title_slide'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets };
                             await renderElementsFromTemplate(slide as any, 'title_slide', tmplElements);
                             delete (slide as any).__data;
@@ -1592,6 +1699,8 @@ export const createPowerpointTool = createTool({
                     {
                         const tmplElements = templateConfig?.layouts?.section_header?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
+                            __templateHasElementsForLayout = true;
+                            try { logger.info({ layout: 'section_header' }, 'Template elements present: skipping code-rendered defaults for section_header'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets };
                             await renderElementsFromTemplate(slide as any, 'section_header', tmplElements);
                             delete (slide as any).__data;
@@ -1611,6 +1720,8 @@ export const createPowerpointTool = createTool({
                     {
                         const tmplElements = templateConfig?.layouts?.quote?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
+                            __templateHasElementsForLayout = true;
+                            try { logger.info({ layout: 'quote' }, 'Template elements present: skipping code-rendered defaults for quote'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, special_content: (slideData as any).special_content };
                             await renderElementsFromTemplate(slide as any, 'quote', tmplElements);
                             delete (slide as any).__data;
@@ -1641,12 +1752,14 @@ export const createPowerpointTool = createTool({
                     {
                         const tmplElements = templateConfig?.layouts?.content_with_visual?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
+                            __templateHasElementsForLayout = true;
+                            try { logger.info({ layout: 'content_with_visual' }, 'Template elements present: skipping code-rendered defaults for content_with_visual'); } catch {}
                             // Provide slide data to renderer
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
                             await renderElementsFromTemplate(slide as any, 'content_with_visual', tmplElements);
                             // If template doesn't include a visual element, fallback to recipe/image region
                             const hasVisualEl = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
-                            if (hasVisualEl) { visualRendered = true; }
+                            if (hasVisualEl) { visualRendered = true; __templateHasVisualElForLayout = true; }
                             if (!hasVisualEl) {
                                 const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.6, twoColVisualW, 3.4);
                                 logger.warn({ layout: 'content_with_visual', area: vArea, recipeType: (slideData as any)?.visual_recipe?.type || null }, 'Template elements missing visual. Falling back to code-rendered visual region');
@@ -1687,11 +1800,13 @@ export const createPowerpointTool = createTool({
                     {
                         const tmplElements = templateConfig?.layouts?.content_with_bottom_visual?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
+                            __templateHasElementsForLayout = true;
+                            try { logger.info({ layout: 'content_with_bottom_visual' }, 'Template elements present: skipping code-rendered defaults for content_with_bottom_visual'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
                             await renderElementsFromTemplate(slide as any, 'content_with_bottom_visual', tmplElements);
                             // Fallback render if no visual element present
                             const hasVisualEl = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
-                            if (hasVisualEl) { visualRendered = true; }
+                            if (hasVisualEl) { visualRendered = true; __templateHasVisualElForLayout = true; }
                             if (!hasVisualEl) {
                                 const va = resolveArea('visual', marginX, bottomBandY, contentW, bottomBandH);
                                 logger.warn({ layout: 'content_with_bottom_visual', area: va, recipeType: (slideData as any)?.visual_recipe?.type || null }, 'Template elements missing visual. Falling back to code-rendered bottom visual region');
@@ -1741,10 +1856,17 @@ export const createPowerpointTool = createTool({
                     {
                         const tmplElements = templateConfig?.layouts?.content_only?.elements;
                         const hasTemplate = Array.isArray(tmplElements) && tmplElements.length > 0;
+                        // expose to outer scope via locals
+                        var __hasTemplate_co = hasTemplate;
+                        var __hasBulletsEl_co = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'text' && (String(e?.area) === 'bullets' || String(e?.contentRef) === 'bullets'));
                         if (hasTemplate) {
+                            __templateHasElementsForLayout = true;
+                            try { logger.info({ layout: 'content_only' }, 'Template elements present: skipping code-rendered defaults for content_only'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
                             await renderElementsFromTemplate(slide as any, 'content_only', tmplElements);
-                            // If template doesn't include visual, we may still render recipe via fallback below (guarded later)
+                            // Mark visual presence to prevent fallback duplication
+                            const hasVisualEl = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
+                            if (hasVisualEl) { visualRendered = true; __templateHasVisualElForLayout = true; }
                             delete (slide as any).__data;
                         }
                         const fitted = fitTextToLines(slideData.title, /*initial*/32, /*min*/20, /*baseWrap*/40, /*lines*/1, /*hard*/24);
@@ -1763,17 +1885,20 @@ export const createPowerpointTool = createTool({
                     // Shift text down to avoid overlapping title
                     const textYContentOnly = contentTopY + 0.5;
                     const textHContentOnly = 4.0;
+                    // If template already rendered bullets, skip fallback bullets to avoid duplication
+                    if (!(__hasTemplate_co && __hasBulletsEl_co)) {
                     if (perSlideRecipeHere) {
                         // If the recipe is of bottom-band type, use full-width text
                         if (isBottomVisual) {
-                            slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                                slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         } else {
                             // Right-panel recipe → two-column
-                            slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { x: twoColTextX, y: textYContentOnly, w: twoColTextW, h: twoColTextH, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                                slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { x: twoColTextX, y: textYContentOnly, w: twoColTextW, h: twoColTextH, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         }
                     } else {
                         // No recipe → full-width text
-                        slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                            slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                        }
                     }
                     break;
             }
@@ -1803,47 +1928,106 @@ export const createPowerpointTool = createTool({
                 logger.warn({ layout, area: region, recipeType: String(perSlideRecipeHere.type || '') }, 'Fallback visual rendering invoked');
                 drawInfographic(slide as any, String(perSlideRecipeHere.type || ''), perSlideRecipeHere, region);
             }
-            // Add per-slide copyright if provided
-            if (typeof templateConfig?.branding?.copyright === 'string' && templateConfig.branding.copyright) {
-                try {
-                    slide.addText(String(templateConfig.branding.copyright), { x: 0.4, y: pageH - 0.35, w: pageW - 0.8, h: 0.3, align: 'center', fontSize: 10, color: '666666', fontFace: bodyFont });
-                } catch {}
-            } else if (companyCopyright) {
-                try {
+            // Copyright (template-driven)
+            try {
+                const crCfg: any = templateConfig?.branding?.copyright;
+                const companyName: string = String((context as any)?.companyName || (context as any)?.companyOverview?.company_name || '').trim();
+                const year = new Date().getFullYear();
+                const formatText = (fmt: string): string => fmt.replace(/<companyName>/g, companyName).replace(/<year>/g, String(year));
+                if (crCfg && typeof crCfg === 'object') {
+                    const show = (crCfg.enabled === true || crCfg.show === true);
+                    const skipOnTitle = !!crCfg?.skipOnTitleSlide;
+                    if (show && !(skipOnTitle && index === 0)) {
+                        const fmt: string = typeof crCfg.format === 'string' && crCfg.format.trim() ? crCfg.format.trim() : '<companyName>';
+                        const text = formatText(fmt);
+                        const area = (crCfg.area || {}) as any;
+                        const ref = typeof area?.ref === 'string' ? area.ref : '';
+                        const refSize = ref && templateConfig?.geometry?.regionDefs && templateConfig.geometry.regionDefs[ref];
+                        const w = Number(area?.w) || Number(refSize?.w) || (pageW - 0.8);
+                        const h = Number(area?.h) || Number(refSize?.h) || 0.3;
+                        const x = Number(area?.x); const y = Number(area?.y);
+                        const px = Number.isFinite(x) ? x : 0.4;
+                        const py = Number.isFinite(y) ? y : (pageH - 0.35);
+                        const styleRefs = Array.isArray(crCfg?.styleRef) ? crCfg.styleRef : (crCfg?.styleRef ? [crCfg.styleRef] : []);
+                        const styleRefObjs = styleRefs.map((p: string) => getByPath(templateConfig, p)).filter(Boolean);
+                        const style = resolveStyle(...styleRefObjs, crCfg?.style);
+                        const align = (style?.align || area?.align || 'center');
+                        const opts: any = {
+                            x: px,
+                            y: py,
+                            w,
+                            h,
+                            align,
+                            fontFace: String(style?.fontFace || bodyFont),
+                            fontSize: Number(style?.fontSize) || 10,
+                            bold: !!style?.bold,
+                            color: normalizeColorToPptxHex(style?.color) || '666666',
+                            shadow: shadowOf(style?.shadow, shadowPreset)
+                        };
+                        if (style?.fill) opts.fill = buildFill(style.fill);
+                        if (style?.lineColor || Number.isFinite(style?.lineWidth)) opts.line = { color: normalizeColorToPptxHex(style?.lineColor) || (normalizeColorToPptxHex(style?.fill) || 'FFFFFF'), width: Number(style?.lineWidth) || 0 };
+                        slide.addText(text, opts);
+                        appliedCopyrightCount++;
+                    }
+                } else if (typeof crCfg === 'string' && crCfg.trim()) {
+                    slide.addText(crCfg.trim(), { x: 0.4, y: pageH - 0.35, w: pageW - 0.8, h: 0.3, align: 'center', fontSize: 10, color: '666666', fontFace: bodyFont });
+                    appliedCopyrightCount++;
+                } else if (companyCopyright) {
                     slide.addText(companyCopyright, { x: 0.4, y: pageH - 0.35, w: pageW - 0.8, h: 0.3, align: 'center', fontSize: 10, color: '666666', fontFace: bodyFont });
                     appliedCopyrightCount++;
-                } catch (e) {
-                    logger.warn({ error: e }, 'Failed to add copyright text on a slide.');
                 }
+            } catch (e) {
+                logger.warn({ error: e }, 'Failed to add copyright text on a slide.');
+            }
+
+            // Page number (template-driven)
+            try {
+                const pageNumCfg: any = templateConfig?.branding?.pageNumber;
+                const showPageNo = !!(pageNumCfg && (pageNumCfg.enabled === true || pageNumCfg.show === true));
+                const skipOnTitle = !!pageNumCfg?.skipOnTitleSlide;
+                if (showPageNo && !(skipOnTitle && index === 0)) {
+                    const fmt: string = typeof pageNumCfg.format === 'string' && pageNumCfg.format.trim() ? pageNumCfg.format.trim() : '<pageNo>';
+                    const pageNoText = fmt.replace(/<pageNo>/g, String(index + 1));
+                    const area = (pageNumCfg.area || {}) as any;
+                    const ref = typeof area?.ref === 'string' ? area.ref : '';
+                    const refSize = ref && templateConfig?.geometry?.regionDefs && templateConfig.geometry.regionDefs[ref];
+                    const w = Number(area?.w) || Number(refSize?.w) || 1.5;
+                    const h = Number(area?.h) || Number(refSize?.h) || 0.3;
+                    const x = Number(area?.x); const y = Number(area?.y);
+                    const px = Number.isFinite(x) ? x : marginX;
+                    const py = Number.isFinite(y) ? y : (pageH - 0.35);
+                    const styleRefs = Array.isArray(pageNumCfg?.styleRef) ? pageNumCfg.styleRef : (pageNumCfg?.styleRef ? [pageNumCfg.styleRef] : []);
+                    const styleRefObjs = styleRefs.map((p: string) => getByPath(templateConfig, p)).filter(Boolean);
+                    const style = resolveStyle(...styleRefObjs, pageNumCfg?.style);
+                    const align = (style?.align || area?.align || 'left');
+                    const opts: any = {
+                        x: px,
+                        y: py,
+                        w,
+                        h,
+                        align,
+                        fontFace: String(style?.fontFace || bodyFont),
+                        fontSize: Number(style?.fontSize) || 10,
+                        bold: !!style?.bold,
+                        color: normalizeColorToPptxHex(style?.color) || '666666',
+                        shadow: shadowOf(style?.shadow, shadowPreset)
+                    };
+                    if (style?.fill) opts.fill = buildFill(style.fill);
+                    if (style?.lineColor || Number.isFinite(style?.lineWidth)) opts.line = { color: normalizeColorToPptxHex(style?.lineColor) || (normalizeColorToPptxHex(style?.fill) || 'FFFFFF'), width: Number(style?.lineWidth) || 0 };
+                    slide.addText(pageNoText, opts);
+                }
+            } catch (e) {
+                try { logger.warn({ error: e }, 'Failed to render page number'); } catch {}
             }
         }
         logger.info({ appliedLogoCount, appliedCopyrightCount }, 'Applied branding to slides.');
         
-        // Optional charts diagnostics slide (enabled via templateConfig.debug.chartsDiagnostics === true)
-        try {
-            if ((templateConfig?.debug?.chartsDiagnostics) === true) {
-                const diag = pres.addSlide({ masterName: MASTER_SLIDE });
-                diag.background = { color: lightenHex(secondary, 90).replace('#','') } as any;
-                diag.addText('Charts Diagnostics', { x: 0.8, y: 0.4, w: pageW - 1.6, h: 0.5, fontSize: 20, bold: true, fontFace: JPN_FONT });
-                const hasAddChart = typeof (diag as any).addChart === 'function';
-                const sampleLabels = ['A','B','C','D'];
-                const sampleData = [{ name: 'Series', labels: sampleLabels, values: [10, 20, 15, 25] }];
-                try {
-                    (diag as any).addChart(((ChartType && ChartType.bar) || 'bar') as any, sampleData, { x: 0.8, y: 1.0, w: 5.8, h: 2.5 } as any);
-                    (diag as any).addChart(((ChartType && ChartType.line) || 'line') as any, sampleData, { x: 6.8, y: 1.0, w: 5.8, h: 2.5 } as any);
-                    (diag as any).addChart(((ChartType && ChartType.pie) || 'pie') as any, [{ name: 'Share', labels: sampleLabels, values: [40,30,20,10] }], { x: 0.8, y: 3.8, w: 5.8, h: 2.5 } as any);
-                    
-                } catch (e) {
-                    logger.warn({ error: e }, 'Charts diagnostics: addChart failed, adding fallback markers.');
-                    diag.addText('addChart failed in diagnostics', { x: 0.8, y: 1.0, w: pageW - 1.6, h: 0.3, fontSize: 12, fontFace: JPN_FONT });
-                }
-            }
-        } catch {}
+        // Charts diagnostics page has been removed per requirements.
 
         // Add company about slide at the end if available (render using pptxgenjs table)
         if (companyAbout || (context as any).companyOverview) {
             try {
-                const aboutSlide = pres.addSlide({ masterName: MASTER_SLIDE });
+                const aboutSlide = pres.addSlide();
                 aboutSlide.background = { color: lightenHex(secondary, 85).replace('#', '') } as any;
                 const tmplElements = templateConfig?.layouts?.company_about?.elements;
                 if (Array.isArray(tmplElements) && tmplElements.length) {
@@ -1873,11 +2057,18 @@ export const createPowerpointTool = createTool({
                         if (Array.isArray(ov.business) && ov.business.length) pairs.push({ label: '事業内容', value: ov.business.join(' / ') });
                         if (ov.homepage) pairs.push({ label: 'HomePage', value: String(ov.homepage) });
                         if (ov.contact) pairs.push({ label: '問い合わせ', value: String(ov.contact) });
-                        const rows: any[] = pairs.map(p => [
-                            { text: p.label, options: { bold: true, color: 'FFFFFF', fill: { color: lightenHex(primary, 60).replace('#','') }, fontFace: JPN_FONT, fontSize: 14, valign: 'middle' } },
-                            { text: p.value, options: { color: '333333', fill: { color: 'FFFFFF' }, fontFace: JPN_FONT, fontSize: 14, valign: 'middle' } }
-                        ]);
-                        aboutSlide.addTable(rows, { x: tableX, y: tableY, w: contentW, colW: [col1W, col2W], border: { type: 'solid', color: 'E6E6E6', pt: 1 } as any });
+                        const baseFill = 'FFFFFF';
+                        const altFill = lightenHex(secondary, 110).replace('#','');
+                        const rows: any[] = pairs.map((p, idx) => {
+                            const isAlt = (idx % 2 === 1);
+                            const rowFill = isAlt ? altFill : baseFill;
+                            return [
+                                { text: p.label, options: { bold: true, color: '333333', fill: { color: rowFill }, fontFace: JPN_FONT, fontSize: 14, valign: 'middle' } },
+                                { text: p.value, options: { color: '333333', fill: { color: rowFill }, fontFace: JPN_FONT, fontSize: 14, valign: 'middle' } }
+                            ];
+                        });
+                        const borderColor = lightenHex(primary, 120).replace('#','');
+                        aboutSlide.addTable(rows, { x: tableX, y: tableY, w: contentW, colW: [col1W, col2W], border: { type: 'solid', color: borderColor, pt: 1 } as any });
                 } else {
                         const text = String(companyAbout || '').replace(/\r?\n/g, '\n');
                         const rows: any[] = [[{ text, options: { fontFace: JPN_FONT, fontSize: 14, color: '333333', valign: 'top' } }]];
@@ -1885,13 +2076,16 @@ export const createPowerpointTool = createTool({
                     }
                 }
                 if (companyLogoPath) {
-                    const maxW = 1.2;
+                    const maxW = 1.2; const maxH = 0.9; const minH = 0.3;
                     const dim = await readImageDimensions(companyLogoPath);
-                    const ratio = dim && dim.width > 0 ? (dim.height / dim.width) : (0.6 / 1.2);
-                    const h = Math.min(0.9, Math.max(0.3, maxW * ratio));
-                    const x = pageW - marginX - maxW;
-                    const y = pageH - h - 0.25;
-                    aboutSlide.addImage({ path: companyLogoPath, x, y, w: maxW, h, sizing: { type: 'contain', w: maxW, h } as any });
+                    const naturalW = Math.max(1, Number(dim?.width) || 1);
+                    const naturalH = Math.max(1, Number(dim?.height) || 1);
+                    const aspect = naturalW > 0 ? (naturalH / naturalW) : 1;
+                    let w = maxW, h = w * aspect;
+                    if (h > maxH) { h = maxH; w = h / aspect; }
+                    if (h < minH) { h = minH; w = h / aspect; }
+                    const x = pageW - marginX - w; const y = pageH - h - 0.25;
+                    aboutSlide.addImage({ path: companyLogoPath, x, y, w, h });
                 }
                 if (companyCopyright) {
                     aboutSlide.addText(companyCopyright, { x: 0.4, y: pageH - 0.35, w: pageW - 0.8, h: 0.3, align: 'center', fontSize: 10, color: '666666', fontFace: JPN_FONT });
@@ -1908,7 +2102,7 @@ export const createPowerpointTool = createTool({
             const recipe = (s as any).visual_recipe;
             if (recipe && typeof recipe === 'object') {
                 try {
-                const infoSlide = pres.addSlide({ masterName: MASTER_SLIDE });
+                const infoSlide = pres.addSlide();
                 infoSlide.background = { color: secondary.replace('#', '') } as any;
                 if (recipe.type) {
                     drawInfographic(infoSlide, String(recipe.type), recipe);
@@ -1925,17 +2119,14 @@ export const createPowerpointTool = createTool({
         const tempImagesCollected: string[] = [];
         const chartsDir = path.join(config.tempDir, 'charts');
         const imagesDir = path.join(config.tempDir, 'images');
-        const publicChartsDir = path.join(config.publicDir || path.join(path.dirname(config.tempDir), 'public'), 'charts');
-        const publicImagesDir = path.join(config.publicDir || path.join(path.dirname(config.tempDir), 'public'), 'temp', 'images');
+        const publicBase = config.publicDir ? path.resolve(config.publicDir) : null;
+        const publicChartsDir = publicBase ? path.join(publicBase, 'temp', 'charts') : null;
+        const publicImagesDir = publicBase ? path.join(publicBase, 'temp', 'images') : null;
         for (const slideData of slides as any[]) {
             if (slideData.imagePath) {
                 const dir = path.resolve(path.dirname(slideData.imagePath));
-                if (
-                  dir === path.resolve(chartsDir) ||
-                  dir === path.resolve(imagesDir) ||
-                  dir === path.resolve(publicChartsDir) ||
-                  dir === path.resolve(publicImagesDir)
-                ) {
+                const approvedDirs = [chartsDir, imagesDir, publicChartsDir, publicImagesDir].filter(Boolean).map((d:any)=>path.resolve(String(d)));
+                if (approvedDirs.includes(dir)) {
                 imagePathsToDelete.add(slideData.imagePath);
                 }
             }
@@ -1950,7 +2141,8 @@ export const createPowerpointTool = createTool({
             try {
                 // Only delete if under approved temp dirs
                 const dir = path.resolve(path.dirname(imagePath));
-                if (dir === path.resolve(chartsDir) || dir === path.resolve(imagesDir) || dir === path.resolve(publicChartsDir) || dir === path.resolve(publicImagesDir)) {
+                const approvedDirs = [chartsDir, imagesDir, publicChartsDir, publicImagesDir].filter(Boolean).map((d:any)=>path.resolve(String(d)));
+                if (approvedDirs.includes(dir)) {
                     await fs.unlink(imagePath);
                 } else {
                     logger.warn({ imagePath }, 'Skip deletion: not under approved temp dir');
@@ -1958,6 +2150,20 @@ export const createPowerpointTool = createTool({
             } catch (unlinkError) {
                 logger.warn({ error: unlinkError, imagePath }, 'Could not delete temporary image.');
             }
+        }
+
+        // Best-effort: sweep leftover files under temp image/chart directories
+        const sweepDirs = [chartsDir, imagesDir, publicChartsDir, publicImagesDir].filter(Boolean) as string[];
+        for (const d of sweepDirs) {
+            try {
+                const resolved = path.resolve(d);
+                const entries = await (await import('node:fs/promises')).readdir(resolved, { withFileTypes: true });
+                for (const ent of entries) {
+                    if (ent.isFile()) {
+                        try { await fs.unlink(path.join(resolved, ent.name)); } catch {}
+                    }
+                }
+            } catch {}
         }
 
         

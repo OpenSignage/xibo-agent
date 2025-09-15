@@ -196,7 +196,7 @@ const freeformElementSchema = z.object({
 
 const slideDesignSchema = z.object({
   title: z.string().describe("The main title of the slide."),
-  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform'])
+  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'visual_hero_split', 'comparison_cards', 'checklist_top_bullets_bottom'])
     .describe("The layout type for the slide."),
   bullets: z.array(z.string()).describe("A list of key bullet points for the slide."),
   visual_suggestion: z.enum(['bar_chart', 'pie_chart', 'line_chart', 'none']).describe("The suggested type of visual for the slide."),
@@ -255,7 +255,8 @@ export const intelligentPresenterWorkflow = createWorkflow({
   inputSchema: z.object({
     reportFileName: z.string().describe('The name of the report file located in persistent_data/reports.'),
     fileNameBase: z.string().optional().describe('The base name for the output files. Defaults to the report file name.'),
-    companyName: z.string().optional().describe('Optional company name to load info from persistent_data/companies_info/<companyName>')
+    companyName: z.string().optional().describe('Optional company name to load info from persistent_data/companies_info/<companyName>'),
+    templateName: z.string().optional().describe('Template JSON filename under persistent_data/presentations/templates (default: default.json)')
   }),
   outputSchema: finalOutputSchema,
 })
@@ -270,12 +271,14 @@ export const intelligentPresenterWorkflow = createWorkflow({
         reportFileName: z.string(),
         fileNameBase: z.string().optional(),
         companyName: z.string().optional(),
+        templateName: z.string().optional(),
     }),
     outputSchema: z.object({
         reportContent: z.string(),
         fileNameBase: z.string(),
         companyName: z.string().optional(),
         errorMessage: z.string().optional(),
+        templateName: z.string().optional(),
     }),
     execute: async (params) => {
         const { reportFileName, fileNameBase, companyName } = params.inputData;
@@ -285,11 +288,11 @@ export const intelligentPresenterWorkflow = createWorkflow({
         try {
             await fs.access(filePath);
             const reportContent = await fs.readFile(filePath, 'utf-8');
-            return { reportContent, fileNameBase: resolvedFileNameBase, companyName };
+            return { reportContent, fileNameBase: resolvedFileNameBase, companyName, templateName: (params.inputData as any).templateName };
         } catch (error) {
             const message = `Report file not found or could not be read: ${filePath}`;
             logger.error({ filePath, error }, message);
-            return { reportContent: '', fileNameBase: resolvedFileNameBase, companyName, errorMessage: message };
+            return { reportContent: '', fileNameBase: resolvedFileNameBase, companyName, errorMessage: message, templateName: (params.inputData as any).templateName };
         }
     },
 }))
@@ -306,6 +309,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
         fileNameBase: z.string(),
         companyName: z.string().optional(),
         errorMessage: z.string().optional(),
+        templateName: z.string().optional(),
     }),
     outputSchema: z.object({
         presentationDesign: z.array(slideDesignSchema),
@@ -319,10 +323,14 @@ export const intelligentPresenterWorkflow = createWorkflow({
     }),
     execute: async (params) => {
         const { reportContent, fileNameBase, errorMessage, companyName } = params.inputData;
+        const templateNameIn = (params.inputData as any).templateName as string | undefined;
+        const safeTemplateName = (templateNameIn && templateNameIn.trim()) ? templateNameIn.trim() : 'default.json';
+        try { logger.info({ templateNameIn, safeTemplateName }, 'Using template for design-presentation'); } catch {}
         if (errorMessage) {
             let templateConfig: any = undefined;
             try {
-                const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', 'default.json');
+                const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
+                try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
                 const raw = await fs.readFile(tplPath, 'utf-8');
                 templateConfig = JSON.parse(raw);
             } catch {}
@@ -341,7 +349,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
 
             スライド構成案の各配列要素は、以下のキーを持つJSONオブジェクトです:
             - "title": string (スライドのタイトル)
-            - "layout": 'title_slide' | 'section_header' | 'content_with_visual' | 'content_with_bottom_visual' | 'content_only' | 'quote' (スライドの役割に応じたレイアウトタイプ)
+            - "layout": 'title_slide' | 'section_header' | 'content_with_visual' | 'content_with_bottom_visual' | 'content_only' | 'quote' | 'visual_hero_split' | 'comparison_cards' | 'checklist_top_bullets_bottom' (スライドの役割に応じたレイアウトタイプ)
             - "bullets": string[] (スライドの要点を箇条書きで)
             - "visual_suggestion": 'bar_chart' | 'pie_chart' | 'line_chart' | 'none' (グラフの提案、不要なら'none')
             - "context_for_visual": string (グラフ作成に必要な文脈)
@@ -350,7 +358,25 @@ export const intelligentPresenterWorkflow = createWorkflow({
             - "accent_color": "#RRGGBB" (任意。タイトル等で強調したい時のアクセントカラー)
             - "slide_style": { "title_bar_variant"?: "solid"|"underline"|"none", "density"?: "compact"|"normal"|"airy" } (任意)
             - 重要: 本ワークフローでは "layout": "freeform" は使用しません。"elements" キーは出力しないでください。
-            - 配置ガイダンス: 視覚要素が帯状（プロセス/ロードマップ/ガント/タイムラインなど）で、本文の箇条書きを広く使いたい場合は、必ず "layout": "content_with_bottom_visual" を使用してください。右パネルに画像/図を置きたい場合のみ "content_with_visual" を使用してください。
+            - レイアウト選択ガイド（厳守）:
+                1) content_only: 視覚要素が不要で、本文の要点のみで十分な場合。
+                2) content_with_visual: 右側に図・画像・簡潔な可視化（KPI/比較/アイコン列など）を置き、左側に本文（bullets）を配置する二分構成。本文だけで終わらせず、原則ビジュアルを伴うこと。
+                3) content_with_bottom_visual: 視覚要素が帯状（process/roadmap/gantt/timeline 等）で、本文の幅を広く使いたい場合。帯は下部に配置。
+                4) visual_hero_split: 左に大きなビジュアル（写真/抽象背景など）を主役として、右側のパネルにタイトルと簡潔な bullets を置く導入/事例向き。
+                5) comparison_cards: 2つの選択肢・プラン・競合比較をカードで並べたい場合（カード内はタイトル＋箇条書き）。
+                6) checklist_top_bullets_bottom: checklist のような短文アイテムを上部に大きく見せ、本文の bullets を下部にまとめて補足したい場合。チェックリストと本文が重複する場合は、本文を簡潔に圧縮すること。
+                7) quote: スライドの主目的が短い引用文のみで、visual_recipe が不要な場合に限定。
+                8) section_header: セクションの切り替え用。本文やビジュアルは持たない。
+                9) title_slide: 最初のスライド。タイトルと（必要に応じて）小さめの bullets を配置。
+            - 追加規則（ビジュアル優先方針）:
+                - 文字列の羅列は避け、極力ビジュアルを伴うレイアウト・recipe を選ぶ。bullets が5行以上、または3項目以上の場合は、必ず何らかの visual_recipe（checklist / callouts / comparison / process / timeline / table など）を提案する。
+                - segment列挙やカテゴリ紹介には 'callouts'（アイコンやロゴの利用を推奨）。
+                - to-do/要点集約には 'checklist'（必要に応じて 'checklist_top_bullets_bottom' レイアウト）。
+                - 比較には 'comparison' または 'comparison_cards'。
+                - 手順/流れには 'process'、時系列には 'timeline'。
+                - visual_recipe が 'process'|'roadmap'|'gantt'|'timeline' の場合は、本文の可読性を優先して "content_with_bottom_visual" を推奨。
+                - visual_recipe が 'checklist' の場合は、"checklist_top_bullets_bottom" を優先。bullets と内容が重複する場合は、bullets を短く要約する。'content_with_visual' は原則避ける。
+                - visual_suggestion が 'none' でも、checklist / callouts / comparison / process / timeline / table 等が有効なら積極的に提案する（重複は避ける）。
                 1) KPI: { "type": "kpi", "items": [{"label": string, "value": string, "icon"?: string}] }
                 2) 比較: { "type": "comparison", "a": {"label": string, "value": string}, "b": {"label": string, "value": string} }
                 3) タイムライン: { "type": "timeline", "steps": [{"label": string}, ...] }
@@ -431,7 +457,8 @@ export const intelligentPresenterWorkflow = createWorkflow({
                 // Load template (default.json)
                 let templateConfig: any = undefined;
                 try {
-                    const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', 'default.json');
+                    const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
+                    try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
                     const raw = await fs.readFile(tplPath, 'utf-8');
                     templateConfig = JSON.parse(raw);
                 } catch {}
@@ -444,7 +471,8 @@ export const intelligentPresenterWorkflow = createWorkflow({
                 logger.warn("AI returned an array instead of an object. Using default theme colors.");
                 let templateConfig: any = undefined;
                 try {
-                    const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', 'default.json');
+                    const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
+                    try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
                     const raw = await fs.readFile(tplPath, 'utf-8');
                     templateConfig = JSON.parse(raw);
                 } catch {}
@@ -461,7 +489,8 @@ export const intelligentPresenterWorkflow = createWorkflow({
                         logger.warn("AI returned a wrapped array. Extracting array and using default theme colors.");
                         let templateConfig: any = undefined;
                         try {
-                            const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', 'default.json');
+                            const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
+                            try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
                             const raw = await fs.readFile(tplPath, 'utf-8');
                             templateConfig = JSON.parse(raw);
                         } catch {}
@@ -475,7 +504,8 @@ export const intelligentPresenterWorkflow = createWorkflow({
             logger.error({ error: objectParseResult.error, aiOutput: designData }, message);
             let templateConfig: any = undefined;
             try {
-                const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', 'default.json');
+                const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
+                try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
                 const raw = await fs.readFile(tplPath, 'utf-8');
                 templateConfig = JSON.parse(raw);
             } catch {}
@@ -485,7 +515,8 @@ export const intelligentPresenterWorkflow = createWorkflow({
             logger.error({ error, aiOutput: (designResult && designResult.success) ? designResult.data.summary : 'AI output not available.' }, message);
             let templateConfig: any = undefined;
             try {
-                const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', 'default.json');
+                const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
+                try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
                 const raw = await fs.readFile(tplPath, 'utf-8');
                 templateConfig = JSON.parse(raw);
             } catch {}
@@ -558,10 +589,22 @@ export const intelligentPresenterWorkflow = createWorkflow({
                 const keywordResult = await summarizeAndAnalyzeTool.execute({ ...params, context: { text: titleSlide.title, objective: keywordExtractionPrompt, temperature: 0.2, topP: 0.9 } });
                 if (!keywordResult.success) return { buffer: undefined as any, imagePath: undefined };
                 const keywords = (keywordResult.data.summary || '').trim();
-                const prompt = `An abstract, professional background image representing the following themes: ${keywords}. High resolution, clean, and visually appealing.`;
-                const negativePrompt = 'text, words, letters, numbers, writing, typography, signatures, logos, people, faces';
+                // Build composed prompt (no raw keywords/title text; clear instruction for abstract, no text)
+                const themeColor1 = (params.inputData as any).themeColor1 as string | undefined;
+                const themeColor2 = (params.inputData as any).themeColor2 as string | undefined;
+                const paletteHint = (themeColor1 && themeColor2) ? `palette: primary=${themeColor1}, secondary=${themeColor2}` : '';
+                const composedPrompt = [
+                    'Abstract corporate background. Do not render any words, letters, numbers, symbols, or logos.',
+                    'Express the slide theme as visual metaphors using shapes, gradients, light, depth, and rhythm — not text.',
+                    'Design cues: clean geometric patterns, subtle gradient layers, soft light streaks, particle networks, depth-of-field bokeh, tasteful contrast.',
+                    paletteHint,
+                    'Minimal, elegant, high-resolution, professional. No text overlay.'
+                ].filter(Boolean).join(' ');
+                const tplBgSrc: any = ((params.inputData as any).templateConfig?.layouts?.title_slide?.background?.source) || {};
+                const negativePrompt = String(tplBgSrc.negativePrompt || 'text, watermark, logo').trim() || undefined;
+                logger.info({ prompt: composedPrompt, negativePrompt }, 'Title background image (pre-gen): sending prompt to generator');
                 const { genarateImage } = await import('../../tools/presenter/genarateImage');
-                const imageResult = await genarateImage({ prompt, aspectRatio: '16:9', negativePrompt });
+                const imageResult = await genarateImage({ prompt: composedPrompt, aspectRatio: '16:9', negativePrompt });
                 if (imageResult.success && imageResult.path) return { buffer: undefined as any, imagePath: imageResult.path };
                 return { buffer: undefined as any, imagePath: undefined };
             } catch {
@@ -698,6 +741,7 @@ Shortening and style constraints (Japanese):
             layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform']),
             special_content: z.string().optional().nullable(),
             visual_recipe: z.any().optional(),
+            context_for_visual: z.string().optional(),
             elements: z.array(z.any()).optional(),
         })),
         fileNameBase: z.string(),
@@ -719,7 +763,10 @@ Shortening and style constraints (Japanese):
         templateConfig: z.any().optional()
     }),
     execute: async (params) => {
-        const { enrichedSlides, companyName, fileNameBase, themeColor1, themeColor2, titleSlideImagePath } = params.inputData as any;
+        const { enrichedSlides, companyName, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, errorMessage } = params.inputData as any;
+        if (errorMessage) {
+            return { finalSlides: [], fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, templateConfig: (params.inputData as any).templateConfig } as any;
+        }
         if (!companyName) {
             logger.info('No companyName provided. Skipping company info enrichment.');
             // Pass-through: convert enrichedSlides->finalSlides without change
@@ -731,6 +778,7 @@ Shortening and style constraints (Japanese):
                 layout: slide.design.layout,
                 special_content: slide.design.special_content,
                 visual_recipe: slide.design.visual_recipe,
+                context_for_visual: slide.design.context_for_visual,
                 elements: slide.design.elements,
             }));
             return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, templateConfig: (params.inputData as any).templateConfig } as any;
@@ -788,7 +836,7 @@ Shortening and style constraints (Japanese):
             companyLogoPath = logoPath;
             logger.info({ logoPath }, 'Detected company logo for PPTX.');
         } catch {}
-        const passthrough = (enrichedSlides || []).map((s: any) => ({ title: s.design.title, bullets: s.design.bullets, imagePath: undefined, notes: s.speech, layout: s.design.layout, special_content: s.design.special_content, visual_recipe: s.design.visual_recipe, elements: s.design.elements }));
+        const passthrough = (enrichedSlides || []).map((s: any) => ({ title: s.design.title, bullets: s.design.bullets, imagePath: undefined, notes: s.speech, layout: s.design.layout, special_content: s.design.special_content, visual_recipe: s.design.visual_recipe, context_for_visual: s.design.context_for_visual, elements: s.design.elements }));
         const companyOverview = {
             company_name: name,
             address: typeof parsed?.address === 'string' ? parsed.address : undefined,
@@ -818,6 +866,7 @@ Shortening and style constraints (Japanese):
             layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform']),
             special_content: z.string().optional().nullable(),
             visual_recipe: z.any().optional(),
+            context_for_visual: z.string().optional(),
             elements: z.array(z.any()).optional(),
         })),
         fileNameBase: z.string(),
@@ -848,6 +897,7 @@ Shortening and style constraints (Japanese):
             layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform']),
             special_content: z.string().optional().nullable(),
             visual_recipe: z.any().optional(),
+            context_for_visual: z.string().optional(),
         })),
         fileNameBase: z.string(),
         themeColor1: z.string(),
@@ -901,14 +951,32 @@ Shortening and style constraints (Japanese):
             // (reverted) do not generate special image for section headers
 
             // Fallback logic removed: explicit layouts should be used (no implicit switching)
-            // Normalize layout if visual_recipe exists but layout lacks visual area
-            let finalLayout = slide.layout;
-            const vr = (slide as any).visual_recipe as any;
-            const vrType = vr && typeof vr === 'object' ? String(vr.type || '') : '';
-            const isBand = vrType === 'process' || vrType === 'roadmap' || vrType === 'gantt' || vrType === 'timeline';
-            if (vr && finalLayout === 'content_only') {
-                finalLayout = isBand ? 'content_with_bottom_visual' : 'content_with_visual';
-            }
+            // Respect AI-chosen layout; do not normalize automatically
+            const finalLayout = slide.layout;
+
+            // Auto-generate contextual image when layout has visual area but no visual_recipe and a context_for_visual is provided
+            try {
+                const needsImage = (slide.layout === 'content_with_visual' || slide.layout === 'content_with_bottom_visual') && !slide.visual_recipe && !imagePath && typeof slide.context_for_visual === 'string' && slide.context_for_visual.trim().length > 0;
+                if (needsImage) {
+                    const paletteHint = themeColor1 && themeColor2 ? `palette: primary=${themeColor1}, secondary=${themeColor2}` : '';
+                    const prompt = [
+                        'Photorealistic product-in-use scene for a presentation slide (no text).',
+                        'Subject: LED signage installed and operating in a real environment.',
+                        `Context: ${slide.context_for_visual.trim()}`,
+                        'Style: modern, high clarity, cinematic lighting, realistic materials, professional tone.',
+                        'Framing: wide shot, subject-centered composition, no people facing camera, no legible text.',
+                        paletteHint
+                    ].filter(Boolean).join(' ');
+                    const tplBgSrc: any = (params.inputData as any).templateConfig?.layouts?.title_slide?.background?.source || {};
+                    const negativePrompt = String(tplBgSrc.negativePrompt || 'text, watermark, logo').trim() || undefined;
+                    logger.info({ prompt, negativePrompt, slideIndex: index }, 'Context visual: sending prompt to generator');
+                    const { genarateImage } = await import('../../tools/presenter/genarateImage');
+                    const res = await genarateImage({ prompt, negativePrompt, aspectRatio: '16:9' });
+                    if (res?.success && res.path) {
+                        imagePath = res.path;
+                    }
+                }
+            } catch {}
 
             return {
                 title: slide.title,
@@ -918,6 +986,7 @@ Shortening and style constraints (Japanese):
                 layout: finalLayout,
                 special_content: slide.special_content,
                 visual_recipe: slide.visual_recipe,
+                context_for_visual: slide.context_for_visual,
                 elements: (slide as any).elements,
             };
         });
@@ -942,6 +1011,7 @@ Shortening and style constraints (Japanese):
             layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform']),
             special_content: z.string().optional().nullable(),
             visual_recipe: z.any().optional(),
+            context_for_visual: z.string().optional(),
         })),
         fileNameBase: z.string(),
         themeColor1: z.string(),
@@ -967,6 +1037,7 @@ Shortening and style constraints (Japanese):
     execute: async (params) => {
         const { finalSlides, fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, visualRecipes, companyLogoPath, companyCopyright, companyAbout, companyOverview, templateConfig } = params.inputData as any;
         if (errorMessage) {
+            try { logger.info('Workflow finished (failed).'); } catch {}
             return { success: false, message: errorMessage } as const;
         }
 
@@ -1013,6 +1084,7 @@ Shortening and style constraints (Japanese):
         // } catch {}
 
         const fileName = path.parse(pptResult.data.filePath).base;
+        try { logger.info('Workflow finished (success).'); } catch {}
         return {
             success: true,
             data: {

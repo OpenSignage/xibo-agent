@@ -24,6 +24,7 @@ export const config = {
   clientId: process.env.XIBO_CLIENT_ID || "",
   clientSecret: process.env.XIBO_CLIENT_SECRET || "",
   geminiApiKey: process.env.GEMINI_API_KEY || "",
+  googleCloudProjectId: process.env.GOOGLE_CLOUD_PROJECT_ID || "",
   apiUrl: "http://localhost:4111/ext-api",
 
   // Define directories relative to the project root for stability.

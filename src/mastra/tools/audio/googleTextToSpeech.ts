@@ -59,10 +59,11 @@ export const googleTextToSpeechTool = createTool({
 		outDir: z.string().optional().describe('Optional output directory for the audio file.'),
 		pronunciationDictPath: z.string().optional().describe('Optional path to a JSON dictionary (word -> reading) applied before TTS.'),
 		returnBuffer: z.boolean().optional().describe('If true, return audio Buffer instead of writing a file.'),
+		ssmlGender: z.enum(['MALE','FEMALE','NEUTRAL']).optional().describe('Preferred voice gender when name is not specified.'),
 	}),
 	outputSchema: z.union([successWrap, errorSchema]),
 	execute: async ({ context }) => {
-		const { text, voiceName, languageCode = 'ja-JP', speakingRate = 1.0, pitch = 0.0, format = 'mp3', fileNameBase, outDir, pronunciationDictPath, returnBuffer } = context as any;
+		const { text, voiceName, languageCode = 'ja-JP', speakingRate = 1.0, pitch = 0.0, format = 'mp3', fileNameBase, outDir, pronunciationDictPath, returnBuffer, ssmlGender } = context as any;
 		const apiKey = process.env.GOOGLE_TTS_API_KEY;
 		if (!apiKey) {
 			const message = 'GOOGLE_TTS_API_KEY is not set.';
@@ -103,9 +104,13 @@ export const googleTextToSpeechTool = createTool({
 			const audioEncoding = format === 'wav' ? 'LINEAR16' : 'MP3';
 			// Force a standard sample rate to avoid speed/pitch issues when concatenating with external assets
 			const targetSampleRate = 44100;
+			const voiceSel: any = voiceName ? { name: voiceName, languageCode } : { languageCode };
+			if (!voiceName && ssmlGender && (ssmlGender === 'MALE' || ssmlGender === 'FEMALE' || ssmlGender === 'NEUTRAL')) {
+				voiceSel.ssmlGender = ssmlGender;
+			}
 			const body = {
 				input: { text: processedText },
-				voice: voiceName ? { name: voiceName, languageCode } : { languageCode },
+				voice: voiceSel,
 				audioConfig: { audioEncoding, speakingRate, pitch, sampleRateHertz: targetSampleRate },
 			};
 			const resp = await fetch(endpoint, {

@@ -93,7 +93,7 @@ export const strategyPlannerWorkflow = createWorkflow({
 			logger.info('No companyName provided. Skipping reference material collection.');
 			return { marketResearch, productAnalysis, references: '', outputTitle };
 		}
-		const baseDir = path.join(config.projectRoot, 'persistent_data', 'company_info', companyName);
+		const baseDir = path.join('/Users/miuramasataka/OpenSignage/xibo-agent/persistent_data/companies_info', companyName);
 		logger.info({ baseDir }, 'Collecting company reference materials...');
 		let refs: string[] = [];
 		try {
@@ -281,7 +281,30 @@ export const strategyPlannerWorkflow = createWorkflow({
 			const fallback = `# Strategy Plan\n\nFailed to draft strategy: ${result.message}`;
 			return { strategyMarkdown: fallback, outputTitle };
 		}
-		return { strategyMarkdown: result.data.summary, outputTitle };
+		// Sanitize AI preamble (e.g., greeting/ack phrases) before saving
+		const sanitize = (md: string): string => {
+			if (!md) return md;
+			let s = md.replace(/^\uFEFF/, '');
+			const mHeading = s.match(/^\s*#\s.+/m);
+			if (mHeading && typeof mHeading.index === 'number') {
+				s = s.slice(mHeading.index);
+				return s.trimStart();
+			}
+			const hr = s.match(/^\s*---\s*$/m);
+			if (hr && typeof hr.index === 'number') {
+				s = s.slice(hr.index);
+				return s.trimStart();
+			}
+			const lines = s.split(/\r?\n/);
+			const preamblePatterns = /(承知いたしました|了解しました|かしこまりました|承知しました|承知です|了解です|はい、|以下の内容|以下に示します)/;
+			const firstNonEmpty = lines.findIndex(l => l.trim().length > 0);
+			if (firstNonEmpty === 0 && preamblePatterns.test(lines[0])) {
+				return lines.slice(1).join('\n').trimStart();
+			}
+			return s.trimStart();
+		};
+		const cleaned = sanitize(result.data.summary || '');
+		return { strategyMarkdown: cleaned, outputTitle };
 	},
 }))
 .then(createStep({
