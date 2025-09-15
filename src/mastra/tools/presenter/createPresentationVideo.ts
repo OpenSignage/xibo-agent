@@ -38,7 +38,7 @@ export const createPresentationVideoTool = createTool({
   }),
   outputSchema: z.object({
     success: z.boolean(),
-    videoPath: z.string().optional().describe('Path to generated video file'),
+    fileName: z.string().optional().describe('File name of generated video file'),
     message: z.string().optional(),
     error: z.string().optional(),
   }),
@@ -73,11 +73,10 @@ export const createPresentationVideoTool = createTool({
         const { wavPath, slideDurations } = await generateWavFromPptx(pptxPath, tempDir, gender);
         logger.info({ wavPath }, 'Generated WAV audio');
 
-        // Step 3: Generate opening and closing images (reverted to images)
-        logger.info('Generating opening and closing images...');
-        const openingImage = await generateOpeningImage(tempDir, baseName);
-        const closingImage = await generateClosingImage(tempDir, baseName);
-        logger.info('Generated opening and closing images');
+        // Step 3: Generate opening and closing content
+        logger.info('Generating opening and closing content...');
+        const { openingContent, closingContent } = await generateOpeningAndClosingContent(tempDir, baseName);
+        logger.info('Generated opening and closing content');
 
         // Step 4: Prepare audio files
         const assetsDir = path.join(config.projectRoot, 'persistent_data', 'assets', 'audios');
@@ -112,9 +111,9 @@ export const createPresentationVideoTool = createTool({
         const imageListPath = path.join(tempDir, 'images.txt');
         let imageListContent = '';
 
-        // Add opening image with duration based on opening audio
+        // Add opening content with duration based on opening audio
         const actualOpeningDuration = openingAudioDuration > 0 ? openingAudioDuration : 5.0;
-        imageListContent += `file '${openingImage.replace(/'/g, "'\\''")}'\nduration ${actualOpeningDuration}\n`;
+        imageListContent += `file '${openingContent.path.replace(/'/g, "'\\''")}'\nduration ${actualOpeningDuration}\n`;
 
         // Add main slides as images
         pngFiles.forEach((pngFile, index) => {
@@ -123,9 +122,9 @@ export const createPresentationVideoTool = createTool({
           imageListContent += `file '${pngFile.replace(/'/g, "'\\''")}'\nduration ${totalDuration}\n`;
         });
 
-        // Add closing image with duration based on closing audio
+        // Add closing content with duration based on closing audio
         const actualClosingDuration = closingAudioDuration > 0 ? closingAudioDuration : 5.0;
-        imageListContent += `file '${closingImage.replace(/'/g, "'\\''")}'\nduration ${actualClosingDuration}\n`;
+        imageListContent += `file '${closingContent.path.replace(/'/g, "'\\''")}'\nduration ${actualClosingDuration}\n`;
 
         await fs.writeFile(imageListPath, imageListContent, 'utf-8');
 
@@ -136,6 +135,10 @@ export const createPresentationVideoTool = createTool({
         // Create final audio with opening, main, and closing
         const finalAudioPath = path.join(tempDir, 'final_audio.wav');
         await createFinalAudio(openingAudio, mixedAudioPath, closingAudio, finalAudioPath);
+        
+        // Log final audio duration for debugging
+        const finalAudioDuration = await getAudioDuration(finalAudioPath);
+        logger.info({ finalAudioDuration }, 'Final audio duration');
 
         // Generate video with ffmpeg
         const ffmpegArgs = [
@@ -151,7 +154,6 @@ export const createPresentationVideoTool = createTool({
           '-preset', preset, // Encoding speed setting
           '-r', '30', // Frame rate
           '-pix_fmt', 'yuv420p', // Pixel format (for compatibility)
-          '-shortest', // Match shorter of audio/video
           outputVideoPath
         ];
 
@@ -164,7 +166,7 @@ export const createPresentationVideoTool = createTool({
 
         return {
           success: true,
-          videoPath: outputVideoPath,
+          fileName: `${baseName}.mp4`,
           message: `Video generated: ${outputVideoPath}`
         };
 
@@ -430,6 +432,28 @@ async function generateWavFromPptx(pptxPath: string, outputDir: string, gender: 
 
 
 /**
+ * Generate opening and closing content (images or videos)
+ * This function provides a clean interface for generating opening/closing content
+ * and can be easily switched between image and video generation
+ */
+async function generateOpeningAndClosingContent(
+  tempDir: string, 
+  baseName: string
+): Promise<{ 
+  openingContent: { path: string; type: 'image' | 'video' }; 
+  closingContent: { path: string; type: 'image' | 'video' } 
+}> {
+  // For now, generate images (can be easily switched to videos later)
+  const openingImage = await generateOpeningImage(tempDir, baseName);
+  const closingImage = await generateClosingImage(tempDir, baseName);
+  
+  return {
+    openingContent: { path: openingImage, type: 'image' },
+    closingContent: { path: closingImage, type: 'image' }
+  };
+}
+
+/**
  * Generate opening image
  */
 async function generateOpeningImage(tempDir: string, baseName: string): Promise<string> {
@@ -544,6 +568,7 @@ async function createFinalAudio(openingPath: string, mainPath: string, closingPa
     outputPath
   ]);
 }
+
 
 
 /**
