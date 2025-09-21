@@ -1823,7 +1823,7 @@ export const createPowerpointTool = createTool({
                         targetSlide.addShape('rect', { x, y, w: boxW, h: boxH, fill: { color: calloutBg }, line: { color: secondary, width: 0.5 }, shadow: shadowOf(resolveVisualShadow('callouts')) });
                         const calloutColor = pickTextColorForBackground(calloutBg).toString();
 
-                        // Resolve icon image path: if provided path use it; else if provided name/keyword, generate via genarateImage
+                        // Resolve icon image path: if provided path use it; else if provided name/keyword, generate via generateImage
                         let iconPath: string | null = null;
                         if (iconEnabled) {
                             const rawIcon = (it?.iconPath || it?.icon || it?.iconName || '').toString().trim();
@@ -1832,9 +1832,9 @@ export const createPowerpointTool = createTool({
                                     iconPath = rawIcon;
                                 } else {
                                     try {
-                                        const { genarateImage } = await import('./genarateImage');
+                                        const { generateImage } = await import('./generateImage');
                                         const prompt = buildIconPrompt(rawIcon, iconStyle, iconMonochrome, fixedGlyph, fixedBg);
-                                        const out = await genarateImage({ prompt, aspectRatio: '1:1' });
+                                        const out = await generateImage({ prompt, aspectRatio: '1:1' });
                                         if (out && out.success && out.path) {
                                             iconPath = out.path;
                                             try { imagePathsToDelete.add(out.path); } catch {}
@@ -1921,9 +1921,9 @@ export const createPowerpointTool = createTool({
                                         iconPath = rawIcon;
                                     } else {
                                         try {
-                                            const { genarateImage } = await import('./genarateImage');
+                                            const { generateImage } = await import('./generateImage');
                                             const prompt = buildIconPrompt(rawIcon, iconStyle, iconMonochrome, fixedGlyph as any, fixedBg as any);
-                                            const out = await genarateImage({ prompt, aspectRatio: '1:1' });
+                                            const out = await generateImage({ prompt, aspectRatio: '1:1' });
                                             if (out && out.success && out.path) {
                                                 iconPath = out.path;
                                                 try { imagePathsToDelete.add(out.path); } catch {}
@@ -2328,9 +2328,9 @@ export const createPowerpointTool = createTool({
                         slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
                     }
                 } else if (isTitleSlide && ((slides[0] as any)?.titleSlideImagePrompt || templateConfig?.layouts?.title_slide?.background?.source?.type === 'ai')) {
-                    // Generate title background via new genarateImage using slide title and executive summary context; respect negativePrompt
+                    // Generate title background via new generateImage using slide title and executive summary context; respect negativePrompt
                     try {
-                        const { genarateImage } = await import('./genarateImage');
+                        const { generateImage } = await import('./generateImage');
                         const tplBgSrc: any = templateConfig?.layouts?.title_slide?.background?.source || {};
                         const slide0: any = (slides[0] as any) || {};
                         // Abstract, textless background prompt (no raw title/keywords)
@@ -2344,7 +2344,7 @@ export const createPowerpointTool = createTool({
                         ].filter(Boolean).join(' ');
                         const negativePrompt: string | undefined = String(slide0.titleSlideImageNegativePrompt || tplBgSrc.negativePrompt || '').trim() || undefined;
                         logger.info({ prompt: composedPrompt, negativePrompt }, 'Title background image: sending prompt to generator');
-                        const out = await genarateImage({ prompt: composedPrompt, negativePrompt, aspectRatio: '16:9' });
+                        const out = await generateImage({ prompt: composedPrompt, negativePrompt, aspectRatio: '16:9' });
                         if (out.success && out.path) {
                             slide.background = { path: out.path } as any;
                             (slide as any).__tempImages = (slide as any).__tempImages || [];
@@ -2728,8 +2728,8 @@ export const createPowerpointTool = createTool({
                                     'Style: modern, clean, high-resolution, professional.',
                                     paletteHint
                                 ].filter(Boolean).join(' ');
-                                const { genarateImage } = await import('./genarateImage');
-                                const res = await genarateImage({ prompt, aspectRatio: '4:3' });
+                                const { generateImage } = await import('./generateImage');
+                                const res = await generateImage({ prompt, aspectRatio: '4:3' });
                                 if (res?.success && res.path) imagePath = res.path;
                             } catch {}
                         }
