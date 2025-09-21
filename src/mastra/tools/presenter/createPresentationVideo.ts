@@ -21,7 +21,6 @@ import { googleTextToSpeechTool } from '../audio/googleTextToSpeech';
 import { getSpeechConfigByGender } from './speachConfig';
 import { config } from '../xibo-agent/config';
 import { genarateImage } from './genarateImage';
-import { genarateVideo } from './genarateVideo';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,7 +30,7 @@ const execFileAsync = promisify(execFile);
  */
 export const createPresentationVideoTool = createTool({
   id: 'create-presentation-video',
-  description: 'Generate video from PowerPoint files by combining PNG images and WAV audio',
+  description: 'Generate video from PowerPoint files by combining PNG images and WAV audio with AI-generated opening and closing images',
   inputSchema: z.object({
     fileName: z.string().describe('File name under persistent_data/generated/presentations (e.g., presentation.pptx)'),
     gender: z.enum(['male', 'female']).optional().default('male').describe('Voice gender (default: male)'),
@@ -56,7 +55,7 @@ export const createPresentationVideoTool = createTool({
     try {
       // Check input file exists
       await fs.access(pptxPath);
-      logger.info({ pptxPath }, 'PowerPoint file confirmed');
+      logger.info({ fileName }, '📄 Processing PowerPoint file');
 
       // Create temporary directory
       const tempDir = path.join(config.projectRoot, 'public', 'temp', 'images');
@@ -64,28 +63,70 @@ export const createPresentationVideoTool = createTool({
 
       try {
         // Step 1: Generate PNG images from PPTX
-        logger.info('Generating PNG images from PowerPoint...');
+        logger.info('📸 Step 1: Converting PowerPoint to PNG images...');
         const pngFiles = await generatePngFromPptx(pptxPath, tempDir, 'medium');
-        logger.info({ count: pngFiles.length }, `Generated ${pngFiles.length} PNG images`);
+        logger.info({ count: pngFiles.length }, `✅ Generated ${pngFiles.length} PNG images`);
 
         // Step 2: Generate WAV audio from PPTX
-        logger.info('Generating WAV audio from PowerPoint...');
+        logger.info('🎤 Step 2: Generating speech audio from slide notes...');
         const { wavPath, slideDurations } = await generateWavFromPptx(pptxPath, tempDir, gender);
-        logger.info({ wavPath }, 'Generated WAV audio');
+        logger.info({ slideCount: slideDurations.length }, '✅ Generated speech audio');
 
         // Step 3: Generate opening and closing content
-        logger.info('Generating opening and closing content...');
+        logger.info('🎨 Step 3: Creating opening and closing images...');
         const { openingContent, closingContent } = await generateOpeningAndClosingContent(tempDir, baseName);
-        logger.info('Generated opening and closing content');
+        logger.info({ 
+          openingType: openingContent.type, 
+          closingType: closingContent.type 
+        }, '✅ Generated opening and closing content');
 
         // Step 4: Prepare audio files
+        logger.info('🎵 Step 4: Preparing audio assets...');
         const assetsDir = path.join(config.projectRoot, 'persistent_data', 'assets', 'audios');
         const openingAudio = path.join(assetsDir, 'Presentation.wav');
         const bgmAudio = path.join(assetsDir, 'bgm001.wav');
         const closingAudio = path.join(assetsDir, 'presentation_long.wav');
 
-        // Step 5: Generate video with opening, main content, and closing
-        logger.info('Generating video...');
+        // Step 5: Extract audio from opening and closing videos
+        logger.info('🔊 Step 5: Processing opening and closing audio...');
+        
+        const openingVideoAudio = path.join(tempDir, 'opening_video_audio.wav');
+        const closingVideoAudio = path.join(tempDir, 'closing_video_audio.wav');
+        
+        // Extract audio from opening video
+        if (openingContent.type === 'video') {
+          await execFileAsync('ffmpeg', [
+            '-y',
+            '-i', openingContent.path,
+            '-vn', // No video
+            '-acodec', 'pcm_s16le',
+            '-ar', '44100',
+            '-ac', '2',
+            openingVideoAudio
+          ]);
+        } else {
+          // If opening is image, use the original opening audio
+          await fs.copyFile(openingAudio, openingVideoAudio);
+        }
+        
+        // Extract audio from closing video
+        if (closingContent.type === 'video') {
+          await execFileAsync('ffmpeg', [
+            '-y',
+            '-i', closingContent.path,
+            '-vn', // No video
+            '-acodec', 'pcm_s16le',
+            '-ar', '44100',
+            '-ac', '2',
+            closingVideoAudio
+          ]);
+        } else {
+          // If closing is image, use the original closing audio
+          await fs.copyFile(closingAudio, closingVideoAudio);
+        }
+
+        // Step 6: Generate video with opening, main content, and closing
+        logger.info('🎬 Step 6: Generating final video...');
         
         // Check ffmpeg command exists
         try {
@@ -99,13 +140,13 @@ export const createPresentationVideoTool = createTool({
         const preset = 'medium';
 
         // Get opening and closing audio durations
-        const openingAudioDuration = await getAudioDuration(openingAudio);
-        const closingAudioDuration = await getAudioDuration(closingAudio);
+        const openingAudioDuration = await getAudioDuration(openingVideoAudio);
+        const closingAudioDuration = await getAudioDuration(closingVideoAudio);
         
         logger.info({ 
-          openingAudioDuration, 
-          closingAudioDuration 
-        }, 'Audio durations detected');
+          opening: Math.round(openingAudioDuration), 
+          closing: Math.round(closingAudioDuration) 
+        }, '⏱️ Audio durations detected (seconds)');
 
         // Create image list file with opening, main slides, and closing
         const imageListPath = path.join(tempDir, 'images.txt');
@@ -127,25 +168,33 @@ export const createPresentationVideoTool = createTool({
         imageListContent += `file '${closingContent.path.replace(/'/g, "'\\''")}'\nduration ${actualClosingDuration}\n`;
 
         await fs.writeFile(imageListPath, imageListContent, 'utf-8');
+        
+        logger.info({ 
+          openingType: openingContent.type,
+          closingType: closingContent.type,
+          slideCount: pngFiles.length
+        }, '📋 Image list created for video generation');
 
         // Create audio mix with BGM
+        logger.info('🎼 Mixing speech with background music...');
         const mixedAudioPath = path.join(tempDir, 'mixed_audio.wav');
         await mixAudioWithBGM(wavPath, bgmAudio, mixedAudioPath);
 
         // Create final audio with opening, main, and closing
+        logger.info('🔗 Combining all audio segments...');
         const finalAudioPath = path.join(tempDir, 'final_audio.wav');
-        await createFinalAudio(openingAudio, mixedAudioPath, closingAudio, finalAudioPath);
+        await createFinalAudio(openingVideoAudio, mixedAudioPath, closingVideoAudio, finalAudioPath);
         
-        // Log final audio duration for debugging
+        // Get final audio duration for validation
         const finalAudioDuration = await getAudioDuration(finalAudioPath);
-        logger.info({ finalAudioDuration }, 'Final audio duration');
+        logger.info({ duration: Math.round(finalAudioDuration) }, '⏱️ Final audio duration (seconds)');
 
         // Generate video with ffmpeg
         const ffmpegArgs = [
           '-y', // Overwrite without confirmation
           '-f', 'concat',
           '-safe', '0',
-          '-i', imageListPath, // Image list
+          '-i', imageListPath, // Image/video list
           '-i', finalAudioPath, // Final audio file
           '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', // Resize to even dimensions
           '-c:v', 'libx264', // Video codec
@@ -154,6 +203,7 @@ export const createPresentationVideoTool = createTool({
           '-preset', preset, // Encoding speed setting
           '-r', '30', // Frame rate
           '-pix_fmt', 'yuv420p', // Pixel format (for compatibility)
+          '-shortest', // End when shortest input ends
           outputVideoPath
         ];
 
@@ -162,7 +212,7 @@ export const createPresentationVideoTool = createTool({
         // Clean up temporary directory
         await fs.rm(tempDir, { recursive: true, force: true });
 
-        logger.info({ outputVideoPath }, 'Video generation completed');
+        logger.info({ outputVideoPath }, '🎉 Video generation completed successfully');
 
         return {
           success: true,
@@ -173,12 +223,17 @@ export const createPresentationVideoTool = createTool({
       } catch (conversionError) {
         // Clean up temporary directory
         await fs.rm(tempDir, { recursive: true, force: true });
-        throw conversionError;
+        const errorMessage = conversionError instanceof Error ? conversionError.message : 'Unknown conversion error';
+        logger.error({ error: errorMessage, fileName }, '❌ Video generation failed');
+        return {
+          success: false,
+          error: errorMessage
+        };
       }
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error({ error, pptxPath }, 'Video generation failed');
+      logger.error({ error: errorMessage, fileName }, '❌ Video generation failed');
       
       return {
         success: false,
@@ -262,7 +317,9 @@ async function generatePngFromPptx(pptxPath: string, outputDir: string, videoQua
   } catch (error) {
     // Clean up temporary directory
     await fs.rm(tempDir, { recursive: true, force: true });
-    throw error;
+    const errorMessage = error instanceof Error ? error.message : 'Unknown PNG generation error';
+    logger.error({ error: errorMessage }, '❌ PNG generation failed');
+    throw new Error(errorMessage);
   }
 }
 
@@ -323,7 +380,6 @@ async function generateWavFromPptx(pptxPath: string, outputDir: string, gender: 
 
     // Speech synthesis configuration
     const speechCfg = getSpeechConfigByGender(gender);
-    logger.info({ gender, voiceName: speechCfg.voiceName, ssmlGender: gender === 'female' ? 'FEMALE' : 'MALE' }, 'TTS configuration');
 
     // Text-to-speech helper function
     const synth = async (text: string, outWav: string) => {
@@ -343,25 +399,25 @@ async function generateWavFromPptx(pptxPath: string, outputDir: string, gender: 
         pronunciationDictPath: speechCfg.pronunciationDictPath 
       };
       
-      logger.info({ ttsParams }, 'Calling Google TTS');
-      
       const res = await googleTextToSpeechTool.execute({ 
         context: ttsParams
       } as any);
       
       if (res.success && (res.data as any).filePath) {
         const src = (res.data as any).filePath as string;
-        if (src !== outWav) {
-          // Normalize Google TTS output to 44.1kHz stereo PCM
-          await execFileAsync('ffmpeg', [
-            '-y',
-            '-i', src,
-            '-ar', '44100',
-            '-ac', '2',
-            '-c:a', 'pcm_s16le',
-            outWav
-          ]);
-        }
+        
+        // Always copy and normalize the file to ensure correct naming
+        await execFileAsync('ffmpeg', [
+          '-y',
+          '-i', src,
+          '-ar', '44100',
+          '-ac', '2',
+          '-c:a', 'pcm_s16le',
+          outWav
+        ]);
+        
+        // Verify the output file was created
+        await fs.access(outWav);
       } else {
         throw new Error('Google TTS failed to synthesize segment');
       }
@@ -370,7 +426,14 @@ async function generateWavFromPptx(pptxPath: string, outputDir: string, gender: 
     // Silence generation helper function
     const makeSilence = async (outWav: string, seconds: number) => {
       const dur = Math.max(0.1, Number(seconds) || 0);
-      await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', String(dur), '-ar', '44100', '-ac', '2', outWav]);
+      try {
+        await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', String(dur), '-ar', '44100', '-ac', '2', outWav]);
+        await fs.access(outWav);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        logger.error({ error: errorMessage, outWav, duration: dur }, '❌ Failed to create silence file');
+        throw new Error(`Silence file creation failed: ${errorMessage}`);
+      }
     };
 
     // Build segments and record slide durations
@@ -380,32 +443,43 @@ async function generateWavFromPptx(pptxPath: string, outputDir: string, gender: 
     for (let i = 0; i < slideNotes.length; i++) {
       const notes = String(slideNotes[i] || '').trim();
       
-      // Image display start (2 seconds silence)
-      const preSlideSilence = path.join(segDir, `pre-slide-${String(i+1).padStart(3,'0')}.wav`);
-      await makeSilence(preSlideSilence, 2.0);
-      segPaths.push(preSlideSilence);
-      
-      if (notes) {
-        // Narration audio
-        const wav = path.join(segDir, `slide-${String(i+1).padStart(3,'0')}.wav`);
-        await synth(notes, wav);
-        segPaths.push(wav);
+      try {
+        // Image display start (2 seconds silence)
+        const preSlideSilence = path.join(segDir, `pre-slide-${String(i+1).padStart(3,'0')}.wav`);
+        await makeSilence(preSlideSilence, 2.0);
+        segPaths.push(preSlideSilence);
         
-        // Measure each slide's audio duration (narration only)
-        const narrationDuration = await getAudioDuration(wav);
-        slideDurations.push(narrationDuration);
-      } else {
-        // Empty slide with 5 seconds silence
-        const emptySlideSilence = path.join(segDir, `empty-slide-${String(i+1).padStart(3,'0')}.wav`);
-        await makeSilence(emptySlideSilence, 5.0);
-        segPaths.push(emptySlideSilence);
-        slideDurations.push(5.0);
+        if (notes) {
+          // Narration audio
+          const wav = path.join(segDir, `slide-${String(i+1).padStart(3,'0')}.wav`);
+          await synth(notes, wav);
+          segPaths.push(wav);
+          
+          // Measure each slide's audio duration (narration only)
+          const narrationDuration = await getAudioDuration(wav);
+          slideDurations.push(narrationDuration);
+        } else {
+          // Empty slide with 5 seconds silence
+          const emptySlideSilence = path.join(segDir, `empty-slide-${String(i+1).padStart(3,'0')}.wav`);
+          await makeSilence(emptySlideSilence, 5.0);
+          segPaths.push(emptySlideSilence);
+          slideDurations.push(5.0);
+        }
+        
+        // After narration ends (1 second silence)
+        const postSlideSilence = path.join(segDir, `post-slide-${String(i+1).padStart(3,'0')}.wav`);
+        await makeSilence(postSlideSilence, 1.0);
+        segPaths.push(postSlideSilence);
+        
+        // Progress logging every 5 slides
+        if ((i + 1) % 5 === 0 || i === slideNotes.length - 1) {
+          logger.info({ processed: i + 1, total: slideNotes.length }, '🎤 Processing speech synthesis');
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        logger.error({ slideIndex: i + 1, error: errorMessage }, '❌ Failed to process slide');
+        throw new Error(`Slide ${i + 1} processing failed: ${errorMessage}`);
       }
-      
-      // After narration ends (1 second silence)
-      const postSlideSilence = path.join(segDir, `post-slide-${String(i+1).padStart(3,'0')}.wav`);
-      await makeSilence(postSlideSilence, 1.0);
-      segPaths.push(postSlideSilence);
     }
 
     if (!segPaths.length) {
@@ -416,6 +490,20 @@ async function generateWavFromPptx(pptxPath: string, outputDir: string, gender: 
     const listPath = path.join(tempDir, 'concat.txt');
     const listBody = segPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
     await fs.writeFile(listPath, listBody, 'utf-8');
+    
+        logger.info({ segmentCount: segPaths.length }, '🔗 Concatenating audio segments');
+    
+    // Verify all segment files exist before concatenation
+    for (const segPath of segPaths) {
+      try {
+        await fs.access(segPath);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        logger.error({ missingFile: segPath, error: errorMessage }, '❌ Segment file does not exist');
+        throw new Error(`Segment file does not exist: ${segPath}`);
+      }
+    }
+    
     await execFileAsync('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', wavPath]);
 
     // Clean up temporary directory
@@ -426,15 +514,16 @@ async function generateWavFromPptx(pptxPath: string, outputDir: string, gender: 
   } catch (error) {
     // Clean up temporary directory
     await fs.rm(tempDir, { recursive: true, force: true });
-    throw error;
+    const errorMessage = error instanceof Error ? error.message : 'Unknown WAV generation error';
+    logger.error({ error: errorMessage }, '❌ WAV generation failed');
+    throw new Error(errorMessage);
   }
 }
 
 
 /**
- * Generate opening and closing content (images or videos)
- * This function provides a clean interface for generating opening/closing content
- * and can be easily switched between image and video generation
+ * Generate opening and closing content (images only)
+ * This function generates AI images for opening and closing sequences
  */
 async function generateOpeningAndClosingContent(
   tempDir: string, 
@@ -443,15 +532,22 @@ async function generateOpeningAndClosingContent(
   openingContent: { path: string; type: 'image' | 'video' }; 
   closingContent: { path: string; type: 'image' | 'video' } 
 }> {
-  // For now, generate images (can be easily switched to videos later)
+  // Generate opening image
   const openingImage = await generateOpeningImage(tempDir, baseName);
+  const openingContent = { path: openingImage, type: 'image' as const };
+  logger.info('Opening image generated');
+
+  // Generate closing image
   const closingImage = await generateClosingImage(tempDir, baseName);
+  const closingContent = { path: closingImage, type: 'image' as const };
+  logger.info('Closing image generated');
   
   return {
-    openingContent: { path: openingImage, type: 'image' },
-    closingContent: { path: closingImage, type: 'image' }
+    openingContent,
+    closingContent
   };
 }
+
 
 /**
  * Generate opening image
@@ -466,7 +562,9 @@ async function generateOpeningImage(tempDir: string, baseName: string): Promise<
   });
 
   if (!result.success) {
-    throw new Error(`Failed to generate opening image: ${result.message}`);
+    const errorMessage = `Failed to generate opening image: ${result.message}`;
+    logger.error({ error: errorMessage }, '❌ Opening image generation failed');
+    throw new Error(errorMessage);
   }
 
   if (result.path) {
@@ -489,7 +587,9 @@ async function generateClosingImage(tempDir: string, baseName: string): Promise<
   });
 
   if (!result.success) {
-    throw new Error(`Failed to generate closing image: ${result.message}`);
+    const errorMessage = `Failed to generate closing image: ${result.message}`;
+    logger.error({ error: errorMessage }, '❌ Closing image generation failed');
+    throw new Error(errorMessage);
   }
 
   if (result.path) {

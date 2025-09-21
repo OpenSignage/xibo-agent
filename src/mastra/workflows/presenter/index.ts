@@ -10,3 +10,4 @@
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 export { intelligentPresenterWorkflow } from './intelligentPresenter';
+export { recipeToPptxWorkflow } from './recipeToPptx';

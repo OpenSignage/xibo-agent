@@ -23,7 +23,8 @@ import { Memory } from '@mastra/memory';
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
 import { fastembed } from '@mastra/fastembed';
 import { getReportsList } from '../../tools/util';
-
+import { createPresentationVideoTool } from '../../tools/presenter/createPresentationVideo';
+import { createNarrationWavTool } from '../../tools/presenter/createNarrationWav';
 /**
  * @module marketingAgent
  * @description An agent specialized in conducting market research by leveraging a suite of tools and workflows.
@@ -46,6 +47,8 @@ export const marketingAgent = new Agent({
   tools: {
     getProductsInfoUploadUrls: getProductsInfoUploadUrlsTool,
     getReportsList: getReportsList,
+    createPresentationVideo: createPresentationVideoTool,
+    createNarrationWav: createNarrationWavTool,
   },
   memory: new Memory({
     options: {

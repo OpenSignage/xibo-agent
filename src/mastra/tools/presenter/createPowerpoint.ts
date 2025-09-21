@@ -16,7 +16,7 @@ import PptxGenJS from 'pptxgenjs';
 import path from 'path';
 import { config } from '../xibo-agent/config';
 import fs from 'fs/promises';
- 
+
 
 //
 const JPN_FONT = 'Noto Sans JP';
@@ -600,9 +600,14 @@ const slideSchema = z.object({
   imagePath: z.string().optional().describe('An optional path to an image to include on the slide.'),
   
   notes: z.string().optional().describe('Speaker notes for the slide.'),
-  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'visual_hero_split', 'comparison_cards', 'checklist_top_bullets_bottom']).optional().describe('The layout type for the slide.'),
+  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_with_image', 'content_only', 'quote', 'visual_hero_split', 'comparison_cards', 'checklist_top_bullets_bottom', 'visual_only']).optional().describe('The layout type for the slide.'),
   special_content: z.string().optional().nullable().describe('Special content for layouts like \'quote\'.'),
   elements: z.array(z.any()).optional().describe('Freeform elements array when layout is freeform.'),
+  visual_recipe: z.any().optional().describe('Optional visual recipe object used by template visual elements.'),
+  context_for_visual: z.string().optional().describe('Optional context hint used for generating or selecting visuals.'),
+  // Optional comparison_cards-specific bullets
+  bulletsA: z.array(z.string()).optional().describe('Left column bullets for comparison_cards layout.'),
+  bulletsB: z.array(z.string()).optional().describe('Right column bullets for comparison_cards layout.'),
 });
 
 const inputSchema = z.object({
@@ -704,6 +709,48 @@ export const createPowerpointTool = createTool({
     logger.info({ filePath, slideCount: slides.length }, 'Creating PowerPoint presentation');
 
     try {
+        // --- Fail-fast template validation (template-driven rendering) ---
+        const validateTemplateForSlides = (tpl: any, slidesIn: any[]): { ok: boolean; errors: string[] } => {
+          const errors: string[] = [];
+          const layouts = tpl?.layouts || {};
+          const getVisualElements = (layoutKey: string): any[] => {
+            const els = layouts?.[layoutKey]?.elements;
+            if (!Array.isArray(els)) return [];
+            return els.filter((e: any) => String(e?.type) === 'visual' && (String(e?.recipeRef || '') === 'visual_recipe'));
+          };
+          for (let i = 0; i < slidesIn.length; i++) {
+            const s: any = slidesIn[i] || {};
+            const layoutKey: string = String(s?.layout || 'content_only');
+            const layoutExists = !!layouts?.[layoutKey];
+            if (!layoutExists) {
+              errors.push(`[slide ${i+1}] layout '${layoutKey}' not found in template.layouts`);
+              continue;
+            }
+            const needsVisual = !!s?.visual_recipe;
+            if (needsVisual) {
+              const vEls = getVisualElements(layoutKey);
+              if (!vEls.length) {
+                errors.push(`[slide ${i+1}] layout '${layoutKey}' has no elements visual (recipeRef: visual_recipe)`);
+              } else {
+                const areas = layouts?.[layoutKey]?.areas || {};
+                for (const ve of vEls) {
+                  const areaName = String(ve?.area || '');
+                  if (!areaName || !areas[areaName]) {
+                    errors.push(`[slide ${i+1}] layout '${layoutKey}' visual element area '${areaName || '(missing)'}' not found in areas`);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          return { ok: errors.length === 0, errors };
+        };
+        const templateValidation = validateTemplateForSlides(templateConfig, slides as any[]);
+        if (!templateValidation.ok) {
+          const line = templateValidation.errors[0] || 'Template validation failed.';
+          logger.error({ error: line }, 'Template validation failed');
+          return { success: false, message: line } as const;
+        }
         await fs.mkdir(presenterDir, { recursive: true });
         // Ensure charts support by preferring a build that includes Charts
         let Pptx: any = PptxGenJS;
@@ -831,6 +878,170 @@ export const createPowerpointTool = createTool({
           return toHex(s);
         };
 
+        // --- Visual categorical palette (for richer color variety) ---
+        const ensureHash = (c: string): string => (c && c.startsWith('#')) ? c : (c ? `#${c}` : '#000000');
+        const paletteColors: string[] = (() => {
+          try {
+            const tplPalette = (templateConfig?.visualStyles?.palette?.colors);
+            if (Array.isArray(tplPalette) && tplPalette.length) {
+              return tplPalette.map((c: any) => ensureHash(String(c))).filter(Boolean);
+            }
+          } catch {}
+          // Build dynamic palette from AI colors according to paletteStrategy
+          const strategy: any = (templateConfig?.rules?.paletteStrategy) || {};
+          const useMode: 'template'|'prefer_ai'|'ai_overrides' = (strategy.use === 'ai_overrides' ? 'ai_overrides' : (strategy.use === 'template' ? 'template' : 'prefer_ai'));
+          const distribution: 'cycle'|'shufflePerVisual'|'shufflePerSlide' = (['cycle','shufflePerVisual','shufflePerSlide'].includes(String(strategy.distribution)) ? strategy.distribution : 'cycle') as any;
+          const maxColors = Number.isFinite(Number(strategy.maxColors)) ? Math.max(3, Number(strategy.maxColors)) : 8;
+          // Source base colors: prefer AI based on aiColorPolicy + paletteStrategy.use
+          const policy: 'template'|'prefer_ai'|'ai_overrides'|'disabled' = aiColorPolicy;
+          const preferAI = (useMode === 'ai_overrides') || (useMode === 'prefer_ai') || (policy === 'ai_overrides') || (policy === 'prefer_ai');
+          const aiOverride = (useMode === 'ai_overrides') || (policy === 'ai_overrides');
+          const baseSeeds: string[] = aiOverride
+            ? [resolvedPrimary, resolvedSecondary]
+            : (preferAI ? [resolvedPrimary, resolvedSecondary, accent] : [primary, secondary, accent]);
+          // Generate a balanced palette: rotate hues and vary lightness/saturation to avoid same-hue clustering
+          const toHsl = (hex: string) => {
+            const h = ensureHash(hex).replace('#','');
+            const r = parseInt(h.slice(0,2),16)/255, g = parseInt(h.slice(2,4),16)/255, b = parseInt(h.slice(4,6),16)/255;
+            const max = Math.max(r,g,b), min = Math.min(r,g,b);
+            let hDeg = 0; const l = (max+min)/2; const d = max-min;
+            if (d !== 0) {
+              const s = d / (1 - Math.abs(2*l - 1));
+              if (max === r) hDeg = 60 * (((g-b)/d) % 6);
+              else if (max === g) hDeg = 60 * (((b-r)/d) + 2);
+              else hDeg = 60 * (((r-g)/d) + 4);
+              return { h: (hDeg+360)%360, s, l };
+            }
+            return { h: 0, s: 0, l };
+          };
+          const fromHsl = (h:number,s:number,l:number) => {
+            const c = (1 - Math.abs(2*l - 1)) * s; const x = c*(1-Math.abs(((h/60)%2)-1)); const m = l - c/2;
+            let r=0,g=0,b=0;
+            if (0<=h && h<60) { r=c; g=x; b=0; }
+            else if (60<=h && h<120) { r=x; g=c; b=0; }
+            else if (120<=h && h<180) { r=0; g=c; b=x; }
+            else if (180<=h && h<240) { r=0; g=x; b=c; }
+            else if (240<=h && h<300) { r=x; g=0; b=c; }
+            else { r=c; g=0; b=x; }
+            const R = Math.round((r+m)*255).toString(16).padStart(2,'0');
+            const G = Math.round((g+m)*255).toString(16).padStart(2,'0');
+            const B = Math.round((b+m)*255).toString(16).padStart(2,'0');
+            return `#${R}${G}${B}`;
+          };
+          const seedsHsl = baseSeeds.map(toHsl);
+          const out: string[] = [];
+          for (let i=0; i<maxColors; i++) {
+            const baseIdx = i % seedsHsl.length;
+            const base = seedsHsl[baseIdx];
+            let h: number;
+            if (aiOverride) {
+              // Keep within same hue family (±6°) to maintain brand/AI color feel
+              const delta = (i % 2 === 0) ? 6 : -6;
+              h = (base.h + delta) % 360;
+            } else {
+              // Balanced spectrum when not strictly overriding with AI
+              const golden = 137.5; // degrees
+              h = (base.h + i*golden) % 360;
+            }
+            // Lightness/Saturation gentle zig-zag for variety while staying in family
+            const s = Math.min(0.85, Math.max(0.35, base.s + ((i%2===0)? 0.08 : -0.04)));
+            const l = Math.min(0.72, Math.max(0.28, base.l + ((i%3===0)? 0.06 : (i%3===1? -0.05 : 0.02))));
+            out.push(fromHsl(h,s,l));
+          }
+          return out;
+        })();
+        const getPaletteColor = (index: number): string => {
+          if (!Array.isArray(paletteColors) || paletteColors.length === 0) return secondary;
+          const strategy: any = (templateConfig?.rules?.paletteStrategy) || {};
+          const distribution: 'cycle'|'shufflePerVisual'|'shufflePerSlide' = (['cycle','shufflePerVisual','shufflePerSlide'].includes(String(strategy.distribution)) ? strategy.distribution : 'cycle') as any;
+          // seed per visual/slide: we approximate by using index with simple hash drift
+          let offset = 0;
+          if (distribution === 'shufflePerVisual') {
+            offset = (index * 3 + 5) % paletteColors.length;
+          } else if (distribution === 'shufflePerSlide') {
+            offset = (Math.floor(index/10) * 7 + 3) % paletteColors.length;
+          }
+          const i = Math.max(0, (index + offset) % paletteColors.length);
+          return paletteColors[i];
+        };
+
+        // Normalize icon image to white background (avoid black background when alpha is present)
+        const normalizeIconBackground = async (iconPath: string): Promise<string> => {
+          try {
+            const sharpMod: any = await import('sharp');
+            const sharp = (sharpMod && sharpMod.default) ? sharpMod.default : sharpMod;
+            const img = sharp(iconPath).flatten({ background: { r: 255, g: 255, b: 255 } });
+            await img.toFile(iconPath);
+          } catch {
+            // ignore normalization failures; use original
+          }
+          return iconPath;
+        };
+
+        // Sanitize icon name and provide simple synonyms for common keywords
+        const sanitizeIconKeyword = (raw: string): string => {
+          const base = String(raw || '').trim().toLowerCase();
+          const simple = base.replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+          const map: Record<string, string> = {
+            'globe alt': 'globe',
+            'shopping cart': 'shopping cart',
+            'arrow trending up': 'upward trending arrow',
+            'chart pie': 'pie chart',
+            'building office': 'office building',
+            'dollar sign': 'dollar',
+            'trending up': 'upward trending arrow',
+            'cpu': 'processor',
+            'building': 'office building'
+          };
+          return map[simple] || simple;
+        };
+
+        const buildIconPrompt = (keyword: string, style: string, monochrome: boolean, glyphColor?: 'white'|'black', bgColor?: 'white'|'transparent'): string => {
+          const k = sanitizeIconKeyword(keyword);
+          const hints: string[] = [];
+          hints.push(`minimal ${style} icon of ${k}`);
+          if (monochrome) hints.push('monochrome');
+          if (glyphColor) hints.push(`${glyphColor} glyph`);
+          if (bgColor === 'white') {
+            hints.push('solid white square background, no gradients');
+          } else {
+            hints.push('transparent background only, alpha transparency');
+          }
+          hints.push('no border, no text');
+          hints.push('flat, vector-like, centered, high-contrast');
+          if (bgColor !== 'white') hints.push('do not include any background rectangle or filled shape');
+          return hints.join(', ');
+        };
+
+        // --- Unified visual placement decision (right panel vs bottom band) ---
+        const shouldPlaceVisualBottom = (typeStrRaw: string, payload: any): boolean => {
+          try {
+            const typeStr = String(typeStrRaw || '').toLowerCase();
+            const vp = (templateConfig?.rules?.visualPlacement) || {};
+            const forceBottomTypes: Set<string> = new Set(vp.forceBottomTypes || ['process','roadmap','gantt','timeline','funnel','waterfall','heatmap']);
+            if (forceBottomTypes.has(typeStr)) return true;
+
+            // KPI: fallback by items count
+            if (typeStr === 'kpi') {
+              const itemsLen = Array.isArray(payload?.items) ? payload.items.length : 0;
+              const kpiMaxRight = Number(vp.kpiMaxRightPanelItems ?? 3);
+              if (itemsLen > kpiMaxRight) return true;
+            }
+            // Checklist: fallback by items count and rough height estimate
+            if (typeStr === 'checklist') {
+              const itemsLen = Array.isArray(payload?.items) ? payload.items.length : 0;
+              const checklistMaxRight = Number(vp.checklistMaxRightPanelItems ?? 4);
+              if (itemsLen > checklistMaxRight) return true;
+            }
+            // Timeline dense steps
+            if (typeStr === 'timeline') {
+              const stepsLen = Array.isArray(payload?.steps) ? payload.steps.length : 0;
+              if (stepsLen >= 4) return true;
+            }
+          } catch {}
+          return false;
+        };
+
         // --- Generic style resolution helpers ---
         const getByPath = (obj: any, pathStr?: string): any => {
           if (!obj || !pathStr || typeof pathStr !== 'string') return undefined;
@@ -902,9 +1113,23 @@ export const createPowerpointTool = createTool({
               }
               if (!textVal) textVal = String(el?.text || '');
               if (!textVal) continue;
+              try { logger.info({ layoutKey, contentPath, sample: textVal.slice(0,64), length: textVal.length }, 'render:text:prepare'); } catch {}
               const textOptions: any = { x, y, w, h, fontFace: String(style?.fontFace || headFont), fontSize: Number(style?.fontSize) || 20, bold: !!style?.bold, color: normalizeColorToPptxHex(style?.color) || '000000', align: style?.align || 'left', valign: style?.valign || 'top', shadow: shadowOf(style?.shadow, shadowPreset) };
+              // Special layout adjustment: in comparison_cards, push bullets below the title within the card area
+              if (layoutKey === 'comparison_cards' && (contentPath === 'bulletsA' || contentPath === 'bulletsB')) {
+                const titleReserve = 0.6; // inches reserved for card title within the card
+                textOptions.y = y + titleReserve;
+                textOptions.h = Math.max(0.2, h - titleReserve);
+                try { logger.info({ contentPath, textLen: textVal.length, box: { x, y: textOptions.y, w, h: textOptions.h } }, 'comparison_cards bullets box'); } catch {}
+                try {
+                  (slideObj as any).__renderedFlags = (slideObj as any).__renderedFlags || {};
+                  (slideObj as any).__renderedFlags[`comparison_cards_${contentPath}`] = true;
+                } catch {}
+              }
               // bullets
-              if (style && (style.bullet === true || typeof style.bulletType === 'string')) {
+              const isCompCardsBullets = (layoutKey === 'comparison_cards' && (contentPath === 'bulletsA' || contentPath === 'bulletsB'));
+              const wantsBullets = !!(style && (style.bullet === true || typeof style.bulletType === 'string'));
+              if (wantsBullets && !isCompCardsBullets) {
                 textOptions.bullet = style.bullet === true ? true : { type: String(style.bulletType) };
                 if (style.autoFit !== undefined) textOptions.autoFit = !!style.autoFit; else textOptions.autoFit = true;
               } else if (style && style.autoFit !== undefined) {
@@ -914,7 +1139,15 @@ export const createPowerpointTool = createTool({
               // background and outline
               if (style?.fill) textOptions.fill = buildFill(style.fill);
               if (style?.lineColor || Number.isFinite(style?.lineWidth)) textOptions.line = { color: normalizeColorToPptxHex(style?.lineColor) || (normalizeColorToPptxHex(style?.fill) || 'FFFFFF'), width: Number(style?.lineWidth) || 0 };
-              slideObj.addText(toBoldRunsFromMarkdown(textVal) as any, textOptions);
+              // When bullets are requested, pass plain string; for comparison_cards bullets force plain (no bullet dots)
+              if (wantsBullets && !isCompCardsBullets) {
+                try { logger.info({ contentPath, options: { x: textOptions.x, y: textOptions.y, w: textOptions.w, h: textOptions.h, fontSize: textOptions.fontSize } }, 'render:text:addText:bullets'); } catch {}
+                slideObj.addText(textVal, textOptions);
+              } else {
+                try { logger.info({ contentPath, options: { x: textOptions.x, y: textOptions.y, w: textOptions.w, h: textOptions.h, fontSize: textOptions.fontSize } }, 'render:text:addText:plain'); } catch {}
+                slideObj.addText(toBoldRunsFromMarkdown(textVal) as any, textOptions);
+              }
+              try { logger.info({ contentPath }, 'render:text:done'); } catch {}
               continue;
             }
             if (type === 'image') {
@@ -991,6 +1224,7 @@ export const createPowerpointTool = createTool({
                 continue;
               }
               const recipe = typeof el?.recipeRef === 'string' ? getByPath((slideObj as any).__data || {}, el.recipeRef) : ((slideObj as any).__data?.visual_recipe);
+              try { logger.info({ layout: layoutKey, hasRecipe: !!recipe, recipeType: recipe?.type, area: { x, y, w, h } }, 'Template visual element encountered'); } catch {}
               // Prevent overlap with reserved bottom branding area
               let vy = y, vh = h;
               const reservedBottom = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
@@ -1000,7 +1234,9 @@ export const createPowerpointTool = createTool({
               }
               // no-op; rely on fallback warnings when needed
               if (recipe && typeof recipe === 'object') {
+                try { logger.info({ type: String(recipe.type||'') }, 'drawInfographic(start)'); } catch {}
                 await drawInfographic(slideObj, String(recipe.type || ''), recipe, { x, y: vy, w, h: vh });
+                try { logger.info('drawInfographic(done)'); } catch {}
               } else if ((slideObj as any).__data?.imagePath) {
                 slideObj.addImage({ path: (slideObj as any).__data.imagePath, x, y: vy, w, h: vh, sizing: { type: style?.sizing || 'contain', w, h: vh } as any, shadow: shadowOf(style?.shadow, shadowPreset) });
               } else {
@@ -1093,94 +1329,281 @@ export const createPowerpointTool = createTool({
                 }
                 case 'kpi_grid': {
                     const items = Array.isArray(payload?.items) ? payload.items : [];
+                    // Template-driven style for kpi_grid
+                    const kgStyle: any = (templateConfig?.visualStyles?.kpi_grid) || {};
+                    const labelFsTpl = Number(kgStyle.labelFontSize);
+                    const valueFsTpl = Number(kgStyle.valueFontSize);
+                    const gap = Number.isFinite(kgStyle.gap) ? Number(kgStyle.gap) : 0.4;
+                    const borderW = Number.isFinite(kgStyle.borderWidth) ? Number(kgStyle.borderWidth) : 0.5;
+                    const borderCol = normalizeColorToPptxHex(kgStyle.borderColor) || 'FFFFFF';
+                    const labelColTpl = normalizeColorToPptxHex(kgStyle.labelColor);
+                    const valueColTpl = normalizeColorToPptxHex(kgStyle.valueColor);
                     const cardW = Math.min( (rw - 0.8) / 2, 2.6 );
                     const cardH = Math.min( rh / 2 - 0.2, 1.35 );
-                    const gap = 0.4;
                     items.slice(0, 4).forEach((it: any, idx: number) => {
                         const row = Math.floor(idx / 2), col = idx % 2;
                         const x = rx + 0.2 + col * (cardW + gap);
                         const y = ry + 0.2 + row * (cardH + gap);
-                        targetSlide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('kpi')) });
-                        targetSlide.addText(String(it?.value ?? ''), { x: x + 0.2, y: y + 0.2, w: cardW - 0.4, h: cardH * 0.55, fontSize: 18, bold: true, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
-                        targetSlide.addText(String(it?.label ?? ''), { x: x + 0.2, y: y + cardH * 0.65, w: cardW - 0.4, h: cardH * 0.3, fontSize: 11.5, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
+                        const __box = getPaletteColor(idx).replace('#','');
+                        const autoTxt = pickTextColorForBackground(`#${__box}`).toString();
+                        const valueFs = Number.isFinite(valueFsTpl) ? Number(valueFsTpl) : 18;
+                        const labelFs = Number.isFinite(labelFsTpl) ? Number(labelFsTpl) : 11.5;
+                        const valueCol = valueColTpl || autoTxt;
+                        const labelCol = labelColTpl || autoTxt;
+                        targetSlide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: __box }, line: { color: borderCol, width: borderW }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('kpi_grid')) });
+                        targetSlide.addText(String(it?.value ?? ''), { x: x + 0.2, y: y + 0.2, w: cardW - 0.4, h: cardH * 0.55, fontSize: valueFs, bold: true, color: valueCol, align: 'center', fontFace: JPN_FONT });
+                        targetSlide.addText(String(it?.label ?? ''), { x: x + 0.2, y: y + cardH * 0.65, w: cardW - 0.4, h: cardH * 0.3, fontSize: labelFs, color: labelCol, align: 'center', fontFace: JPN_FONT });
                     });
                     break;
                 }
                 case 'kpi_donut': {
                     const items = Array.isArray(payload?.items) ? payload.items : [];
-                    const values = items.map((it: any) => Number(it?.value ?? 0)).filter((n: number) => Number.isFinite(n) && n >= 0);
-                    const sum = values.reduce((a: number, b: number) => a + b, 0);
-                    const isDistribution = items.length >= 4 || (sum > 95 && sum < 105);
-                    const labelsForLog = items.map((it: any) => String(it?.label ?? ''));
-                    if (isDistribution) {
-                        // Render as doughnut chart for multi-category distribution
                         const labels = items.map((it: any) => String(it?.label ?? ''));
-                        const data = [{ name: 'Share', labels, values }];
-                        const palette = [
-                            primary,
-                            secondary,
-                            accent,
-                            lightenHex(primary, 20),
-                            lightenHex(secondary, 20),
-                            lightenHex(accent, 20),
-                            lightenHex(primary, 40),
-                            lightenHex(secondary, 40),
-                            lightenHex(accent, 40),
-                        ];
-                        const colors = labels.map((_: string, i: number) => palette[i % palette.length]);
-                        const chartColors = colors.map((c: string) => String(c || '').replace('#', ''));
-                        try {
-                            const doughnutType = (ChartType && ChartType.doughnut) || ('doughnut' as any);
-                            const hasAddChart = typeof (targetSlide as any).addChart === 'function';
-                            (targetSlide as any).addChart(doughnutType, data, {
-                                x: rx, y: ry, w: rw, h: rh,
-                                showLegend: true,
-                                legendPos: 'b',
-                                chartColors,
-                            } as any);
-                        } catch (e) {
-                            // Fallback: simple title if chart fails
-                            targetSlide.addText('KPI Donut', { x: rx, y: ry, w: rw, h: 0.3, fontSize: 12, bold: true, fontFace: JPN_FONT });
+                    const values = items.map((it: any) => Number(it?.value ?? 0)).map((v: number) => Math.max(0, Math.min(100, v)));
+                    const total = values.reduce((a: number, b: number) => a + b, 0) || 1;
+                    const kdStyle: any = (templateConfig?.visualStyles?.kpi_donut) || {};
+                    // Layout: donut chart on top, legend below
+                    const chartH = Math.min(rh * 0.65, 1.6);
+                    const legendH = Math.max(0.4, rh - chartH - 0.1);
+                    let chartRendered = false;
+                    try {
+                        if ((ChartType as any) && (ChartType as any).doughnut && typeof (targetSlide as any).addChart === 'function') {
+                            const doughnutType = (ChartType as any).doughnut;
+                            const data = [{ name: 'CAGR', labels, values }];
+                            const chartColors = labels.map((_: string, i: number) => getPaletteColor(i)).map((c: string)=>c.replace('#',''));
+                            (targetSlide as any).addChart(doughnutType, data, { x: rx, y: ry, w: rw, h: chartH, showLegend: false, chartColors } as any);
+                            chartRendered = true;
+                            try { logger.info('kpi_donut: charts'); } catch {}
                         }
-                    } else {
-                        // Render 1-3 concentric progress rings
+                    } catch {}
+                    if (!chartRendered) {
+                        // Fallback: render pie chart image via generateChart tool
+                        try {
+                            const imgPath = await (async () => {
+                                try { return await renderChartImage('pie', labels, values, payload?.title || ''); } catch { return null; }
+                            })();
+                            if (imgPath) {
+                                targetSlide.addImage({ path: imgPath, x: rx, y: ry, w: rw, h: chartH, sizing: { type: 'contain', w: rw, h: chartH } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                                try { imagePathsToDelete.add(imgPath); } catch {}
+                                chartRendered = true;
+                                try { logger.info('kpi_donut: image-fallback'); } catch {}
+                            }
+                        } catch {}
+                    }
+                    if (!chartRendered) {
+                        // Fallback 2: draw donut using shapes (pie wedges + inner hole)
                         const cx = rx + rw / 2;
-                        const cy = ry + rh / 2;
-                        const radius = Math.min(rw, rh) / 2 - 0.1;
-                        items.slice(0, 3).forEach((it: any, i: number) => {
-                            const r = radius - i * 0.3;
-                            const v = Math.max(0, Math.min(100, Number(it?.value ?? 0)));
-                            // background ring
-                            targetSlide.addShape('ellipse', { x: cx - r, y: cy - r, w: 2 * r, h: 2 * r, line: { color: '#CCCCCC', width: 2 } });
-                            // foreground arc approximation using pie slice (limited API)
-                            const wedgeDeg = Math.max(0, Math.min(359.9, (v / 100) * 360));
-                            targetSlide.addShape('pie', { x: cx - r, y: cy - r, w: 2 * r, h: 2 * r, fill: { color: i % 2 ? secondary : primary }, angle: wedgeDeg } as any);
-                            targetSlide.addText(String(it?.label ?? ''), { x: cx - r, y: cy + r + 0.05 + i * 0.25, w: 2 * r, h: 0.25, fontSize: 10, align: 'center', fontFace: JPN_FONT });
-                        });
+                        const cy = ry + chartH / 2;
+                        const diameter = Math.min(rw, chartH);
+                        const x0 = cx - diameter / 2;
+                        const y0 = cy - diameter / 2;
+                        let startAngle = -90; // start from top
+                        for (let i = 0; i < values.length; i++) {
+                            const v = Math.max(0, Number(values[i] || 0));
+                            if (v <= 0) continue;
+                            const ratio = v / (total || 1);
+                            const span = Math.max(0.1, Math.min(359.9, ratio * 360));
+                            const col = getPaletteColor(i);
+                            targetSlide.addShape('pie', { x: x0, y: y0, w: diameter, h: diameter, fill: { color: col }, line: { color: col.replace('#',''), width: 0 }, angle: span, rotate: startAngle } as any);
+                            startAngle += span;
+                        }
+                        // inner hole
+                        const holeScale = (Number(kdStyle.holeScale) && Number(kdStyle.holeScale) > 0 && Number(kdStyle.holeScale) < 0.95) ? Number(kdStyle.holeScale) : 0.6; // default 60%
+                        const holeW = diameter * holeScale;
+                        const holeH = diameter * holeScale;
+                        const hx = cx - holeW / 2;
+                        const hy = cy - holeH / 2;
+                        targetSlide.addShape('ellipse', { x: hx, y: hy, w: holeW, h: holeH, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 } });
+                        chartRendered = true;
+                        try { logger.info('kpi_donut: shape-fallback'); } catch {}
+                    }
+                    if (!chartRendered) {
+                        targetSlide.addText('CAGR', { x: rx, y: ry, w: rw, h: 0.3, fontSize: 12, bold: true, fontFace: JPN_FONT });
+                    }
+                    // Overlay labels on the donut (instead of bottom legend)
+                    const cx = rx + rw / 2;
+                    const cy = ry + chartH / 2;
+                    const radius = Math.min(rw, chartH) / 2;
+                    const labelR = radius * 0.78;
+                    let angleCursor = -90; // start at top
+                    for (let i = 0; i < labels.length; i++) {
+                        const v = Math.max(0, Number(values[i] || 0));
+                        const span = (total > 0) ? (v / total) * 360 : 0;
+                        const mid = angleCursor + span / 2;
+                        const rad = (mid * Math.PI) / 180;
+                        const lx = cx + Math.cos(rad) * labelR;
+                        const ly = cy + Math.sin(rad) * labelR;
+                        const w = Math.min(1.8, Math.max(1.1, rw * 0.22));
+                        const h = 0.38;
+                        const text = `${labels[i]} ${v}%`;
+                        const segColor = getPaletteColor(i);
+                        const autoTextColor = pickTextColorForBackground(segColor).toString();
+                        // leader line from donut edge to label
+                        const edgeR = radius * 0.92;
+                        const ax = cx + Math.cos(rad) * edgeR;
+                        const ay = cy + Math.sin(rad) * edgeR;
+                        const leaderWidth = Number.isFinite(Number(kdStyle.leaderLineWidth)) ? Math.max(0.5, Number(kdStyle.leaderLineWidth)) : 1;
+                        targetSlide.addShape('line', { x: Math.min(ax, lx), y: Math.min(ay, ly), w: Math.max(0.02, Math.abs(lx - ax)), h: Math.max(0.02, Math.abs(ly - ay)), line: { color: segColor.replace('#',''), width: leaderWidth } });
+                        // overlay text with subtle shadow as outline
+                        const lblFs = Number.isFinite(Number(kdStyle.labelFontSize)) ? Number(kdStyle.labelFontSize) : 11;
+                        targetSlide.addText(text, { x: lx - w / 2, y: ly - h / 2, w, h, fontSize: lblFs, align: 'center', fontFace: JPN_FONT, valign: 'middle', color: autoTextColor, shadow: { type: 'outer', color: '000000', opacity: 0.35, blur: 1, offset: 0, angle: 0 } as any });
+                        angleCursor += span;
                     }
                     break;
                 }
                 case 'progress': {
                     const items = Array.isArray(payload?.items) ? payload.items : [];
-                    const barH = Math.min(0.4, rh / Math.max(1, items.length) - 0.1);
-                    items.slice(0, 5).forEach((it: any, i: number) => {
-                        const y = ry + i * (barH + 0.15);
-                        targetSlide.addText(String(it?.label ?? ''), { x: rx, y, w: rw * 0.35, h: barH, fontSize: 11, fontFace: JPN_FONT });
-                        targetSlide.addShape('rect', { x: rx + rw * 0.4, y, w: rw * 0.55, h: barH, fill: { color: '#EEEEEE' }, line: { color: '#DDDDDD', width: 0.5 } });
+                    const prStyle: any = (templateConfig?.visualStyles?.progress) || {};
+                    const labelAlign = (String(prStyle.labelAlign||'right').startsWith('r') ? 'right' : 'left') as 'left'|'right';
+                    const labelFs = Number(prStyle.labelFontSize) || 14;
+                    const labelGap = Number.isFinite(Number(prStyle.labelGap)) ? Number(prStyle.labelGap) : 0.08;
+                    const barCfg = (prStyle.bar || {}) as any;
+                    const barHeightMax = Math.min(0.6, Number(barCfg.heightMax)||0.4);
+                    const barBg = normalizeColorToPptxHex(barCfg.bg) || 'EEEEEE';
+                    const barBgLine = normalizeColorToPptxHex(barCfg.bgLine) || 'DDDDDD';
+                    const valCfg = (prStyle.value || {}) as any;
+                    const showVal = (valCfg.show !== false);
+                    const valSuffix = (typeof valCfg.suffix === 'string') ? valCfg.suffix : '%';
+                    const valFs = Number(valCfg.fontSize) || 12;
+                    const valAlignRight = String(valCfg.align||'right').startsWith('r');
+                    const valOffset = Number.isFinite(Number(valCfg.offset)) ? Number(valCfg.offset) : 0.04;
+                    const barAreaX = rx + rw * 0.40;
+                    const barAreaW = rw * 0.55;
+                    const labelW = rw * 0.35;
+                    const barH = Math.min(barHeightMax, rh / Math.max(1, items.length) - 0.1);
+                    items.slice(0, 8).forEach((it: any, i: number) => {
+                        const y = ry + i * (barH + 0.12);
+                        // label (right aligned by default)
+                        targetSlide.addText(String(it?.label ?? ''), { x: rx, y, w: labelW - labelGap, h: barH, fontSize: labelFs, fontFace: JPN_FONT, align: labelAlign, valign: 'middle' });
+                        // bar background
+                        targetSlide.addShape('rect', { x: barAreaX, y, w: barAreaW, h: barH, fill: { color: barBg }, line: { color: barBgLine, width: 0.5 } });
                         const v = Math.max(0, Math.min(100, Number(it?.value ?? 0)));
-                        targetSlide.addShape('rect', { x: rx + rw * 0.4, y, w: (rw * 0.55) * (v / 100), h: barH, fill: { color: primary }, line: { color: primary, width: 0 } });
+                        const __c = getPaletteColor(i).replace('#','');
+                        const filledW = barAreaW * (v / 100);
+                        // bar filled
+                        targetSlide.addShape('rect', { x: barAreaX, y, w: filledW, h: barH, fill: { color: __c }, line: { color: __c, width: 0 } });
+                        // value text
+                        if (showVal) {
+                            const valText = `${v}${valSuffix}`;
+                            const tx = valAlignRight ? (barAreaX + filledW - valOffset) : (barAreaX + filledW + valOffset);
+                            const tw = Math.max(0.5, rw * 0.12);
+                            const color = '111111';
+                            targetSlide.addText(valText, { x: tx - (valAlignRight? tw : 0), y, w: tw, h: barH, fontSize: valFs, fontFace: JPN_FONT, align: valAlignRight ? 'right' : 'left', valign: 'middle', color });
+                        }
                     });
                     break;
                 }
                 case 'gantt': {
                     const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
-                    const barH = Math.min(0.35, rh / Math.max(1, tasks.length) - 0.08);
-                    // naive scale: position by index since we don't parse dates here
-                    tasks.slice(0, 6).forEach((t: any, i: number) => {
-                        const y = ry + i * (barH + 0.12);
-                        targetSlide.addText(String(t?.label ?? ''), { x: rx, y, w: rw * 0.25, h: barH, fontSize: 10, fontFace: JPN_FONT });
-                        targetSlide.addShape('rect', { x: rx + rw * 0.28, y, w: rw * 0.65, h: barH, fill: { color: lightenHex(secondary, 20) }, line: { color: secondary, width: 0.5 } });
+                    const visibleTasks = tasks.slice(0, 10);
+                    const barH = Math.min(0.35, rh / Math.max(1, visibleTasks.length) - 0.08);
+
+                    // Parse dates; support ISO YYYY-MM-DD. If missing end but duration provided, derive end.
+                    type TaskWithDates = { label: string; start?: Date; end?: Date };
+                    const parsed: TaskWithDates[] = visibleTasks.map((t: any) => {
+                        const label = String(t?.label ?? '');
+                        const startStr = typeof t?.start === 'string' ? t.start : undefined;
+                        const endStr = typeof t?.end === 'string' ? t.end : undefined;
+                        const duration = Number(t?.duration);
+                        let start: Date | undefined = startStr ? new Date(startStr) : undefined;
+                        let end: Date | undefined = endStr ? new Date(endStr) : undefined;
+                        if (!end && start && Number.isFinite(duration) && duration > 0) {
+                            const e = new Date(start.getTime());
+                            e.setDate(e.getDate() + Math.floor(duration));
+                            end = e;
+                        }
+                        return { label, start, end };
                     });
+
+                    // Compute min/max dates among valid tasks
+                    const valid = parsed.filter(p => p.start instanceof Date && !isNaN(p.start.getTime()) && p.end instanceof Date && !isNaN(p.end.getTime()) && p.end.getTime() >= p.start.getTime());
+                    if (valid.length) {
+                        const minStart = new Date(Math.min(...valid.map(v => v.start!.getTime())));
+                        const maxEnd = new Date(Math.max(...valid.map(v => v.end!.getTime())));
+                        const spanMs = Math.max(1, maxEnd.getTime() - minStart.getTime());
+                        const scale = (d: Date) => (rw * 0.65) * ((d.getTime() - minStart.getTime()) / spanMs);
+                        const barX0 = rx + rw * 0.28;
+
+                        // Grid lines by span unit (month/week/day/hour)
+                        const dayMs = 24 * 60 * 60 * 1000;
+                        const spanDays = spanMs / dayMs;
+                        type Unit = 'month' | 'week' | 'day' | 'hour';
+                        const unit: Unit = spanDays >= 60 ? 'month' : spanDays >= 14 ? 'week' : spanDays >= 2 ? 'day' : 'hour';
+                        const lines: Date[] = [];
+                        const clamp = (d: Date) => new Date(Math.max(minStart.getTime(), Math.min(maxEnd.getTime(), d.getTime())));
+                        if (unit === 'month') {
+                            const start = new Date(minStart.getFullYear(), minStart.getMonth(), 1);
+                            for (let y = start.getFullYear(), m = start.getMonth(); ; ) {
+                                const d = new Date(y, m, 1);
+                                if (d.getTime() > maxEnd.getTime()) break;
+                                lines.push(clamp(d));
+                                m += 1; if (m > 11) { m = 0; y += 1; }
+                            }
+                        } else if (unit === 'week') {
+                            const start = new Date(minStart);
+                            const dow = start.getDay();
+                            const toMon = (dow + 6) % 7; // Monday=0
+                            start.setDate(start.getDate() - toMon);
+                            start.setHours(0,0,0,0);
+                            for (let d = new Date(start); d.getTime() <= maxEnd.getTime(); d.setDate(d.getDate() + 7)) {
+                                lines.push(clamp(new Date(d)));
+                            }
+                        } else if (unit === 'day') {
+                            const start = new Date(minStart); start.setHours(0,0,0,0);
+                            for (let d = new Date(start); d.getTime() <= maxEnd.getTime(); d.setDate(d.getDate() + 1)) {
+                                lines.push(clamp(new Date(d)));
+                            }
+                        } else {
+                            const start = new Date(minStart); start.setMinutes(0,0,0);
+                            for (let d = new Date(start); d.getTime() <= maxEnd.getTime(); d.setHours(d.getHours() + 1)) {
+                                lines.push(clamp(new Date(d)));
+                            }
+                        }
+                        const ganttStyle: any = (templateConfig?.visualStyles?.gantt) || {};
+                        const gridColor = (typeof ganttStyle.gridColor === 'string' && ganttStyle.gridColor.trim()) ? String(ganttStyle.gridColor).trim() : '#9AA3AF';
+                        const gridWidth = Number.isFinite(Number(ganttStyle.gridWidth)) ? Math.max(0.5, Number(ganttStyle.gridWidth)) : 1.2;
+                        for (const d of lines) {
+                            const gx = barX0 + scale(d);
+                            targetSlide.addShape('line', { x: gx, y: ry, w: 0, h: rh, line: { color: gridColor, width: gridWidth } });
+                        }
+
+                        // Bars + per-task start/end date labels
+                        const barMaxX = barX0 + rw * 0.65;
+                        valid.forEach((t, i) => {
+                            const y = ry + i * (barH + 0.12);
+                            // Task label on the left
+                            targetSlide.addText(String(t.label), { x: rx, y, w: rw * 0.25, h: barH, fontSize: 10, fontFace: JPN_FONT, align: 'right', valign: 'middle' });
+                            // Bar geometry
+                            const w = Math.max(0.05, scale(t.end!) - scale(t.start!));
+                            const x = barX0 + scale(t.start!);
+                            const barColor = getPaletteColor(i).replace('#','');
+                            targetSlide.addShape('rect', { x, y, w, h: barH, fill: { color: barColor }, line: { color: barColor, width: 0.5 } });
+                            // Per-phase start date label (above the bar)
+                            const ganttStyleLocal: any = (templateConfig?.visualStyles?.gantt) || {};
+                            const dateFs = Number.isFinite(Number(ganttStyleLocal.labelFontSize)) ? Math.max(6, Number(ganttStyleLocal.labelFontSize)) : 12;
+                            const dateH = 0.2;
+                            // Place label slightly above the bar without clamping to region top
+                            const dateY = y - 0.18;
+                            const startStr = t.start!.toISOString().slice(0, 10);
+                            // Start label: align x with bar start, place above the bar (left-aligned)
+                            const startBoxW = 1.6; // enough for YYYY-MM-DD
+                            const startX = x;
+                            targetSlide.addText(startStr, { x: startX, y: dateY, w: startBoxW, h: dateH, fontSize: dateFs, fontFace: JPN_FONT, color: '666666', align: 'left', valign: 'bottom' });
+                            // Duration text inside bar (centered)
+                            const durationDays = Math.max(1, Math.round((t.end!.getTime() - t.start!.getTime()) / dayMs));
+                            const durText = `${durationDays}日`;
+                            const textColor = pickTextColorForBackground(`#${barColor}`).toString();
+                            targetSlide.addText(durText, { x, y, w, h: barH, fontSize: 10, fontFace: JPN_FONT, color: textColor, align: 'center', valign: 'middle' });
+                        });
+                    } else {
+                        // Fallback: index-based if dates are unusable
+                        visibleTasks.forEach((t: any, i: number) => {
+                            const y = ry + i * (barH + 0.12);
+                            targetSlide.addText(String(t?.label ?? ''), { x: rx, y, w: rw * 0.25, h: barH, fontSize: 10, fontFace: JPN_FONT });
+                            const barColor = getPaletteColor(i).replace('#','');
+                            targetSlide.addShape('rect', { x: rx + rw * 0.28, y, w: rw * 0.65, h: barH, fill: { color: barColor }, line: { color: barColor, width: 0.5 } });
+                        });
+                    }
                     break;
                 }
                 case 'heatmap': {
@@ -1244,8 +1667,15 @@ export const createPowerpointTool = createTool({
                     const cx1 = rx + rw / 2 - r * 0.6;
                     const cx2 = rx + rw / 2 + r * 0.6;
                     const cy = ry + rh / 2;
-                    targetSlide.addShape('ellipse', { x: cx1 - r, y: cy - r, w: 2 * r, h: 2 * r, fill: { color: lightenHex(primary, 40) }, line: { color: primary, width: 1 } });
-                    targetSlide.addShape('ellipse', { x: cx2 - r, y: cy - r, w: 2 * r, h: 2 * r, fill: { color: lightenHex(secondary, 40) }, line: { color: secondary, width: 1 } });
+                    // Semi-transparent fills to visualize overlap clearly
+                    const aFill = { color: lightenHex(primary, 20), transparency: 40 } as any;
+                    const bFill = { color: lightenHex(secondary, 20), transparency: 40 } as any;
+                    targetSlide.addShape('ellipse', { x: cx1 - r, y: cy - r, w: 2 * r, h: 2 * r, fill: aFill, line: { color: primary, width: 1 } });
+                    targetSlide.addShape('ellipse', { x: cx2 - r, y: cy - r, w: 2 * r, h: 2 * r, fill: bFill, line: { color: secondary, width: 1 } });
+                    // Optional: emphasize overlap percentage text if provided
+                    if (Number.isFinite(overlap) && overlap > 0) {
+                        targetSlide.addText(`${overlap}%`, { x: (cx1+cx2)/2 - 0.4, y: cy - 0.15, w: 0.8, h: 0.3, fontSize: 14, align: 'center', fontFace: JPN_FONT, color: '333333' });
+                    }
                     targetSlide.addText(String(a?.label ?? 'A'), { x: cx1 - r, y: cy + r + 0.05, w: 2 * r, h: 0.25, fontSize: 10, align: 'center', fontFace: JPN_FONT });
                     targetSlide.addText(String(b?.label ?? 'B'), { x: cx2 - r, y: cy + r + 0.05, w: 2 * r, h: 0.25, fontSize: 10, align: 'center', fontFace: JPN_FONT });
                     break;
@@ -1271,10 +1701,26 @@ export const createPowerpointTool = createTool({
                     const totalGap = gap * Math.max(0, count - 1);
                     const barW = Math.max(0.2, (rw - totalGap) / count);
                     const maxAbs = Math.max(1, ...sliced.map((it: any) => Math.abs(Number(it?.delta || 0))));
+                    const wfStyle: any = (templateConfig?.visualStyles?.waterfall) || {};
                     const maxBarH = rh * 0.85; // leave some top/bottom padding
                     const scale = maxBarH / maxAbs;
                     const minBarH = Math.min(0.15, rh * 0.25);
-                    const baseline = ry + rh * 0.55; // slightly above center in the bottom band
+                    // baseline position (0..1 of region height), default 0.55
+                    const baselineRatio = Number.isFinite(Number(wfStyle.baselineRatio)) ? Math.max(0.05, Math.min(0.95, Number(wfStyle.baselineRatio))) : 0.55;
+                    const baseline = ry + rh * baselineRatio;
+                    // optional grid lines (horizontal)
+                    const showGrid = wfStyle.grid === true || String(wfStyle.grid).toLowerCase() === 'true';
+                    if (showGrid) {
+                        const gridColor = (typeof wfStyle.gridColor === 'string' && wfStyle.gridColor.trim()) ? normalizeColorToPptxHex(wfStyle.gridColor) : 'DDE3EA';
+                        const gridWidth = Number.isFinite(Number(wfStyle.gridWidth)) ? Math.max(0.5, Number(wfStyle.gridWidth)) : 1.0;
+                        const levels = Math.max(2, Math.min(6, Number.isFinite(Number(wfStyle.gridLevels)) ? Number(wfStyle.gridLevels) : 4));
+                        for (let i = 0; i < levels; i++) {
+                            const y = ry + (i / (levels - 1)) * rh;
+                            targetSlide.addShape('line', { x: rx, y, w: rw, h: 0, line: { color: gridColor, width: gridWidth } });
+                        }
+                        // baseline line emphasized
+                        targetSlide.addShape('line', { x: rx, y: baseline, w: rw, h: 0, line: { color: gridColor, width: gridWidth + 0.4 } });
+                    }
                     let x = rx;
                     sliced.forEach((it: any) => {
                         const v = Number(it?.delta || 0);
@@ -1302,17 +1748,43 @@ export const createPowerpointTool = createTool({
                 case 'bullet': {
                     const items = Array.isArray(payload?.items) ? payload.items : [];
                     const rowH = Math.min(0.45, rh / Math.max(1, items.length) - 0.08);
+                    // Style from template (overridable)
+                    const bStyle: any = (templateConfig?.visualStyles?.bullet) || {};
+                    const labelFs = Number.isFinite(Number(bStyle.labelFontSize)) ? Number(bStyle.labelFontSize) : 14;
+                    const labelAlign: 'left'|'right' = (String(bStyle.labelAlign||'right').toLowerCase().startsWith('r') ? 'right' : 'left');
+                    const valueFs = Number.isFinite(Number(bStyle.valueFontSize)) ? Number(bStyle.valueFontSize) : 12;
+                    const targetFs = Number.isFinite(Number(bStyle.targetFontSize)) ? Number(bStyle.targetFontSize) : 11;
+                    const valueBoxW = Number.isFinite(Number(bStyle.valueBoxWidth)) ? Math.max(0.4, Number(bStyle.valueBoxWidth)) : 0.8;
+                    const valueOutsidePad = Number.isFinite(Number(bStyle.valueOutsidePad)) ? Math.max(0, Number(bStyle.valueOutsidePad)) : 0.05;
+                    const targetOffsetY = Number.isFinite(Number(bStyle.targetOffsetY)) ? Math.max(0.05, Number(bStyle.targetOffsetY)) : 0.18;
+                    const valueTextColorOverride = typeof bStyle.valueTextColor === 'string' && bStyle.valueTextColor ? normalizeColorToPptxHex(bStyle.valueTextColor) : undefined;
+
                     items.slice(0, 5).forEach((it: any, i: number) => {
                         const y = ry + i * (rowH + 0.12);
-                        targetSlide.addText(String(it?.label ?? ''), { x: rx + 0.1, y, w: rw * 0.25 - 0.1, h: rowH, fontSize: 11, fontFace: JPN_FONT });
+                        // label: align from template, larger font
+                        targetSlide.addText(String(it?.label ?? ''), { x: rx + 0.1, y, w: rw * 0.25 - 0.1, h: rowH, fontSize: labelFs, fontFace: JPN_FONT, align: labelAlign, valign: 'middle' });
                         const baseX = rx + rw * 0.30;
                         targetSlide.addShape('rect', { x: baseX, y, w: rw * 0.58, h: rowH, fill: { color: '#EEEEEE' }, line: { color: '#DDDDDD', width: 0.5 } });
                         const val = Number(it?.value ?? 0), tgt = Number(it?.target ?? 0);
                         const denom = Math.max(1, Math.max(val, tgt, 100));
                         const valW = Math.max(0, Math.min(rw * 0.58, (rw * 0.58) * (val / denom)));
                         const tgtX = baseX + Math.max(0, Math.min(rw * 0.58, (rw * 0.58) * (tgt / denom)));
-                        targetSlide.addShape('rect', { x: baseX, y, w: valW, h: rowH, fill: { color: primary }, line: { color: primary, width: 0 } });
+                        const __bar = getPaletteColor(i).replace('#','');
+                        targetSlide.addShape('rect', { x: baseX, y, w: valW, h: rowH, fill: { color: __bar }, line: { color: __bar, width: 0 } });
                         targetSlide.addShape('line', { x: tgtX, y, w: 0, h: rowH, line: { color: '#333333', width: 2 } });
+                        // value and target labels on the bar
+                        const valueLabel = `${val}`;
+                        const targetLabel = `${tgt}`;
+                        const textColor = (valueTextColorOverride || pickTextColorForBackground(`#${__bar}`).toString());
+                        // Value text: inside filled bar, right-aligned near the end
+                        if (valW > valueBoxW) {
+                            targetSlide.addText(valueLabel, { x: baseX + Math.max(0, valW - valueBoxW), y, w: valueBoxW, h: rowH, fontSize: valueFs, fontFace: JPN_FONT, color: textColor, align: 'right', valign: 'middle' });
+                        } else {
+                            // If very short, place just to the right of the bar start
+                            targetSlide.addText(valueLabel, { x: baseX + valW + valueOutsidePad, y, w: valueBoxW, h: rowH, fontSize: valueFs, fontFace: JPN_FONT, color: '#333333', align: 'left', valign: 'middle' });
+                        }
+                        // Target text: above the target marker
+                        targetSlide.addText(targetLabel, { x: tgtX - valueBoxW/2, y: y - targetOffsetY, w: valueBoxW, h: 0.2, fontSize: targetFs, fontFace: JPN_FONT, color: '#333333', align: 'center', valign: 'bottom' });
                     });
                     break;
                 }
@@ -1330,52 +1802,225 @@ export const createPowerpointTool = createTool({
                 }
                 case 'callouts': {
                     const items = Array.isArray(payload?.items) ? payload.items : [];
-                    items.slice(0, 4).forEach((it: any, i: number) => {
+                    // Template-driven icon config
+                    const calloutStyle: any = (templateConfig?.visualStyles?.callouts) || {};
+                    const iconCfg: any = calloutStyle.icon || {};
+                    const iconEnabled: boolean = (iconCfg.enabled !== false);
+                    const iconSize: number = Number(iconCfg.size) || 0.36; // inches
+                    const iconPad: number = Number(iconCfg.padding) || 0.08; // inches
+                    const iconStyle: string = String(iconCfg.style || 'line');
+                    const iconMonochrome: boolean = true; // fixed monochrome (request)
+                    const fixedGlyph: 'white'|'black' = (String(iconCfg?.fixed?.glyph || 'black').toLowerCase() === 'white') ? 'white' : 'black';
+                    const fixedBg: 'white'|'transparent' = (String(iconCfg?.fixed?.background || 'white').toLowerCase() === 'white') ? 'white' : 'transparent';
+
+                    for (let i = 0; i < Math.min(4, items.length); i++) {
+                        const it: any = items[i] || {};
                         const x = rx + (i % 2) * (rw/2) + 0.1;
                         const y = ry + Math.floor(i/2) * (rh/2) + 0.1;
-                        const calloutBg = lightenHex(secondary, 60);
-                        targetSlide.addShape('rect', { x, y, w: rw/2 - 0.2, h: rh/2 - 0.2, fill: { color: calloutBg }, line: { color: secondary, width: 0.5 }, shadow: shadowOf(resolveVisualShadow('callouts')) });
+                        const boxW = rw/2 - 0.2;
+                        const boxH = rh/2 - 0.2;
+                        const calloutBg = lightenHex(getPaletteColor(i), 60);
+                        targetSlide.addShape('rect', { x, y, w: boxW, h: boxH, fill: { color: calloutBg }, line: { color: secondary, width: 0.5 }, shadow: shadowOf(resolveVisualShadow('callouts')) });
                         const calloutColor = pickTextColorForBackground(calloutBg).toString();
-                        targetSlide.addText(String(it?.label ?? ''), { x: x + 0.1, y: y + 0.1, w: rw/2 - 0.4, h: 0.4, fontSize: 12, bold: true, fontFace: JPN_FONT, color: calloutColor });
-                        if (it?.value) {
-                            targetSlide.addText(String(it.value), { x: x + 0.1, y: y + 0.55, w: rw/2 - 0.4, h: 0.4, fontSize: 14, fontFace: JPN_FONT, color: calloutColor });
+
+                        // Resolve icon image path: if provided path use it; else if provided name/keyword, generate via genarateImage
+                        let iconPath: string | null = null;
+                        if (iconEnabled) {
+                            const rawIcon = (it?.iconPath || it?.icon || it?.iconName || '').toString().trim();
+                            if (rawIcon) {
+                                if (/\\|\//.test(rawIcon) || /\.(png|jpg|jpeg)$/i.test(rawIcon)) {
+                                    iconPath = rawIcon;
+                                } else {
+                                    try {
+                                        const { genarateImage } = await import('./genarateImage');
+                                        const prompt = buildIconPrompt(rawIcon, iconStyle, iconMonochrome, fixedGlyph, fixedBg);
+                                        const out = await genarateImage({ prompt, aspectRatio: '1:1' });
+                                        if (out && out.success && out.path) {
+                                            iconPath = out.path;
+                                            try { imagePathsToDelete.add(out.path); } catch {}
+                                        }
+                                    } catch {}
+                                }
+                            }
                         }
-                    });
+
+                        // If icon exists, reserve space on the left; else, full width for text
+                        const textLeftX = iconPath ? (x + iconPad + iconSize + iconPad) : (x + 0.1);
+                        const textWidth = iconPath ? (boxW - (textLeftX - x) - 0.1) : (boxW - 0.2);
+
+                        if (iconPath) {
+                            try { iconPath = await normalizeIconBackground(iconPath); } catch {}
+                            // Place icon square within box, top pad
+                            const ix = x + iconPad;
+                            const iy = y + iconPad;
+                            const iw = Math.min(iconSize, boxW * 0.3);
+                            const ih = Math.min(iconSize, boxH * 0.5);
+                            targetSlide.addImage({ path: iconPath, x: ix, y: iy, w: iw, h: ih, sizing: { type: 'contain', w: iw, h: ih } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                        }
+
+                        // Title (label)
+                        targetSlide.addText(String(it?.label ?? ''), { x: textLeftX, y: y + 0.1, w: textWidth, h: 0.4, fontSize: 12, bold: true, fontFace: JPN_FONT, color: calloutColor });
+                        // Body (value)
+                        if (it?.value) {
+                            targetSlide.addText(String(it.value), { x: textLeftX, y: y + 0.55, w: textWidth, h: 0.4, fontSize: 14, fontFace: JPN_FONT, color: calloutColor });
+                        }
+                    }
                     break;
                 }
                 case 'kpi': {
                     const items = Array.isArray(payload?.items) ? payload.items : [];
-                    const cardW = Math.min( (rw - 0.8) / 2, 2.6 );
-                    const cardH = Math.min( rh / 2 - 0.2, 1.35 );
-                    const gap = 0.4;
-                    items.slice(0, 4).forEach((it: any, idx: number) => {
-                        const row = Math.floor(idx / 2), col = idx % 2;
-                        const x = rx + 0.2 + col * (cardW + gap);
-                        const y = ry + 0.2 + row * (cardH + gap);
-                        targetSlide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: secondary }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('kpi')) });
-                        targetSlide.addText(String(it?.value ?? ''), { x: x + 0.2, y: y + 0.2, w: cardW - 0.4, h: cardH * 0.55, fontSize: 18, bold: true, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
-                        targetSlide.addText(String(it?.label ?? ''), { x: x + 0.2, y: y + cardH * 0.65, w: cardW - 0.4, h: cardH * 0.3, fontSize: 11.5, color: 'FFFFFF', align: 'center', fontFace: JPN_FONT });
-                    });
+                    try { logger.info({ count: Array.isArray(items)?items.length:0 }, 'render:kpi'); } catch {}
+                    const count = Math.min(4, items.length);
+                    if (!count) { break; }
+                    // Layout: up to 3 items -> 1列。4件は2x2。
+                    const columns = (count <= 3) ? 1 : 2;
+                    const rows = Math.ceil(count / columns);
+                    const kpiLayout: any = (templateConfig?.visualStyles?.kpi?.layout) || {};
+                    const gap = (columns === 1) ? (Number(kpiLayout.gap1Col) || 0.24) : (Number(kpiLayout.gap2Col) || 0.30);
+                    const outerMargin = (columns === 1) ? (Number(kpiLayout.outerMargin1Col) || 0.02) : (Number(kpiLayout.outerMargin2Col) || 0.06);
+                    const innerPadX = Number(kpiLayout.innerPadX) || 0.2;
+                    const innerPadY = (columns === 1) ? (Number(kpiLayout.innerPadY1Col) || 0.12) : (Number(kpiLayout.innerPadY2Col) || 0.16);
+                    const cardW = Math.max(0.8, (rw - (columns - 1) * gap - outerMargin * 2) / columns);
+                    const cardH = (rh - (rows - 1) * gap - outerMargin * 2) / rows;
+                    // resolve template-driven style for KPI
+                    const kpiStyle: any = (templateConfig?.visualStyles?.kpi) || {};
+                    const tplLabelColor = normalizeColorToPptxHex(kpiStyle.labelColor);
+                    const tplValueColor = normalizeColorToPptxHex(kpiStyle.valueColor);
+                    const unifyKpiFonts: boolean = (kpiStyle.unifyLabelAndValueFontSize !== false);
+                    const tplLabelFsNum = Number(kpiStyle.labelFontSize);
+                    const tplValueFsNum = Number(kpiStyle.valueFontSize);
+                    const hasFixedLabelFs = Number.isFinite(tplLabelFsNum);
+                    const hasFixedValueFs = Number.isFinite(tplValueFsNum);
+                    const fixedCommonFs: number | undefined = unifyKpiFonts ? (hasFixedLabelFs ? tplLabelFsNum : (hasFixedValueFs ? tplValueFsNum : undefined)) : undefined;
+                    const baseWrap = (w: number, factor: number) => Math.max(16, Math.floor(w * factor));
+                    for (let idx = 0; idx < count; idx++) {
+                        const it: any = items[idx] || {};
+                        const row = Math.floor(idx / columns);
+                        const col = idx % columns;
+                        const x = rx + outerMargin + col * (cardW + gap);
+                        const y = ry + outerMargin + row * (cardH + gap);
+                        // Card background color from palette
+                        const boxColor = getPaletteColor(idx).replace('#','');
+                        targetSlide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: boxColor }, line: { color: outlineColor, width: 0.5 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('kpi')) });
+                        // Icon (optional, top-left)
+                        let iconPath: string | null = null;
+                        try {
+                            const calloutStyle: any = (templateConfig?.visualStyles?.callouts) || {};
+                            const iconCfg: any = calloutStyle.icon || {};
+                            const iconEnabled: boolean = (iconCfg.enabled !== false);
+                            const iconSize: number = Number(iconCfg.size) || 0.36;
+                            const iconPad: number = Number(iconCfg.padding) || 0.08;
+                            const iconStyle: string = String(iconCfg.style || 'line');
+                            const iconMonochrome: boolean = true; // fixed monochrome
+                            const fixedGlyph: 'white'|'black' = (String((kpiStyle as any)?.icon?.fixed?.glyph || iconCfg?.fixed?.glyph || 'black').toLowerCase() === 'white') ? 'white' : 'black';
+                            const fixedBg: 'white'|'transparent' = (String((kpiStyle as any)?.icon?.fixed?.background || iconCfg?.fixed?.background || 'white').toLowerCase() === 'white') ? 'white' : 'transparent';
+                            if (iconEnabled && (it?.icon || it?.iconName || it?.iconPath)) {
+                                const rawIcon = (it?.iconPath || it?.icon || it?.iconName || '').toString().trim();
+                                if (rawIcon) {
+                                    if (/\\|\//.test(rawIcon) || /\.(png|jpg|jpeg)$/i.test(rawIcon)) {
+                                        iconPath = rawIcon;
+                                    } else {
+                                        try {
+                                            const { genarateImage } = await import('./genarateImage');
+                                            const prompt = buildIconPrompt(rawIcon, iconStyle, iconMonochrome, fixedGlyph as any, fixedBg as any);
+                                            const out = await genarateImage({ prompt, aspectRatio: '1:1' });
+                                            if (out && out.success && out.path) {
+                                                iconPath = out.path;
+                                                try { imagePathsToDelete.add(out.path); } catch {}
+                                            }
+                                        } catch {}
+                                    }
+                                }
+                            }
+                            if (iconPath) {
+                                try { iconPath = await normalizeIconBackground(iconPath); } catch {}
+                                // Protrude half of icon outside the top-left corner of the card box (no white circle)
+                                const ix = x - iconSize / 2;
+                                const iy = y - iconSize / 2;
+                                targetSlide.addImage({ path: iconPath, x: ix, y: iy, w: iconSize, h: iconSize, sizing: { type: 'contain', w: iconSize, h: iconSize } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                            }
+                        } catch {}
+                        // Text areas and fitting (Label top, Value below)
+                        const rawLabel = String(it?.label ?? '');
+                        const rawValue = String(it?.value ?? '');
+                        // Adjust text box start X/W if icon placed
+                        const iconOverlapInside = (iconPath ? ((Number((templateConfig?.visualStyles?.callouts?.icon?.size)) || 0.36) * 0.5 + (Number((templateConfig?.visualStyles?.callouts?.icon?.padding)) || 0.08)) : 0);
+                        const textX = x + innerPadX + iconOverlapInside;
+                        const textW = Math.max(0.5, cardW - (textX - x) - innerPadX);
+                        // Font size policy: respect template fixed sizes if provided; otherwise auto-fit
+                        const initialFs = (columns === 1) ? (Number(kpiLayout.initialFs1Col) || 20) : (Number(kpiLayout.initialFs2Col) || 16);
+                        const minFs = (columns === 1) ? (Number(kpiLayout.minFs1Col) || 11) : (Number(kpiLayout.minFs2Col) || 9); // allow a bit smaller fonts to avoid overlap
+                        const targetLabelFs = (fixedCommonFs ?? (hasFixedLabelFs ? tplLabelFsNum : undefined));
+                        const targetValueFs = (fixedCommonFs ?? (hasFixedValueFs ? tplValueFsNum : undefined));
+                        const labelFit0 = typeof targetLabelFs === 'number'
+                          ? fitTextToLines(rawLabel, /*initial*/targetLabelFs, /*min*/targetLabelFs, /*baseWrap*/baseWrap(textW, 10.5), /*lines*/2, /*hard*/30)
+                          : fitTextToLines(rawLabel, /*initial*/initialFs, /*min*/minFs, /*baseWrap*/baseWrap(textW, 10.5), /*lines*/2, /*hard*/30);
+                        const valueFit0 = typeof targetValueFs === 'number'
+                          ? fitTextToLines(rawValue, /*initial*/targetValueFs, /*min*/targetValueFs, /*baseWrap*/baseWrap(textW, 11.5), /*lines*/2, /*hard*/30)
+                          : fitTextToLines(rawValue, /*initial*/initialFs, /*min*/minFs, /*baseWrap*/baseWrap(textW, 11.5), /*lines*/2, /*hard*/30);
+                        const commonFs = typeof fixedCommonFs === 'number' ? fixedCommonFs : (unifyKpiFonts ? Math.min(labelFit0.fontSize, valueFit0.fontSize) : labelFit0.fontSize);
+                        const labelFit = typeof targetLabelFs === 'number'
+                          ? fitTextToLines(rawLabel, /*initial*/targetLabelFs, /*min*/targetLabelFs, /*baseWrap*/baseWrap(textW, 10.5), /*lines*/2, /*hard*/30)
+                          : fitTextToLines(rawLabel, /*initial*/commonFs, /*min*/minFs, /*baseWrap*/baseWrap(textW, 10.5), /*lines*/2, /*hard*/30);
+                        const valueFit = typeof targetValueFs === 'number'
+                          ? fitTextToLines(rawValue, /*initial*/targetValueFs, /*min*/targetValueFs, /*baseWrap*/baseWrap(textW, 11.5), /*lines*/2, /*hard*/30)
+                          : fitTextToLines(rawValue, /*initial*/commonFs, /*min*/minFs, /*baseWrap*/baseWrap(textW, 11.5), /*lines*/2, /*hard*/30);
+                        const labelLines = Math.max(1, labelFit.text.split('\n').length);
+                        const valueLines = Math.max(1, valueFit.text.split('\n').length);
+                        // Allocate card height to balance label/value vertically
+                        const labelH = (columns === 1)
+                          ? Math.min(cardH * 0.34, (cardH * 0.20) + 0.08 * (labelLines - 1))
+                          : Math.min(cardH * 0.42, (cardH * 0.22) + 0.09 * (labelLines - 1));
+                        const minGap = Number.isFinite(Number(kpiLayout.minGap)) ? Number(kpiLayout.minGap) : 0.08; // slightly larger gap to avoid visual collision
+                        const valueH = Math.max((columns === 1 ? cardH * 0.50 : cardH * 0.42), cardH - labelH - innerPadY * 2 - minGap);
+                        const defaultTextColor = pickTextColorForBackground(`#${boxColor}`).toString();
+                        const labelColor = tplLabelColor || defaultTextColor;
+                        const valueColor = tplValueColor || defaultTextColor;
+                        targetSlide.addText(labelFit.text, { x: textX, y: y + innerPadY, w: textW, h: labelH, fontSize: labelFit.fontSize, bold: true, color: labelColor, align: 'center', fontFace: JPN_FONT, valign: 'top', paraSpaceAfter: 0 });
+                        targetSlide.addText(valueFit.text, { x: textX, y: y + innerPadY + labelH + minGap, w: textW, h: Math.max(0, valueH - minGap), fontSize: valueFit.fontSize, bold: false, color: valueColor, align: 'center', fontFace: JPN_FONT, valign: 'top', paraSpaceAfter: 0 });
+                    }
                     break;
                 }
                 case 'checklist': {
                     const items = Array.isArray(payload?.items) ? payload.items : [];
-                    const maxItems = 7;
-                    const gapY = 0.1;
-                    const lineH = Math.min(0.65, rh / Math.max(1, Math.min(items.length, maxItems)) - gapY);
-                    const markSize = 0.28;
-                    items.slice(0, maxItems).forEach((it: any, i: number) => {
-                        const y = ry + i * (lineH + gapY);
+                    const maxItems = Math.min(10, items.length || 0) || 0;
+                    if (!maxItems) break;
+                    const clStyle: any = (templateConfig?.visualStyles?.checklist) || {};
+                    const gapY = Number.isFinite(Number(clStyle.gapY)) ? Number(clStyle.gapY) : 0.18; // larger gap to avoid overlap when wrapped
+                    const markSize = Number.isFinite(Number(clStyle.markSize)) ? Number(clStyle.markSize) : 0.28;
+                    const padLeft = markSize + 0.3;
+                    const textW = Math.max(0.5, rw - padLeft);
+                    // First pass: estimate required height per item based on wrapped lines
+                    const estHeights: number[] = [];
+                    const fittedTexts: { text: string; fontSize: number }[] = [];
+                    for (let i = 0; i < Math.min(items.length, 10); i++) {
+                        const label = String(items[i]?.label ?? '');
+                        const fit = fitTextToLines(label, /*initial*/(Number(clStyle.fontSizeInitial)||18), /*min*/(Number(clStyle.fontSizeMin)||11), /*baseWrap*/Math.max(18, Math.floor(textW * 10)), /*lines*/(Number(clStyle.maxLines)||3), /*hard*/48);
+                        const lines = Math.max(1, fit.text.split('\n').length);
+                        const base = Number.isFinite(Number(clStyle.baseRowHeight)) ? Number(clStyle.baseRowHeight) : 0.42; // base height per row
+                        const extra = (Number.isFinite(Number(clStyle.extraPerWrappedLine)) ? Number(clStyle.extraPerWrappedLine) : 0.20) * (lines - 1); // more room per wrapped line
+                        const h = Math.min(0.95, base + extra);
+                        estHeights.push(h);
+                        fittedTexts.push({ text: fit.text, fontSize: fit.fontSize });
+                    }
+                    // Normalize total height to fit region (rh)
+                    const totalNeeded = estHeights.reduce((a, b) => a + b, 0) + gapY * (Math.min(items.length, 10) - 1);
+                    const scale = totalNeeded > rh ? Math.max(0.75, rh / totalNeeded) : 1;
+                    let yCursor = ry;
+                    for (let i = 0; i < Math.min(items.length, 10); i++) {
+                        const h = estHeights[i] * scale;
+                        const labelFit = fittedTexts[i];
                         // leading check mark (rounded rect background + tick)
                         const boxX = rx;
-                        const boxY = y + (lineH - markSize)/2;
+                        const boxY = yCursor + (h - markSize) / 2;
                         targetSlide.addShape('rect', { x: boxX, y: boxY, w: markSize, h: markSize, fill: { color: lightenHex(primary, 10) }, line: { color: primary, width: 1 }, rectRadius: 4, shadow: shadowOf(resolveVisualShadow('callouts')) });
-                        // tick as a short chevron
                         targetSlide.addShape('chevron', { x: boxX + 0.04, y: boxY + 0.06, w: markSize - 0.08, h: markSize - 0.12, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 } } as any);
-                        // text (larger and bold)
-                        const label = String(it?.label ?? '');
-                        targetSlide.addText(label, { x: rx + markSize + 0.2, y, w: rw - (markSize + 0.3), h: lineH, fontSize: 18, bold: true, fontFace: JPN_FONT, color: '111111' });
-                    });
+                        // text with dynamic height and font size
+                        const txtColor = (typeof clStyle.textColor === 'string' && clStyle.textColor) ? normalizeColorToPptxHex(clStyle.textColor) : '111111';
+                        targetSlide.addText(labelFit.text, { x: rx + padLeft, y: yCursor, w: textW, h, fontSize: labelFit.fontSize, bold: true, fontFace: JPN_FONT, color: txtColor, valign: 'middle' });
+                        yCursor += h + gapY;
+                        if (yCursor > ry + rh - 0.05) break;
+                    }
                     break;
                 }
                 case 'matrix': {
@@ -1409,11 +2054,18 @@ export const createPowerpointTool = createTool({
                         const headers: string[] | undefined = Array.isArray((payload as any)?.headers) ? (payload as any).headers.map((s:any)=>String(s||'')) : undefined;
                         const rows2d: string[][] = Array.isArray((payload as any)?.rows) ? (payload as any).rows.map((r:any)=>Array.isArray(r)?r.map((s:any)=>String(s||'')):[String(r||'')]) : [];
                         const tableRows: any[] = [];
+                        const headerFillHex = (templateConfig?.visualStyles?.tables?.headerFill && normalizeColorToPptxHex(templateConfig.visualStyles.tables.headerFill)) || normalizeColorToPptxHex(lightenHex(primary, 40)) || 'CCCCCC';
+                        const headerTextHex = (templateConfig?.visualStyles?.tables?.headerColor && normalizeColorToPptxHex(templateConfig.visualStyles.tables.headerColor)) || 'FFFFFF';
+                        const rowFillA = (templateConfig?.visualStyles?.tables?.rowFillA && normalizeColorToPptxHex(templateConfig.visualStyles.tables.rowFillA)) || normalizeColorToPptxHex(lightenHex(secondary, 120)) || 'FFFFFF';
+                        const rowFillB = (templateConfig?.visualStyles?.tables?.rowFillB && normalizeColorToPptxHex(templateConfig.visualStyles.tables.rowFillB)) || normalizeColorToPptxHex(lightenHex(primary, 120)) || 'F7F7F7';
                         if (headers && headers.length) {
-                            tableRows.push(headers.map(h => ({ text: String(h), options: { bold: true, fontFace: JPN_FONT, fontSize: 12, align: 'center' } })));
+                            tableRows.push(headers.map(h => ({ text: String(h), options: { bold: true, fontFace: JPN_FONT, fontSize: 12, align: 'center', color: headerTextHex, fill: { color: headerFillHex } } })));
                         }
-                        for (const r of rows2d) {
-                            tableRows.push(r.map(cell => ({ text: String(cell), options: { fontFace: JPN_FONT, fontSize: 12 } })));
+                        for (let i = 0; i < rows2d.length; i++) {
+                            const r = rows2d[i];
+                            const isAlt = (i % 2 === 1);
+                            const fillHex = isAlt ? rowFillB : rowFillA;
+                            tableRows.push(r.map(cell => ({ text: String(cell), options: { fontFace: JPN_FONT, fontSize: 12, fill: { color: fillHex } } })));
                         }
                         if (tableRows.length) {
                             targetSlide.addTable(tableRows, { x: rx, y: ry, w: rw, h: rh, border: { type: 'solid', color: 'E6E6E6', pt: 1 } as any });
@@ -1434,7 +2086,8 @@ export const createPowerpointTool = createTool({
                         const tW = topW * (1 - i * 0.15);
                         const bW = topW * (1 - (i + 1) * 0.15);
                         const y = startY + (i * (height / layers));
-                        targetSlide.addShape('trapezoid', { x: startX + (topW - tW)/2, y, w: tW, h: height / layers - 0.04, fill: { color: i % 2 ? secondary : primary }, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(resolveVisualShadow('funnel')) } as any);
+                        const __layer = getPaletteColor(i).replace('#','');
+                        targetSlide.addShape('trapezoid', { x: startX + (topW - tW)/2, y, w: tW, h: height / layers - 0.04, fill: { color: __layer }, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(resolveVisualShadow('funnel')) } as any);
                         targetSlide.addText(String(steps[i]?.label ?? ''), { x: startX + 0.15, y: y + 0.04, w: topW - 0.3, h: (height / layers) - 0.12, fontSize: 12, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: JPN_FONT });
                     }
                     break;
@@ -1452,7 +2105,8 @@ export const createPowerpointTool = createTool({
                     const startX = rx + Math.max(0, (rw - groupWidth) / 2);
                     steps.slice(0, maxSteps).forEach((s: any, i: number) => {
                         const x = startX + i * (stepW + gap);
-                            targetSlide.addShape('rect', { x, y, w: stepW, h: stepH, fill: { color: primary }, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(resolveVisualShadow('process')) });
+                            const __step = getPaletteColor(i).replace('#','');
+                            targetSlide.addShape('rect', { x, y, w: stepW, h: stepH, fill: { color: __step }, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(resolveVisualShadow('process')) });
                         targetSlide.addText(String(s?.label ?? `Step ${i+1}`), { x: x + 0.08, y: y + 0.14, w: stepW - 0.16, h: stepH - 0.28, fontSize: 11, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: JPN_FONT });
                         if (i < maxSteps - 1) {
                                 targetSlide.addShape('chevron', { x: x + stepW + (gap - 0.4) / 2, y: y + (stepH - 0.4) / 2, w: 0.4, h: 0.4, fill: { color: secondary }, line: { color: secondary, width: 0 } } as any);
@@ -1476,7 +2130,8 @@ export const createPowerpointTool = createTool({
                         const cx = startX + (i * (totalW / Math.max(1, milestones.length - 1)));
                         // no-op debug removed
                         // Milestone dot
-                        targetSlide.addShape('ellipse', { x: cx - 0.08, y: startY - 0.08, w: 0.16, h: 0.16, fill: { color: accent }, line: { color: outlineColor, width: 0.8 } });
+                        const __ms = getPaletteColor(i).replace('#','');
+                        targetSlide.addShape('ellipse', { x: cx - 0.08, y: startY - 0.08, w: 0.16, h: 0.16, fill: { color: __ms }, line: { color: outlineColor, width: 0.8 } });
                         // Clamp label/date boxes within the slide region to prevent overflow
                         const labelW = 1.6;
                         const dateW = 1.2;
@@ -1491,26 +2146,140 @@ export const createPowerpointTool = createTool({
                 }
                 case 'comparison': {
                     const a = payload?.a, b = payload?.b;
-                    const boxW = Math.min((rw - 0.6) / 2, 2.5);
-                    const boxH = Math.min(rh - 0.2, 1.55);
+                    const aLabel = String(a?.label ?? 'A');
+                    const aValue = String(a?.value ?? '');
+                    const bLabel = String(b?.label ?? 'B');
+                    const bValue = String(b?.value ?? '');
+                    
+                    // Resolve comparison style from template (with sane defaults)
+                    const compStyle: any = (templateConfig?.visualStyles?.comparison) || {};
+                    const labelColorHex = normalizeColorToPptxHex(compStyle.labelColor) || 'EEEEEE';
+                    const valueColorHex = normalizeColorToPptxHex(compStyle.valueColor) || 'FFFFFF';
+                    const unifyFonts: boolean = (compStyle.unifyLabelAndValueFontSize !== false);
+                    const labelAlign: 'left' | 'center' | 'right' = (['left','center','right'].includes(String(compStyle.labelAlign)) ? String(compStyle.labelAlign) as any : 'right');
+                    const layoutPolicy: any = compStyle.layoutPolicy || {};
+                    const preferVerticalIfCrowded: boolean = (layoutPolicy.preferVerticalIfCrowded !== false);
+                    const horizontalMinBoxWidth: number = Number(layoutPolicy.horizontalMinBoxWidth) || 2.4;
+                    // Try horizontal side-by-side first. If too tight, fall back to vertical stacking.
+                    const gapX = Number((compStyle?.layoutPolicy?.gapX)) || 0.3;
+                    // Use a slightly smaller gap to maximize label/value width
+                    const effGapX = Math.min(gapX, 0.12);
+                    const padX = Number((compStyle?.layoutPolicy?.padX)) || 0.15;
+                    // Reduce horizontal padding for wider text area
+                    const labelPadX = Math.max(0.06, padX * 0.4);
+                    const padY = Number((compStyle?.layoutPolicy?.padY)) || 0.12;
+                    const valueOffsetY = Number(compStyle?.valueOffsetY) || 0;
+                    const horizontalBoxW = Math.max(2.2, (rw - effGapX) / 2);
+                    const horizontalBoxH = Math.max(1.2, rh - 0.2);
+                    const hLeftX = rx;
+                    const hRightX = rx + horizontalBoxW + effGapX;
+                    const baseWrap = (w: number, factor: number) => Math.max(16, Math.floor(w * factor));
+                    
+                    // Fit for horizontal layout
+                    // First pass fits (same initial/min so that common size can be enforced)
+                    const aLabelHFit0 = fitTextToLines(aLabel, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(horizontalBoxW, 8.5), /*lines*/2, /*hard*/30);
+                    const aValueHFit0 = fitTextToLines(aValue, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(horizontalBoxW, 10.5), /*lines*/5, /*hard*/44);
+                    const bLabelHFit0 = fitTextToLines(bLabel, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(horizontalBoxW, 8.5), /*lines*/2, /*hard*/30);
+                    const bValueHFit0 = fitTextToLines(bValue, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(horizontalBoxW, 10.5), /*lines*/5, /*hard*/44);
+                    // Enforce same font size per box (label/value equal) if enabled
+                    const aCommonH = 16;
+                    const bCommonH = 16;
+                    const aLabelHFit = fitTextToLines(aLabel, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(horizontalBoxW, 8.5), /*lines*/2, /*hard*/30);
+                    const aValueHFit = fitTextToLines(aValue, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(horizontalBoxW, 10.5), /*lines*/5, /*hard*/44);
+                    const bLabelHFit = fitTextToLines(bLabel, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(horizontalBoxW, 8.5), /*lines*/2, /*hard*/30);
+                    const bValueHFit = fitTextToLines(bValue, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(horizontalBoxW, 10.5), /*lines*/5, /*hard*/44);
+                    const aLabelHLines = aLabelHFit.text.split('\n').length;
+                    const bLabelHLines = bLabelHFit.text.split('\n').length;
+                    const aValueHLines = aValueHFit.text.split('\n').length;
+                    const bValueHLines = bValueHFit.text.split('\n').length;
+                    // Tighter line spacing and guard to avoid overlap into value area
+                    const hLabelH = Math.min(0.7, 0.28 + 0.12 * Math.max(aLabelHLines, bLabelHLines));
+                    const hValueH = horizontalBoxH - hLabelH - padY * 2 - 0.04;
+                    // Heuristic: decide if horizontal is too crowded
+                    const horizontalCrowded = preferVerticalIfCrowded && ((
+                      aValueHFit.fontSize <= 12 && aValueHLines >= 3
+                    ) || (
+                      bValueHFit.fontSize <= 12 && bValueHLines >= 3
+                    ) || (horizontalBoxW < horizontalMinBoxWidth && (aValue.length + bValue.length) > 40));
+                    
+                    const useVertical = horizontalCrowded;
+                    
+                    if (!useVertical) {
                     const y = ry + 0.1;
-                    const compRadius = 0; // squared corners for maximum usable area
-                    const leftX = rx + 0.1;
-                    const rightX = rx + 0.3 + boxW;
-                    // Use rect to avoid corner clipping on long text, with drop shadow bottom-right
-                    targetSlide.addShape('rect', { x: leftX, y, w: boxW, h: boxH, fill: { color: primary }, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(resolveVisualShadow('comparison')) });
-                    targetSlide.addShape('rect', { x: rightX, y, w: boxW, h: boxH, fill: { color: secondary }, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(resolveVisualShadow('comparison')) });
-                    // Fit label/value text into boxes to avoid overflow
-                    const scaleWrap = (base: number) => Math.max(16, Math.floor(base * (boxW / 2.4)));
-                    const aLabelFit = fitTextToLines(String(a?.label ?? 'A'), /*initial*/13, /*min*/9, /*baseWrap*/scaleWrap(24), /*lines*/2, /*hard*/24);
-                    const aValueFit = fitTextToLines(String(a?.value ?? ''), /*initial*/18, /*min*/11, /*baseWrap*/scaleWrap(20), /*lines*/2, /*hard*/22);
-                    const bLabelFit = fitTextToLines(String(b?.label ?? 'B'), /*initial*/13, /*min*/9, /*baseWrap*/scaleWrap(24), /*lines*/2, /*hard*/24);
-                    const bValueFit = fitTextToLines(String(b?.value ?? ''), /*initial*/18, /*min*/11, /*baseWrap*/scaleWrap(20), /*lines*/2, /*hard*/22);
-                    const padX = 0.12;
-                    targetSlide.addText(aLabelFit.text, { x: leftX + padX, y: y + 0.06, w: boxW - padX*2, h: 0.52, fontSize: aLabelFit.fontSize, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center', valign: 'middle' });
-                    targetSlide.addText(aValueFit.text, { x: leftX + padX, y: y + 0.58, w: boxW - padX*2, h: boxH - 0.66, fontSize: aValueFit.fontSize, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center', valign: 'middle' });
-                    targetSlide.addText(bLabelFit.text, { x: rightX + padX, y: y + 0.06, w: boxW - padX*2, h: 0.52, fontSize: bLabelFit.fontSize, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center', valign: 'middle' });
-                    targetSlide.addText(bValueFit.text, { x: rightX + padX, y: y + 0.58, w: boxW - padX*2, h: boxH - 0.66, fontSize: bValueFit.fontSize, bold: true, color: 'FFFFFF', fontFace: JPN_FONT, align: 'center', valign: 'middle' });
+                        // Determine color mode for box fills
+                        const colorMode: 'primarySecondary'|'palettePair'|'aiPair' = (String(compStyle.colorMode||'primarySecondary') as any);
+                        const leftFill = (() => {
+                          if (colorMode === 'palettePair') return getPaletteColor(0).replace('#','');
+                          if (colorMode === 'aiPair') return ensureHash(resolvedPrimary).replace('#','');
+                          return ensureHash(primary).replace('#','');
+                        })();
+                        const rightFill = (() => {
+                          if (colorMode === 'palettePair') return getPaletteColor(1).replace('#','');
+                          if (colorMode === 'aiPair') return ensureHash(resolvedSecondary).replace('#','');
+                          return ensureHash(secondary).replace('#','');
+                        })();
+                        // left box
+                        targetSlide.addShape('rect', { x: hLeftX, y, w: horizontalBoxW, h: horizontalBoxH, fill: { color: leftFill }, line: { color: outlineColor, width: 0.5 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('comparison')) });
+                        // label background (semi-transparent white)
+                        targetSlide.addShape('rect', { x: hLeftX + labelPadX, y: y + padY, w: horizontalBoxW - labelPadX * 2, h: hLabelH, fill: { color: 'FFFFFF', transparency: 50 }, line: { color: 'FFFFFF', width: 0 } } as any);
+                        targetSlide.addText(aLabelHFit.text, { x: hLeftX + labelPadX, y: y + padY, w: horizontalBoxW - labelPadX * 2, h: hLabelH, fontSize: aLabelHFit.fontSize, bold: true, color: labelColorHex, fontFace: JPN_FONT, align: labelAlign, valign: 'middle' });
+                        targetSlide.addText(aValueHFit.text, { x: hLeftX + labelPadX, y: y + padY + hLabelH + valueOffsetY, w: horizontalBoxW - labelPadX * 2, h: hValueH, fontSize: aValueHFit.fontSize, bold: false, color: valueColorHex, fontFace: JPN_FONT, align: 'center', valign: 'top' });
+                        // right box
+                        targetSlide.addShape('rect', { x: hRightX, y, w: horizontalBoxW, h: horizontalBoxH, fill: { color: rightFill }, line: { color: outlineColor, width: 0.5 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('comparison')) });
+                        // label background (semi-transparent white)
+                        targetSlide.addShape('rect', { x: hRightX + labelPadX, y: y + padY, w: horizontalBoxW - labelPadX * 2, h: hLabelH, fill: { color: 'FFFFFF', transparency: 50 }, line: { color: 'FFFFFF', width: 0 } } as any);
+                        targetSlide.addText(bLabelHFit.text, { x: hRightX + labelPadX, y: y + padY, w: horizontalBoxW - labelPadX * 2, h: hLabelH, fontSize: bLabelHFit.fontSize, bold: true, color: labelColorHex, fontFace: JPN_FONT, align: labelAlign, valign: 'middle' });
+                        targetSlide.addText(bValueHFit.text, { x: hRightX + labelPadX, y: y + padY + hLabelH + valueOffsetY, w: horizontalBoxW - labelPadX * 2, h: hValueH, fontSize: bValueHFit.fontSize, bold: false, color: valueColorHex, fontFace: JPN_FONT, align: 'center', valign: 'top' });
+                        break;
+                    }
+                    
+                    // Vertical stacking fallback: each box gets full width, half height
+                    const vGapY = 0.2;
+                    const vBoxW = rw;
+                    const vBoxH = (rh - vGapY) / 2;
+                    const vTopY = ry + 0.05;
+                    const vBottomY = vTopY + vBoxH + vGapY;
+                    
+                    const aLabelVFit0 = fitTextToLines(aLabel, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(vBoxW, 7), /*lines*/2, /*hard*/30);
+                    const aValueVFit0 = fitTextToLines(aValue, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(vBoxW, 10), /*lines*/6, /*hard*/52);
+                    const bLabelVFit0 = fitTextToLines(bLabel, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(vBoxW, 7), /*lines*/2, /*hard*/30);
+                    const bValueVFit0 = fitTextToLines(bValue, /*initial*/16, /*min*/16, /*baseWrap*/baseWrap(vBoxW, 10), /*lines*/6, /*hard*/52);
+                    const aLabelVFit = aLabelVFit0;
+                    const aValueVFit = aValueVFit0;
+                    const bLabelVFit = bLabelVFit0;
+                    const bValueVFit = bValueVFit0;
+                    const aLabelVLines = aLabelVFit.text.split('\n').length;
+                    const bLabelVLines = bLabelVFit.text.split('\n').length;
+                    const aLabelVH = Math.min(0.9, 0.32 + 0.16 * aLabelVLines);
+                    const bLabelVH = Math.min(0.9, 0.32 + 0.16 * bLabelVLines);
+                    const aValueVH = vBoxH - aLabelVH - padY * 2;
+                    const bValueVH = vBoxH - bLabelVH - padY * 2;
+                    
+                    // Determine color mode for vertical boxes as well
+                    const colorModeV: 'primarySecondary'|'palettePair'|'aiPair' = (String(compStyle.colorMode||'primarySecondary') as any);
+                    const topFill = (() => {
+                      if (colorModeV === 'palettePair') return getPaletteColor(0).replace('#','');
+                      if (colorModeV === 'aiPair') return ensureHash(resolvedPrimary).replace('#','');
+                      return ensureHash(primary).replace('#','');
+                    })();
+                    const bottomFill = (() => {
+                      if (colorModeV === 'palettePair') return getPaletteColor(1).replace('#','');
+                      if (colorModeV === 'aiPair') return ensureHash(resolvedSecondary).replace('#','');
+                      return ensureHash(secondary).replace('#','');
+                    })();
+                    // Top box (A)
+                    targetSlide.addShape('rect', { x: rx, y: vTopY, w: vBoxW, h: vBoxH, fill: { color: topFill }, line: { color: outlineColor, width: 0.5 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('comparison')) });
+                    // label background (semi-transparent white)
+                    targetSlide.addShape('rect', { x: rx + labelPadX, y: vTopY + padY, w: vBoxW - labelPadX * 2, h: aLabelVH, fill: { color: 'FFFFFF', transparency: 50 }, line: { color: 'FFFFFF', width: 0 } } as any);
+                    targetSlide.addText(aLabelVFit.text, { x: rx + labelPadX, y: vTopY + padY, w: vBoxW - labelPadX * 2, h: aLabelVH, fontSize: aLabelVFit.fontSize, bold: true, color: labelColorHex, fontFace: JPN_FONT, align: labelAlign, valign: 'middle' });
+                    targetSlide.addText(aValueVFit.text, { x: rx + labelPadX, y: vTopY + padY + aLabelVH + valueOffsetY, w: vBoxW - labelPadX * 2, h: aValueVH, fontSize: aValueVFit.fontSize, bold: false, color: valueColorHex, fontFace: JPN_FONT, align: 'center', valign: 'top' });
+                    
+                    // Bottom box (B)
+                    targetSlide.addShape('rect', { x: rx, y: vBottomY, w: vBoxW, h: vBoxH, fill: { color: bottomFill }, line: { color: outlineColor, width: 0.5 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('comparison')) });
+                    // label background (semi-transparent white)
+                    targetSlide.addShape('rect', { x: rx + labelPadX, y: vBottomY + padY, w: vBoxW - labelPadX * 2, h: bLabelVH, fill: { color: 'FFFFFF', transparency: 50 }, line: { color: 'FFFFFF', width: 0 } } as any);
+                    targetSlide.addText(bLabelVFit.text, { x: rx + labelPadX, y: vBottomY + padY, w: vBoxW - labelPadX * 2, h: bLabelVH, fontSize: bLabelVFit.fontSize, bold: true, color: labelColorHex, fontFace: JPN_FONT, align: labelAlign, valign: 'middle' });
+                    targetSlide.addText(bValueVFit.text, { x: rx + labelPadX, y: vBottomY + padY + bLabelVH + valueOffsetY, w: vBoxW - labelPadX * 2, h: bValueVH, fontSize: bValueVFit.fontSize, bold: false, color: valueColorHex, fontFace: JPN_FONT, align: 'center', valign: 'top' });
                     break;
                 }
                 case 'timeline': {
@@ -1524,7 +2293,8 @@ export const createPowerpointTool = createTool({
                     steps.slice(0, 6).forEach((s: any, i: number) => {
                         const cx = startX + i * segW + segW / 2;
                             
-                            targetSlide.addShape('ellipse', { x: cx - 0.08, y: startY - 0.08, w: 0.16, h: 0.16, fill: { color: accent }, line: { color: outlineColor, width: 0.8 } });
+                            const __dot2 = getPaletteColor(i).replace('#','');
+                            targetSlide.addShape('ellipse', { x: cx - 0.08, y: startY - 0.08, w: 0.16, h: 0.16, fill: { color: __dot2 }, line: { color: outlineColor, width: 0.8 } });
                         targetSlide.addText(String(s?.label ?? `Step ${i+1}`), { x: cx - 0.9, y: startY + 0.18, w: 1.8, h: 0.32, fontSize: 11, align: 'center', fontFace: JPN_FONT });
                     });
                     } catch (e) {
@@ -1547,16 +2317,17 @@ export const createPowerpointTool = createTool({
 
             // Background: prioritize title image; otherwise themed flat color.
             if (index === 0) {
-                if (titleSlideImagePath) {
+                const isTitleSlide = String((slideData as any)?.layout || '') === 'title_slide';
+                if (isTitleSlide && titleSlideImagePath) {
                     try {
-                        await fs.access(titleSlideImagePath);
-                        slide.background = { path: titleSlideImagePath };
+                    await fs.access(titleSlideImagePath);
+                    slide.background = { path: titleSlideImagePath };
                         
-                    } catch (error) {
+                } catch (error) {
                         logger.warn({ path: titleSlideImagePath, error }, 'Could not access title slide image file. Using default background.');
                         slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
                     }
-                } else if ((slides[0] as any)?.titleSlideImagePrompt || templateConfig?.layouts?.title_slide?.background?.source?.type === 'ai') {
+                } else if (isTitleSlide && ((slides[0] as any)?.titleSlideImagePrompt || templateConfig?.layouts?.title_slide?.background?.source?.type === 'ai')) {
                     // Generate title background via new genarateImage using slide title and executive summary context; respect negativePrompt
                     try {
                         const { genarateImage } = await import('./genarateImage');
@@ -1579,15 +2350,18 @@ export const createPowerpointTool = createTool({
                             (slide as any).__tempImages = (slide as any).__tempImages || [];
                             (slide as any).__tempImages.push(out.path);
                             try { imagePathsToDelete.add(out.path); } catch {}
-                        } else {
+            } else {
                             slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
                         }
                     } catch (e) {
                         logger.warn({ error: e }, 'Failed to generate title background. Falling back to color.');
                         slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
                     }
-                } else {
+                } else if (isTitleSlide) {
                     slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
+                } else {
+                    // Non-title first slide: use normal non-title background policy
+                    slide.background = { color: lightenHex(secondary, 80).replace('#', '') } as any;
                 }
             } else {
                 slide.background = { color: lightenHex(secondary, 80).replace('#', '') } as any;
@@ -1643,6 +2417,24 @@ export const createPowerpointTool = createTool({
             const perSlideRecipeHere = (slideData as any).visual_recipe || ctxRecipe || null;
             const isBottomVisual = perSlideRecipeHere && (['process','roadmap','gantt','timeline'].includes(String(perSlideRecipeHere.type)));
             const titleTextShadowValue: any = templateConfig?.components?.title?.shadow;
+            // Helper: decide whether a visual should be placed in the bottom band instead of right panel
+            const shouldPlaceVisualBottom = (typeStrIn: string, recipeIn: any): boolean => {
+                const t = String(typeStrIn || '').toLowerCase();
+                const vp = (templateConfig?.rules?.visualPlacement) || {};
+                const forceBottomTypes: string[] = Array.isArray(vp.forceBottomTypes) ? vp.forceBottomTypes.map((s: any)=>String(s||'').toLowerCase()) : [];
+                if (forceBottomTypes.includes(t)) return true;
+                const checklistMax = Number.isFinite(Number(vp.checklistMaxRightPanelItems)) ? Number(vp.checklistMaxRightPanelItems) : 4;
+                const kpiMax = Number.isFinite(Number(vp.kpiMaxRightPanelItems)) ? Number(vp.kpiMaxRightPanelItems) : 3;
+                const items = Array.isArray((recipeIn||{}).items) ? recipeIn.items : [];
+                if (t === 'checklist') {
+                    return items.length > checklistMax;
+                }
+                if (t === 'kpi' || t === 'kpi_grid') {
+                    return items.length > kpiMax;
+                }
+                // Default: keep in right panel
+                return false;
+            };
             // Prepare layout area resolver early to avoid TDZ in case blocks
             let layout = (slideData as any).layout || 'content_only';
             // Degrade layout to content_only when no visual exists to render
@@ -1684,9 +2476,9 @@ export const createPowerpointTool = createTool({
                             x: 0.8, y: 1.2, w: pageW - 1.6, h: 1.2,
                             align: 'center', valign: 'middle', fontSize: fittedTitle.fontSize, bold: true, fontFace: JPN_FONT, color: bgTextColor,
                             shadow: shadowOf(templateConfig?.components?.title?.shadow, shadowPreset)
-                        });
-                        if (slideData.bullets.length > 0) {
-                            const subtitle = preventLeadingPunctuation(formatBulletsForColonSeparation(slideData.bullets, 24, 4));
+                    });
+                    if (slideData.bullets.length > 0) {
+                        const subtitle = preventLeadingPunctuation(formatBulletsForColonSeparation(slideData.bullets, 24, 4));
                             const fittedSub = fitTextToLines(subtitle, /*initial*/18, /*min*/14, /*baseWrap*/36, /*lines*/3, /*hard*/32);
                             slide.addText(toBoldRunsFromMarkdown(fittedSub.text) as any, {
                                 x: 0.8, y: 2.6, w: pageW - 1.6, h: 1.6,
@@ -1754,24 +2546,52 @@ export const createPowerpointTool = createTool({
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
                             try { logger.info({ layout: 'content_with_visual' }, 'Template elements present: skipping code-rendered defaults for content_with_visual'); } catch {}
+                            // Decide if visual should go to bottom band instead of right panel
+                            // Use unified per-slide recipe (from slide or context)
+                            const typeStr = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
+                            const preferBottom = shouldPlaceVisualBottom(typeStr, perSlideRecipeHere);
+                            // Render template elements; when preferBottom is true, skip template visual element
+                            const elementsToRender = preferBottom ? (tmplElements.filter((e: any) => String(e?.type) !== 'visual')) : tmplElements;
                             // Provide slide data to renderer
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
-                            await renderElementsFromTemplate(slide as any, 'content_with_visual', tmplElements);
-                            // If template doesn't include a visual element, fallback to recipe/image region
-                            const hasVisualEl = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
-                            if (hasVisualEl) { visualRendered = true; __templateHasVisualElForLayout = true; }
-                            if (!hasVisualEl) {
-                                const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.6, twoColVisualW, 3.4);
-                                logger.warn({ layout: 'content_with_visual', area: vArea, recipeType: (slideData as any)?.visual_recipe?.type || null }, 'Template elements missing visual. Falling back to code-rendered visual region');
-                                if ((slideData as any).visual_recipe) {
-                                    await drawInfographic(slide as any, String(((slideData as any).visual_recipe?.type) || ''), (slideData as any).visual_recipe, vArea);
-                                    visualRendered = true;
-                                } else if (slideData.imagePath) {
-                                    slide.addImage({ path: slideData.imagePath, x: vArea.x, y: vArea.y, w: vArea.w, h: vArea.h, sizing: { type: 'contain', w: vArea.w, h: vArea.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
-                                    visualRendered = true;
+                            await renderElementsFromTemplate(slide as any, 'content_with_visual', elementsToRender);
+                            delete (slide as any).__data;
+                            // If template doesn't include a visual element or we intentionally skipped it, render either right-panel or bottom-band
+                            const templateHadVisualEl = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
+                            __templateHasVisualElForLayout = __templateHasVisualElForLayout || templateHadVisualEl;
+                            if (!preferBottom && templateHadVisualEl) {
+                                // Respect template rendering only (no code-side duplication)
+                                visualRendered = true;
+                            } else {
+                            if (preferBottom) {
+                                    // Use explicit bottom band rectangle to avoid content_with_visual template area override
+                                    const va = { x: marginX, y: bottomBandY, w: contentW, h: bottomBandH };
+                                    const bulletsBottom = (contentTopY + 0.5) + Math.max(2.5, twoColTextH - 0.5);
+                                    (va as any).y = Math.max(va.y, bulletsBottom + 0.2);
+                                    const reservedBottom = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
+                                    if ((va.y + va.h) > (pageH - reservedBottom)) {
+                                        const minY = contentTopY + 0.7;
+                                        (va as any).y = Math.max(minY, (pageH - reservedBottom) - va.h);
+                                    }
+                                    if (perSlideRecipeHere && typeof perSlideRecipeHere === 'object') {
+                                        await drawInfographic(slide as any, String(typeStr), perSlideRecipeHere, va);
+                                        visualRendered = true;
+                                    } else if (slideData.imagePath) {
+                                        slide.addImage({ path: slideData.imagePath, x: va.x, y: va.y, w: va.w, h: va.h, sizing: { type: 'contain', w: va.w, h: va.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                                        visualRendered = true;
+                                    }
+                                } else {
+                                    const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.6, twoColVisualW, 3.4);
+                                    logger.warn({ layout: 'content_with_visual', area: vArea, recipeType: (slideData as any)?.visual_recipe?.type || null }, 'Template elements missing visual. Falling back to code-rendered visual region');
+                                    if ((slideData as any).visual_recipe) {
+                                        await drawInfographic(slide as any, String(((slideData as any).visual_recipe?.type) || ''), (slideData as any).visual_recipe, vArea);
+                                        visualRendered = true;
+                                    } else if (slideData.imagePath) {
+                                        slide.addImage({ path: slideData.imagePath, x: vArea.x, y: vArea.y, w: vArea.w, h: vArea.h, sizing: { type: 'contain', w: vArea.w, h: vArea.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                                        visualRendered = true;
+                                    }
                                 }
                             }
-                            delete (slide as any).__data;
                             break;
                         }
                         const fitted = fitTextToLines(slideData.title, /*initial*/32, /*min*/22, /*baseWrap*/36, /*lines*/1, /*hard*/24);
@@ -1788,10 +2608,30 @@ export const createPowerpointTool = createTool({
                     {
                         const bArea = resolveArea('bullets', twoColTextX, contentTopY + 0.5, twoColTextW, Math.max(2.5, twoColTextH - 0.5));
                     const cleanedBulletsCv = (slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim());
-                    const bulletTextCv = cleanedBulletsCv.join('\n');
-                        slide.addText(toBoldRunsFromMarkdown(bulletTextCv) as any, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: 18, bullet: { type: 'bullet' }, fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                    const bulletTextCv = cleanedBulletsCv.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
+                        slide.addText(bulletTextCv, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: 18, bullet: { type: 'bullet' }, fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                     }
-                    if (!isBottomVisual && slideData.imagePath) {
+                    // Non-template path: if visual exists and is crowded for right-panel, draw into bottom band instead
+                    if (perSlideRecipeHere) {
+                        const typeStr = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
+                        const preferBottom = shouldPlaceVisualBottom(typeStr, perSlideRecipeHere);
+                        if (preferBottom) {
+                            const va = resolveArea('visual', marginX, bottomBandY, contentW, bottomBandH);
+                            const bulletsBottom = (contentTopY + 0.5) + Math.max(2.5, twoColTextH - 0.5);
+                            (va as any).y = Math.max(va.y, bulletsBottom + 0.2);
+                            const reservedBottom = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
+                            if ((va.y + va.h) > (pageH - reservedBottom)) {
+                                const minY = contentTopY + 0.7;
+                                (va as any).y = Math.max(minY, (pageH - reservedBottom) - va.h);
+                            }
+                            await drawInfographic(slide as any, typeStr, perSlideRecipeHere as any, va);
+                            visualRendered = true;
+                        } else if (!isBottomVisual) {
+                            const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.6, twoColVisualW, 3.4);
+                            await drawInfographic(slide as any, typeStr, perSlideRecipeHere as any, vArea);
+                            visualRendered = true;
+                        }
+                    } else if (!isBottomVisual && slideData.imagePath) {
                         const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.6, twoColVisualW, 3.4);
                         slide.addImage({ path: slideData.imagePath, x: vArea.x, y: vArea.y, w: vArea.w, h: vArea.h, sizing: { type: 'contain', w: vArea.w, h: vArea.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
                     }
@@ -1804,10 +2644,13 @@ export const createPowerpointTool = createTool({
                             try { logger.info({ layout: 'content_with_bottom_visual' }, 'Template elements present: skipping code-rendered defaults for content_with_bottom_visual'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
                             await renderElementsFromTemplate(slide as any, 'content_with_bottom_visual', tmplElements);
-                            // Fallback render if no visual element present
+                            // Fallback render only if template lacks a visual element
                             const hasVisualEl = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
-                            if (hasVisualEl) { visualRendered = true; __templateHasVisualElForLayout = true; }
-                            if (!hasVisualEl) {
+                            __templateHasVisualElForLayout = __templateHasVisualElForLayout || hasVisualEl;
+                            if (hasVisualEl) {
+                                // Template already rendered the visual; avoid duplicate drawing
+                                visualRendered = true;
+                            } else {
                                 const va = resolveArea('visual', marginX, bottomBandY, contentW, bottomBandH);
                                 logger.warn({ layout: 'content_with_bottom_visual', area: va, recipeType: (slideData as any)?.visual_recipe?.type || null }, 'Template elements missing visual. Falling back to code-rendered bottom visual region');
                                 if ((slideData as any).visual_recipe) {
@@ -1833,8 +2676,8 @@ export const createPowerpointTool = createTool({
                     {
                         const bArea = resolveArea('bullets', twoColTextX, contentTopY + 0.5, contentW, 2.4);
                         const cleanedBullets = mergeQuotedContinuations((slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim()));
-                        const bulletText = cleanedBullets.join('\n');
-                        slide.addText(toBoldRunsFromMarkdown(bulletText) as any, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                        const bulletText = cleanedBullets.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
+                        slide.addText(bulletText, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                     }
                     {
                         const aVisual = resolveArea('visual', marginX, bottomBandY, contentW, bottomBandH);
@@ -1851,6 +2694,167 @@ export const createPowerpointTool = createTool({
                         }
                     }
                     break;
+                case 'content_with_image':
+                    {
+                        const tmplElements = templateConfig?.layouts?.content_with_image?.elements;
+                        if (Array.isArray(tmplElements) && tmplElements.length) {
+                            __templateHasElementsForLayout = true;
+                            try { logger.info({ layout: 'content_with_image' }, 'Template elements present: skipping code-rendered defaults for content_with_image'); } catch {}
+                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, imagePath: slideData.imagePath };
+                            await renderElementsFromTemplate(slide as any, 'content_with_image', tmplElements);
+                            delete (slide as any).__data;
+                            break;
+                        }
+                        // Title bar
+                        const fitted = fitTextToLines(slideData.title, /*initial*/32, /*min*/22, /*baseWrap*/36, /*lines*/1, /*hard*/24);
+                        const layoutKeyLocal = 'content_with_image';
+                        const resolved = resolveTitleBarColorFromTemplate(templateConfig, layoutKeyLocal, primary, (slideData as any).accent_color);
+                        const bgColor = (templateConfig?.layouts?.[layoutKeyLocal]?.titleBar?.color) || (titleBarAreaStyle?.fill) || resolved;
+                        const textColor = pickTextColorForBackground(bgColor).toString();
+                        const tArea = resolveArea('title', twoColTextX, contentTopY - 0.35, contentW, 0.6);
+                        slide.addShape('rect', { x: tArea.x, y: tArea.y, w: tArea.w, h: tArea.h, fill: buildFill(bgColor), line: { color: normalizeColorToPptxHex(bgColor) || 'FFFFFF', width: 0 }, shadow: shadowOf(titleBarAreaStyle?.shadow, shadowPreset) } as any);
+                        slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, { x: tArea.x, y: tArea.y, w: tArea.w, h: tArea.h, fontSize: fitted.fontSize, bold: true, fontFace: headFont, color: textColor, shadow: shadowOf(titleTextShadowValue, shadowPreset) });
+                        // Areas: left image, right bullets
+                        const imgArea = resolveArea('image', marginX, contentTopY + 0.5, Math.max(5.4, contentW * 0.45), Math.max(3.6, twoColTextH));
+                        const bulletsArea = resolveArea('bullets', imgArea.x + imgArea.w + gap, contentTopY + 0.5, Math.max(4.5, contentW - imgArea.w - gap), Math.max(2.5, twoColTextH - 0.2));
+                        // Ensure image is available or generate via AI if context_for_visual provided
+                        let imagePath = (slideData as any).imagePath as (string|undefined);
+                        if (!imagePath && typeof (slideData as any).context_for_visual === 'string' && (slideData as any).context_for_visual.trim()) {
+                            try {
+                                const paletteHint = primary && secondary ? `palette: primary=${primary}, secondary=${secondary}` : '';
+                                const prompt = [
+                                    'Photorealistic/product or scene image for presentation (no text).',
+                                    `Context: ${(slideData as any).context_for_visual.trim()}`,
+                                    'Style: modern, clean, high-resolution, professional.',
+                                    paletteHint
+                                ].filter(Boolean).join(' ');
+                                const { genarateImage } = await import('./genarateImage');
+                                const res = await genarateImage({ prompt, aspectRatio: '4:3' });
+                                if (res?.success && res.path) imagePath = res.path;
+                            } catch {}
+                        }
+                        if (imagePath) {
+                            slide.addImage({ path: imagePath, x: imgArea.x, y: imgArea.y, w: imgArea.w, h: imgArea.h, sizing: { type: 'cover', w: imgArea.w, h: imgArea.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                        }
+                        // Bullets on the right
+                        const bulletsText = (slideData.bullets || []).map((b:any)=>String(b||'').replace(/\n[ \t　]*/g,' ').trim()).join('\n').replace(/\*\*([^*]+)\*\*/g,'$1');
+                        slide.addText(bulletsText, { x: bulletsArea.x, y: bulletsArea.y, w: bulletsArea.w, h: bulletsArea.h, fontSize: 18, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                    }
+                    break;
+                case 'visual_only':
+                    {
+                        const tmplElements = templateConfig?.layouts?.visual_only?.elements;
+                        if (Array.isArray(tmplElements) && tmplElements.length) {
+                            __templateHasElementsForLayout = true;
+                            try { logger.info({ layout: 'visual_only' }, 'Template elements present: skipping code-rendered defaults for visual_only'); } catch {}
+                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
+                            await renderElementsFromTemplate(slide as any, 'visual_only', tmplElements);
+                            delete (slide as any).__data;
+                            break;
+                        }
+                        // Fallback: use full canvas for visual
+                        const vArea = { x: marginX, y: contentTopY - 0.1, w: contentW, h: pageH - (contentTopY - 0.1) - 0.6 };
+                        if (perSlideRecipeHere && typeof perSlideRecipeHere === 'object') {
+                            await drawInfographic(slide as any, String(perSlideRecipeHere.type || ''), perSlideRecipeHere, vArea);
+                        } else if (slideData.imagePath) {
+                            slide.addImage({ path: slideData.imagePath, x: vArea.x, y: vArea.y, w: vArea.w, h: vArea.h, sizing: { type: 'cover', w: vArea.w, h: vArea.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                        }
+                    }
+                    break;
+                case 'visual_hero_split':
+                    {
+                        const tmplElements = templateConfig?.layouts?.visual_hero_split?.elements;
+                        if (Array.isArray(tmplElements) && tmplElements.length) {
+                            __templateHasElementsForLayout = true;
+                            try { logger.info({ layout: 'visual_hero_split' }, 'Rendering from template elements'); } catch {}
+                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, imagePath: slideData.imagePath };
+                            await renderElementsFromTemplate(slide as any, 'visual_hero_split', tmplElements);
+                            delete (slide as any).__data;
+                            break;
+                        }
+                        // No explicit code fallback; rely on template
+                    }
+                    break;
+                case 'comparison_cards':
+                    {
+                        const tmplElements = templateConfig?.layouts?.comparison_cards?.elements;
+                        if (Array.isArray(tmplElements) && tmplElements.length) {
+                            __templateHasElementsForLayout = true;
+                            try { logger.info({ layout: 'comparison_cards' }, 'Rendering from template elements'); } catch {}
+                            // Build bulletsA/B with fallbacks: if missing, split common bullets array into two halves
+                            const rawA: any = (slideData as any).bulletsA;
+                            const rawB: any = (slideData as any).bulletsB;
+                            const common: any = (slideData as any).bullets;
+                            let aList: string[] | undefined = Array.isArray(rawA) ? rawA.map((s:any)=>String(s||'')) : undefined;
+                            let bList: string[] | undefined = Array.isArray(rawB) ? rawB.map((s:any)=>String(s||'')) : undefined;
+                            if ((!aList || aList.length === 0 || !bList || bList.length === 0) && Array.isArray(common) && common.length) {
+                              const mid = Math.ceil(common.length / 2);
+                              const left = common.slice(0, mid).map((s:any)=>String(s||''));
+                              const right = common.slice(mid).map((s:any)=>String(s||''));
+                              if (!aList || aList.length === 0) aList = left;
+                              if (!bList || bList.length === 0) bList = right.length ? right : left; // if odd, mirror left
+                              try { logger.warn({ fallbackFromCommon: true, commonLen: common.length, aLen: aList.length, bLen: bList.length }, 'comparison_cards: bullets fallback applied'); } catch {}
+                            }
+                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, bulletsA: aList, bulletsB: bList } as any;
+                            try { logger.info({ hasA: Array.isArray(aList), hasB: Array.isArray(bList), aLen: Array.isArray(aList)?aList.length:0, bLen: Array.isArray(bList)?bList.length:0 }, 'comparison_cards: __data bullets presence'); } catch {}
+                            await renderElementsFromTemplate(slide as any, 'comparison_cards', tmplElements);
+                            // Manual fallback draw if template bullets did not render but data exists
+                            try {
+                              const flags = (slide as any).__renderedFlags || {};
+                              const aList = (slide as any).__data?.bulletsA as string[] | undefined;
+                              const bList = (slide as any).__data?.bulletsB as string[] | undefined;
+                              const needA = Array.isArray(aList) && aList.length > 0 && !flags['comparison_cards_bulletsA'];
+                              const needB = Array.isArray(bList) && bList.length > 0 && !flags['comparison_cards_bulletsB'];
+                              const areas = (templateConfig?.layouts?.comparison_cards?.areas) || {};
+                              const reg = templateConfig?.geometry?.regionDefs || {};
+                              const getBox = (areaName: string) => {
+                                const a: any = areas[areaName] || {};
+                                const ref = typeof a?.ref === 'string' ? a.ref : '';
+                                const refSize: any = ref && reg[ref] ? reg[ref] : {};
+                                const w = Number(a?.w) || Number(refSize?.w) || 3.8;
+                                const h = Number(a?.h) || Number(refSize?.h) || 2.4;
+                                const x = Number(a?.x) || 0.8;
+                                const y = Number(a?.y) || 1.6;
+                                return { x, y, w, h };
+                              };
+                              const titleReserve = 0.6;
+                              if (needA) {
+                                const box = getBox('cardA');
+                                const y = box.y + titleReserve;
+                                const h = Math.max(0.2, box.h - titleReserve);
+                                const txt = aList.join('\n');
+                                slide.addText(txt, { x: box.x + 0.2, y, w: box.w - 0.4, h, fontSize: 16, fontFace: JPN_FONT, bullet: { type: 'bullet' }, color: '333333', valign: 'top' });
+                                logger.warn({ manual:true, len:aList.length, box:{x:box.x,y,h,w:box.w} }, 'comparison_cards: manual render bulletsA');
+                              }
+                              if (needB) {
+                                const box = getBox('cardB');
+                                const y = box.y + titleReserve;
+                                const h = Math.max(0.2, box.h - titleReserve);
+                                const txt = bList.join('\n');
+                                slide.addText(txt, { x: box.x + 0.2, y, w: box.w - 0.4, h, fontSize: 16, fontFace: JPN_FONT, bullet: { type: 'bullet' }, color: '333333', valign: 'top' });
+                                logger.warn({ manual:true, len:bList.length, box:{x:box.x,y,h,w:box.w} }, 'comparison_cards: manual render bulletsB');
+                              }
+                            } catch {}
+                            delete (slide as any).__data;
+                            break;
+                        }
+                        // No explicit code fallback; rely on template
+                    }
+                    break;
+                case 'checklist_top_bullets_bottom':
+                    {
+                        const tmplElements = templateConfig?.layouts?.checklist_top_bullets_bottom?.elements;
+                        if (Array.isArray(tmplElements) && tmplElements.length) {
+                            __templateHasElementsForLayout = true;
+                            try { logger.info({ layout: 'checklist_top_bullets_bottom' }, 'Rendering from template elements'); } catch {}
+                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere };
+                            await renderElementsFromTemplate(slide as any, 'checklist_top_bullets_bottom', tmplElements);
+                            delete (slide as any).__data;
+                            break;
+                        }
+                        // No explicit code fallback; rely on template
+                    }
+                    break;
                 case 'content_only':
                 default:
                     {
@@ -1859,6 +2863,23 @@ export const createPowerpointTool = createTool({
                         // expose to outer scope via locals
                         var __hasTemplate_co = hasTemplate;
                         var __hasBulletsEl_co = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'text' && (String(e?.area) === 'bullets' || String(e?.contentRef) === 'bullets'));
+                        // If this slide actually has a visual, prefer rendering via an appropriate layout template
+                        if (perSlideRecipeHere && typeof perSlideRecipeHere === 'object') {
+                            const typeStrCO = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
+                            const preferBottom = isBottomVisual || shouldPlaceVisualBottom(typeStrCO, perSlideRecipeHere);
+                            const targetLayout = preferBottom ? 'content_with_bottom_visual' : 'content_with_visual';
+                            const targetElems = templateConfig?.layouts?.[targetLayout]?.elements;
+                            if (Array.isArray(targetElems) && targetElems.length) {
+                                __templateHasElementsForLayout = true;
+                                try { logger.info({ from: 'content_only', to: targetLayout }, 'Redirecting rendering to target layout to avoid overlap.'); } catch {}
+                                (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere };
+                                await renderElementsFromTemplate(slide as any, targetLayout, targetElems);
+                                const hasVisualEl = Array.isArray(targetElems) && targetElems.some((e: any) => String(e?.type) === 'visual');
+                                if (hasVisualEl) { visualRendered = true; __templateHasVisualElForLayout = true; }
+                                delete (slide as any).__data;
+                                break;
+                            }
+                        }
                         if (hasTemplate) {
                             __templateHasElementsForLayout = true;
                             try { logger.info({ layout: 'content_only' }, 'Template elements present: skipping code-rendered defaults for content_only'); } catch {}
@@ -1881,40 +2902,54 @@ export const createPowerpointTool = createTool({
                     }
                     // Allow a bit more content on content-only slides: target 4 lines per bullet
                     const cleanedBulletsCo = mergeQuotedContinuations((slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim()));
-                    const bulletTextCo = cleanedBulletsCo.join('\n');
+                    const bulletTextCo = cleanedBulletsCo.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
                     // Shift text down to avoid overlapping title
                     const textYContentOnly = contentTopY + 0.5;
-                    const textHContentOnly = 4.0;
-                    // If template already rendered bullets, skip fallback bullets to avoid duplication
-                    if (!(__hasTemplate_co && __hasBulletsEl_co)) {
+                    let textHContentOnly = 4.0;
+                    // If visual exists and is bottom-type or will be placed at bottom, shorten bullets area to avoid overlap
                     if (perSlideRecipeHere) {
-                        // If the recipe is of bottom-band type, use full-width text
-                        if (isBottomVisual) {
-                                slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                        const typeStrCO = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
+                        const willBottom = isBottomVisual || shouldPlaceVisualBottom(typeStrCO, perSlideRecipeHere);
+                        if (willBottom) {
+                            textHContentOnly = Math.min(textHContentOnly, 2.6);
+                        }
+                    }
+                    // If template already rendered bullets, or we redirected to another layout above, skip fallback bullets
+                    if (!(__hasTemplate_co && __hasBulletsEl_co) && !__templateHasVisualElForLayout) {
+                    if (perSlideRecipeHere) {
+                        const typeStrCO2 = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
+                        const willBottom2 = isBottomVisual || shouldPlaceVisualBottom(typeStrCO2, perSlideRecipeHere);
+                        // If the recipe should be placed at bottom, use full-width text; otherwise two-column
+                        if (willBottom2) {
+                                slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         } else {
                             // Right-panel recipe → two-column
-                                slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { x: twoColTextX, y: textYContentOnly, w: twoColTextW, h: twoColTextH, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                                slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: twoColTextW, h: twoColTextH, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         }
                     } else {
                         // No recipe → full-width text
-                            slide.addText(toBoldRunsFromMarkdown(bulletTextCo) as any, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                            slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         }
                     }
                     break;
             }
 
-            // If a per-slide visual recipe exists, render it in a right panel (for content_* only)
+            // If a per-slide visual recipe exists, choose optimal layout to avoid overlap
             if (perSlideRecipeHere && (layout === 'content_with_visual' || layout === 'content_only') && !visualRendered) {
-                // place process/roadmap/gantt/timeline at bottom band, others to right panel
                 const typeStr = String(perSlideRecipeHere.type || '');
-                const isBottom = isBottomVisual || typeStr === 'gantt' || typeStr === 'timeline';
+                // Decide placement dynamically for content_only
+                if (layout === 'content_only') {
+                    const preferBottom = shouldPlaceVisualBottom(typeStr, perSlideRecipeHere);
+                    layout = preferBottom ? 'content_with_bottom_visual' : 'content_with_visual';
+                }
+                const isBottom = (layout === 'content_with_bottom_visual') || isBottomVisual || typeStr === 'gantt' || typeStr === 'timeline';
                 // If an image chart exists on the right panel for content_with_visual,
                 // move recipe to bottom band to avoid overlap.
                 const hasImageForSlide = !!(slideData as any).imagePath;
                 const forceBottomForRecipe = (layout === 'content_with_visual') && hasImageForSlide;
                 // Right panel and bottom band regions (absolute, 16:9)
                 // For content_only, place band under bullets area to avoid overlap
-                const bulletsBottomY = contentTopY + 0.5 + 2.4; // adjusted to avoid overlap with bottom band
+                const bulletsBottomY = contentTopY + 0.5 +  (layout === 'content_only' ? 2.6 : 2.4); // content_only uses shortened bullets when bottom visual
                 const dynamicBottomY = layout === 'content_only' ? Math.max(bottomBandY, bulletsBottomY + 0.2) : bottomBandY;
                 let region = (isBottom || forceBottomForRecipe)
                   ? { x: marginX, y: dynamicBottomY, w: contentW, h: bottomBandH }
@@ -1926,7 +2961,7 @@ export const createPowerpointTool = createTool({
                     region.y = Math.max(minY, (pageH - reservedBottom) - region.h);
                 }
                 logger.warn({ layout, area: region, recipeType: String(perSlideRecipeHere.type || '') }, 'Fallback visual rendering invoked');
-                drawInfographic(slide as any, String(perSlideRecipeHere.type || ''), perSlideRecipeHere, region);
+                await drawInfographic(slide as any, String(perSlideRecipeHere.type || ''), perSlideRecipeHere, region);
             }
             // Copyright (template-driven)
             try {
@@ -1967,7 +3002,7 @@ export const createPowerpointTool = createTool({
                         if (style?.fill) opts.fill = buildFill(style.fill);
                         if (style?.lineColor || Number.isFinite(style?.lineWidth)) opts.line = { color: normalizeColorToPptxHex(style?.lineColor) || (normalizeColorToPptxHex(style?.fill) || 'FFFFFF'), width: Number(style?.lineWidth) || 0 };
                         slide.addText(text, opts);
-                        appliedCopyrightCount++;
+                    appliedCopyrightCount++;
                     }
                 } else if (typeof crCfg === 'string' && crCfg.trim()) {
                     slide.addText(crCfg.trim(), { x: 0.4, y: pageH - 0.35, w: pageW - 0.8, h: 0.3, align: 'center', fontSize: 10, color: '666666', fontFace: bodyFont });
@@ -1976,9 +3011,9 @@ export const createPowerpointTool = createTool({
                     slide.addText(companyCopyright, { x: 0.4, y: pageH - 0.35, w: pageW - 0.8, h: 0.3, align: 'center', fontSize: 10, color: '666666', fontFace: bodyFont });
                     appliedCopyrightCount++;
                 }
-            } catch (e) {
-                logger.warn({ error: e }, 'Failed to add copyright text on a slide.');
-            }
+                } catch (e) {
+                    logger.warn({ error: e }, 'Failed to add copyright text on a slide.');
+                }
 
             // Page number (template-driven)
             try {
@@ -2097,27 +3132,13 @@ export const createPowerpointTool = createTool({
         }
         // drawInfographic defined earlier; ensure not duplicated here
 
-        // Try to render visual_recipe if supplied in slide payload
-        for (const s of slides as any[]) {
-            const recipe = (s as any).visual_recipe;
-            if (recipe && typeof recipe === 'object') {
-                try {
-                const infoSlide = pres.addSlide();
-                infoSlide.background = { color: secondary.replace('#', '') } as any;
-                if (recipe.type) {
-                    drawInfographic(infoSlide, String(recipe.type), recipe);
-                    }
-                } catch (e) {
-                    logger.warn({ error: e }, 'Skipped visual_recipe slide due to rendering error.');
-                }
-            }
-        }
+        // Removed automatic extra slide for raw visual_recipe preview to keep flow simple and avoid duplication
         
         await pres.writeFile({ fileName: filePath });
 
         // Collect unique image paths to delete (charts + images under temp/public)
         const tempImagesCollected: string[] = [];
-        const chartsDir = path.join(config.tempDir, 'charts');
+                const chartsDir = path.join(config.tempDir, 'charts');
         const imagesDir = path.join(config.tempDir, 'images');
         const publicBase = config.publicDir ? path.resolve(config.publicDir) : null;
         const publicChartsDir = publicBase ? path.join(publicBase, 'temp', 'charts') : null;
@@ -2127,7 +3148,7 @@ export const createPowerpointTool = createTool({
                 const dir = path.resolve(path.dirname(slideData.imagePath));
                 const approvedDirs = [chartsDir, imagesDir, publicChartsDir, publicImagesDir].filter(Boolean).map((d:any)=>path.resolve(String(d)));
                 if (approvedDirs.includes(dir)) {
-                imagePathsToDelete.add(slideData.imagePath);
+                    imagePathsToDelete.add(slideData.imagePath);
                 }
             }
         }
@@ -2136,14 +3157,14 @@ export const createPowerpointTool = createTool({
         // Since PPTXGenJS doesn't expose slides list in types, we track our own
         // Note: We already pushed paths into imagePathsToDelete when adding images; ensure dedupe
         // (No-op here because we don't have a central registry; paths were added where generated.)
- 
+
         for (const imagePath of imagePathsToDelete) {
             try {
                 // Only delete if under approved temp dirs
                 const dir = path.resolve(path.dirname(imagePath));
                 const approvedDirs = [chartsDir, imagesDir, publicChartsDir, publicImagesDir].filter(Boolean).map((d:any)=>path.resolve(String(d)));
                 if (approvedDirs.includes(dir)) {
-                    await fs.unlink(imagePath);
+                await fs.unlink(imagePath);
                 } else {
                     logger.warn({ imagePath }, 'Skip deletion: not under approved temp dir');
                 }
