@@ -16,5 +16,6 @@ export { marketResearchWorkflow } from './market-research/marketResearch';
 export { strategyPlannerWorkflow } from './strategy-planner/strategyPlanner';
 export { productAnalysisWorkflow } from './product-analysis/productAnalysis';
 export { intelligentPresenterWorkflow } from './presenter/intelligentPresenter';
+export { recipeToPptxWorkflow } from './presenter/recipeToPptx';
 export { podcastPlannerWorkflow } from './podcast/podcastPlanner';
 export { signageAdsPlannerWorkflow } from './signage-ads/signageAdsPlanner';

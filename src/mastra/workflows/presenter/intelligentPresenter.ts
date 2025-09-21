@@ -349,7 +349,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
 
             スライド構成案の各配列要素は、以下のキーを持つJSONオブジェクトです:
             - "title": string (スライドのタイトル)
-            - "layout": 'title_slide' | 'section_header' | 'content_with_visual' | 'content_with_bottom_visual' | 'content_only' | 'quote' | 'visual_hero_split' | 'comparison_cards' | 'checklist_top_bullets_bottom' (スライドの役割に応じたレイアウトタイプ)
+            - "layout": 'title_slide' | 'section_header' | 'content_with_visual' | 'content_with_bottom_visual' | 'content_with_image' | 'visual_only' | 'content_only' | 'quote' | 'visual_hero_split' | 'comparison_cards' | 'checklist_top_bullets_bottom' (スライドの役割に応じたレイアウトタイプ)
             - "bullets": string[] (スライドの要点を箇条書きで)
             - "visual_suggestion": 'bar_chart' | 'pie_chart' | 'line_chart' | 'none' (グラフの提案、不要なら'none')
             - "context_for_visual": string (グラフ作成に必要な文脈)
@@ -362,6 +362,8 @@ export const intelligentPresenterWorkflow = createWorkflow({
                 1) content_only: 視覚要素が不要で、本文の要点のみで十分な場合。
                 2) content_with_visual: 右側に図・画像・簡潔な可視化（KPI/比較/アイコン列など）を置き、左側に本文（bullets）を配置する二分構成。本文だけで終わらせず、原則ビジュアルを伴うこと。
                 3) content_with_bottom_visual: 視覚要素が帯状（process/roadmap/gantt/timeline 等）で、本文の幅を広く使いたい場合。帯は下部に配置。
+                4) content_with_image: 左に画像（AI自動生成推奨）、右に本文。画像で雰囲気・事例を見せつつ、右で要点を整理する。
+                5) visual_only: ビジュアルを主役にしたい場合に選択。本文は最小限に抑え、画面全体にvisual_recipeや画像を大胆に配置する。
                 4) visual_hero_split: 左に大きなビジュアル（写真/抽象背景など）を主役として、右側のパネルにタイトルと簡潔な bullets を置く導入/事例向き。
                 5) comparison_cards: 2つの選択肢・プラン・競合比較をカードで並べたい場合（カード内はタイトル＋箇条書き）。
                 6) checklist_top_bullets_bottom: checklist のような短文アイテムを上部に大きく見せ、本文の bullets を下部にまとめて補足したい場合。チェックリストと本文が重複する場合は、本文を簡潔に圧縮すること。
@@ -580,7 +582,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
             context_for_visual: s.context_for_visual,
         }));
 
-        // Launch title image generation concurrently (if needed)
+        // Launch title image generation concurrently (title_slide only)
         const titleImagePromise = (async () => {
             try {
                 if (!presentationDesign.length || presentationDesign[0].layout !== 'title_slide') return { buffer: undefined as any, imagePath: undefined as string | undefined };
@@ -612,7 +614,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
             }
         })();
 
-        const batchObjective = `You are a senior presentation designer and content generator. Produce visually rich slides using structured visuals. Given an array of slides and the report body, output a JSON object strictly in the following format (no extra commentary):
+        const batchObjective = `You are a senior presentation designer. Generate IMPACTFUL slides that already maximize visuals on the first pass (no post-processing expected). Use structured visual_recipe aggressively and choose the best visual per slide based on its content. Given an array of slides and the report body, output a JSON object strictly in the following format (no extra commentary):
 {
   "slides": [
     { "idx": number, "speech": string, "chartData": null | { "chart_type": "bar"|"pie"|"line", "title": string, "labels": string[], "data": number[] }, "visual_recipe": null | (
@@ -637,19 +639,17 @@ export const intelligentPresenterWorkflow = createWorkflow({
   ]
 }
 Rules (Design & Content):
-- The speech should be ~150 Japanese characters, readable and presenter-friendly. Do not include markdown fences.
-- If a slide's visual_suggestion is 'none', set chartData to null.
-- If chartData is provided, labels.length must equal data.length and data values must be numbers.
-- Use the slide's context_for_visual only when chartData is required.
-- If chartData is null but a visual is useful, propose a simple visual_recipe such as KPI cards, checklist, short timeline, or a compact table when comparing entities (e.g., columns: 会社, 強み; rows: each competitor). Keep it minimal (<=5 rows, <=3 columns).
-- Prefer diverse visuals across the deck (KPI / comparison / checklist / timeline / process). Avoid repeating the same visual style consecutively.
-- Titles and section headers should be concise; bullets should be scannable and benefit from colon-separated formatting (e.g., "課題：説明").
+- Strongly prefer a visual_recipe for every slide that benefits from visuals; avoid leaving slides as text-only unless necessary.
+- Choose the most impactful visual type per content: KPI/Comparison/Checklist/Timeline/Process/Funnel/Charts/Table/etc., and keep it concise.
+- For KPI and Comparison, include clear labels/values; for Callouts, include optional icon keywords (icon) when helpful.
+- chartData is only for bar/pie/line charts; ensure labels.length==data.length and data are numbers.
+- Keep visual complexity manageable (e.g., checklist <= 6 items, timeline <= 6 steps, compact tables <= 5 rows and <= 3 columns).
+- Ensure variety across slides; avoid repeating the same visual type consecutively when possible.
+- Titles and bullets remain concise; use colon-separated style where appropriate.
 Shortening and style constraints (Japanese):
-- Titles and section headers must be noun phrases, no verbs like "〜する". 1 line only. Title max 26 chars, section max 24 chars.
-- Content titles must also be noun phrases, 1 line, max 24 chars.
-- Bullets are concise lead phrases (noun-based), each item up to 3 lines, each line up to 22 chars; avoid spoken style.
-- Quotes up to 4 lines; summarize if longer.
-- Avoid emojis and excessive symbols. Use formal written style fit for slide headlines.
+- Titles and section headers are noun phrases, 1 line (max ~26 chars)。
+- Content titles 1 line (max ~24 chars)。
+- Bullets up to ~3 lines; avoid spoken style。No emojis or excessive symbols。
 `;
 
         const combined = `# Slides\n\n${JSON.stringify(slidesInput, null, 2)}\n\n# Report\n\n${reportContent}`;
@@ -954,29 +954,7 @@ Shortening and style constraints (Japanese):
             // Respect AI-chosen layout; do not normalize automatically
             const finalLayout = slide.layout;
 
-            // Auto-generate contextual image when layout has visual area but no visual_recipe and a context_for_visual is provided
-            try {
-                const needsImage = (slide.layout === 'content_with_visual' || slide.layout === 'content_with_bottom_visual') && !slide.visual_recipe && !imagePath && typeof slide.context_for_visual === 'string' && slide.context_for_visual.trim().length > 0;
-                if (needsImage) {
-                    const paletteHint = themeColor1 && themeColor2 ? `palette: primary=${themeColor1}, secondary=${themeColor2}` : '';
-                    const prompt = [
-                        'Photorealistic product-in-use scene for a presentation slide (no text).',
-                        'Subject: LED signage installed and operating in a real environment.',
-                        `Context: ${slide.context_for_visual.trim()}`,
-                        'Style: modern, high clarity, cinematic lighting, realistic materials, professional tone.',
-                        'Framing: wide shot, subject-centered composition, no people facing camera, no legible text.',
-                        paletteHint
-                    ].filter(Boolean).join(' ');
-                    const tplBgSrc: any = (params.inputData as any).templateConfig?.layouts?.title_slide?.background?.source || {};
-                    const negativePrompt = String(tplBgSrc.negativePrompt || 'text, watermark, logo').trim() || undefined;
-                    logger.info({ prompt, negativePrompt, slideIndex: index }, 'Context visual: sending prompt to generator');
-                    const { genarateImage } = await import('../../tools/presenter/genarateImage');
-                    const res = await genarateImage({ prompt, negativePrompt, aspectRatio: '16:9' });
-                    if (res?.success && res.path) {
-                        imagePath = res.path;
-                    }
-                }
-            } catch {}
+            // Disable contextual auto image for non-title slides: template-driven only
 
             return {
                 title: slide.title,

@@ -229,6 +229,86 @@ APP_ROOT=/path/to/your/project
 - 各ファイルにはフロントマター（メタデータ）を含めてください
 - 環境変数`APP_ROOT`が設定されていない場合は、デフォルトのパスが使用されます
 
+## プレゼンテンプレートとガント表示のカスタマイズ
+
+プレゼン（PowerPoint）生成時の見た目はテンプレート `persistent_data/presentations/templates/default.json` で制御できます。
+
+### ガント（gantt）のスタイル指定
+
+`visualStyles.gantt` で開始日ラベルやグリッド線のスタイルを調整できます。
+
+```json
+{
+  "visualStyles": {
+    "gantt": {
+      "shadow": "none",
+      "labelFontSize": 12,
+      "gridColor": "#9AA3AF",
+      "gridWidth": 1.2
+    }
+  }
+}
+```
+
+- `labelFontSize`: 各タスクの開始日ラベルのフォントサイズ（pt）。
+- `gridColor`: ガントの縦グリッド線の色。
+- `gridWidth`: ガントの縦グリッド線の太さ。
+
+実装上の挙動:
+- 開始日ラベルは各バーの開始X座標に揃え、帯の上（上側）に左寄せで表示します。
+- グリッド線は期間に応じて自動で単位を切替（約60日以上: 月、14日以上: 週、2日以上: 日、それ未満: 時間）。
+
+サンプル:
+- `persistent_data/presentations/recipes/sample-recipe.json` の「ガント予定（日付付き）」スライド。
+
+### ブレットチャート（bullet）のスタイル指定
+
+`visualStyles.bullet` でラベルの配置や数値表示の体裁を調整できます。
+
+```json
+{
+  "visualStyles": {
+    "bullet": {
+      "labelFontSize": 14,
+      "labelAlign": "right",        // "left" or "right"
+      "valueFontSize": 12,
+      "targetFontSize": 11,
+      "valueBoxWidth": 0.8,         // 値テキストの幅（in）
+      "valueOutsidePad": 0.05,      // バー外に出す際の左パディング（in）
+      "targetOffsetY": 0.18         // 目標値テキストの縦方向オフセット（in）
+    }
+  }
+}
+```
+
+実装上の挙動:
+- ラベルは `labelAlign` と `labelFontSize` を使用
+- value はバーの内側終端に右寄せ（短いときは外側に左寄せ）+ `valueFontSize`/`valueBoxWidth`/`valueOutsidePad`
+- target は目標ライン上に表示（上部）+ `targetFontSize`/`targetOffsetY`
+
+### ウォーターフォール（waterfall）のスタイル指定
+
+`visualStyles.waterfall` で基準線（ベースライン）やグリッド表示を制御できます。
+
+```json
+{
+  "visualStyles": {
+    "waterfall": {
+      "baselineRatio": 0.55,   // ベースラインを領域高さに対する比率で指定（0.05〜0.95）
+      "grid": true,            // グリッド線の表示有無
+      "gridColor": "#DDE3EA", // グリッド線の色
+      "gridWidth": 1.0,        // グリッド線の太さ
+      "gridLevels": 4          // グリッド線の本数（2〜6）
+    }
+  }
+}
+```
+
+実装上の挙動:
+- ベースラインは `baselineRatio` に基づいて領域内Y位置を決定（既定 0.55）。
+- `grid` が有効な場合、等間隔の水平グリッドを描画し、ベースラインはやや太めで強調します。
+
+
 ## ログ出力
 
 このプロジェクトでは、`@mastra/core`のロガーを使用してログを出力します。
