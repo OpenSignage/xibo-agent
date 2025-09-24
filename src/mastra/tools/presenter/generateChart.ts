@@ -9,7 +9,11 @@ import { ChartJSNodeCanvas } from 'chartjs-node-canvas';
 import { ChartConfiguration } from 'chart.js';
 import { promises as fs } from 'fs';
 
-const chartTypeSchema = z.enum(['bar', 'pie', 'line', 'doughnut']);
+const chartTypeSchema = z.enum([
+  'bar', 'line', 'pie', 'doughnut',
+  'radar', 'polarArea', 'scatter', 'bubble',
+  'horizontalBar', 'stackedBar', 'area'
+]);
 const inputSchema = z.object({
   chartType: chartTypeSchema,
   title: z.string(),
@@ -19,6 +23,7 @@ const inputSchema = z.object({
   returnBuffer: z.boolean().optional(),
   themeColor1: z.string().optional(),
   themeColor2: z.string().optional(),
+  chartsStyle: z.any().optional(),
 });
 
 const outputFileSchema = z.object({ imagePath: z.string() });
@@ -53,51 +58,42 @@ export const generateChartTool = createTool({
   inputSchema,
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
-    const { chartType, title, labels, data, fileName, returnBuffer, themeColor1, themeColor2 } = context as any;
+    const { chartType, title, labels, data, fileName, returnBuffer, themeColor1, themeColor2, chartsStyle: chartsStyleFromCtx } = context as any;
     logger.info({ chartType, title }, 'Generating chart image (PNG)...');
     try {
-      let chartsStyle: any = undefined;
-      try {
-        const { config } = await import('../xibo-agent/config');
-        const path = await import('path');
-        const fsMod = await import('fs/promises');
-        const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', 'default.json');
-        const raw = await fsMod.readFile(tplPath, 'utf-8');
-        const tpl = JSON.parse(raw);
-        chartsStyle = (tpl && tpl.visualStyles && tpl.visualStyles.charts) ? tpl.visualStyles.charts : undefined;
-      } catch {}
+      let chartsStyle: any = chartsStyleFromCtx || {};
 
-      const primary = typeof themeColor1 === 'string' && /^#?[0-9a-fA-F]{6}$/.test(themeColor1) ? (themeColor1.startsWith('#') ? themeColor1 : `#${themeColor1}`) : (chartsStyle?.colors?.[0] || '#005A9C');
-      const secondary = typeof themeColor2 === 'string' && /^#?[0-9a-fA-F]{6}$/.test(themeColor2) ? (themeColor2.startsWith('#') ? themeColor2 : `#${themeColor2}`) : (chartsStyle?.colors?.[1] || '#00B0FF');
+      const primary = typeof themeColor1 === 'string' && /^#?[0-9a-fA-F]{6}$/.test(themeColor1) ? (themeColor1.startsWith('#') ? themeColor1 : `#${themeColor1}`) : (chartsStyle?.colors?.[0]);
+      const secondary = typeof themeColor2 === 'string' && /^#?[0-9a-fA-F]{6}$/.test(themeColor2) ? (themeColor2.startsWith('#') ? themeColor2 : `#${themeColor2}`) : (chartsStyle?.colors?.[1]);
       const alpha = (hex: string, a: number) => {
         const h = hex.replace('#','');
         const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
         return `rgba(${r}, ${g}, ${b}, ${a})`;
       };
-      const palette = Array.isArray(chartsStyle?.colors) && chartsStyle.colors.length ? chartsStyle.colors : [primary, secondary, '#FFC107', '#4CAF50', '#9C27B0', '#FF7043'];
-      const alphaPie = Number.isFinite(Number(chartsStyle?.alpha?.pieDoughnut)) ? Number(chartsStyle.alpha.pieDoughnut) : 0.9;
-      const alphaOthers = Number.isFinite(Number(chartsStyle?.alpha?.others)) ? Number(chartsStyle.alpha.others) : 0.7;
-      const bgPalette = (palette as string[]).map((c: string) => alpha(c, (chartType === 'pie' || chartType === 'doughnut') ? alphaPie : alphaOthers));
+      const palette = Array.isArray(chartsStyle?.colors) && chartsStyle.colors.length ? chartsStyle.colors : [primary, secondary].filter(Boolean) as string[];
+      const alphaPie = Number.isFinite(Number(chartsStyle?.alpha?.pieDoughnut)) ? Number(chartsStyle.alpha.pieDoughnut) : 1;
+      const alphaOthers = Number.isFinite(Number(chartsStyle?.alpha?.others)) ? Number(chartsStyle.alpha.others) : 1;
+      const bgPalette = (palette as string[]).length ? (palette as string[]).map((c: string) => alpha(c, (chartType === 'pie' || chartType === 'doughnut') ? alphaPie : alphaOthers)) : undefined as any;
 
-      const titleSize = chartType === 'bar' ? (Number(chartsStyle?.titleFontSizeBar) || 34) : (Number(chartsStyle?.titleFontSizeDefault) || 26);
-      const axisFontSize = Number(chartsStyle?.axisFontSize) || 14;
-      const axisFontSizeX = Number(chartsStyle?.axisFontSizeX) || axisFontSize;
-      const axisFontSizeY = Number(chartsStyle?.axisFontSizeY) || axisFontSize;
-      const padding = Number(chartsStyle?.padding) || 28;
-      const borderWidth = Number(chartsStyle?.borderWidth) || 1;
-      const legendPosition = String(chartsStyle?.legend?.position || 'bottom');
-      const gridColor = String(chartsStyle?.gridColor || 'rgba(0,0,0,0.10)');
-      const dataLabelFontSize = Number(chartsStyle?.dataLabelFontSize) || 12;
-      const dataLabelColor = String(chartsStyle?.dataLabelColor || '#111');
+      const titleSize = chartType === 'bar' ? (Number(chartsStyle?.titleFontSizeBar)) : (Number(chartsStyle?.titleFontSizeDefault));
+      const axisFontSize = Number(chartsStyle?.axisFontSize);
+      const axisFontSizeX = Number.isFinite(Number(chartsStyle?.axisFontSizeX)) ? Number(chartsStyle?.axisFontSizeX) : axisFontSize;
+      const axisFontSizeY = Number.isFinite(Number(chartsStyle?.axisFontSizeY)) ? Number(chartsStyle?.axisFontSizeY) : axisFontSize;
+      const padding = Number(chartsStyle?.padding);
+      const borderWidth = Number(chartsStyle?.borderWidth);
+      const legendPosition = chartsStyle?.legend?.position ? String(chartsStyle?.legend?.position) : undefined;
+      const gridColor = chartsStyle?.gridColor ? String(chartsStyle?.gridColor) : undefined;
+      const dataLabelFontSize = Number(chartsStyle?.dataLabelFontSize);
+      const dataLabelColor = chartsStyle?.dataLabelColor ? String(chartsStyle?.dataLabelColor) : undefined;
 
       // Draw numeric value labels on each bar (without external plugins)
-      const barValuePlugin: any = (chartType === 'bar') ? {
+      const barValuePlugin: any = (chartType === 'bar' && Number.isFinite(dataLabelFontSize) && dataLabelColor) ? {
         id: 'bar-value-label',
         afterDatasetsDraw: (chart: any) => {
           const { ctx } = chart;
           ctx.save();
-          ctx.font = `${dataLabelFontSize}px Noto Sans JP`;
-          ctx.fillStyle = dataLabelColor;
+          ctx.font = `${dataLabelFontSize as number}px Noto Sans JP`;
+          ctx.fillStyle = dataLabelColor as string;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'bottom';
           const meta = chart.getDatasetMeta(0);
@@ -114,37 +110,64 @@ export const generateChartTool = createTool({
         },
       } : undefined;
 
+      // Map logical types to Chart.js base types + options
+      const baseType = ((): any => {
+        if (chartType === 'horizontalBar' || chartType === 'stackedBar') return 'bar';
+        if (chartType === 'area') return 'line';
+        if (chartType === 'polarArea') return 'polarArea';
+        return chartType as any;
+      })();
+
       const chartConfig: ChartConfiguration = {
-        type: chartType,
+        type: baseType,
         data: {
           labels,
           datasets: [{
             label: title,
-            data,
-            backgroundColor: bgPalette,
-            borderColor: alpha(primary, 1),
+            data: ((): any => {
+              if (chartType === 'scatter') {
+                return (data || []).map((y: number, i: number) => ({ x: i, y }));
+              }
+              if (chartType === 'bubble') {
+                return (data || []).map((y: number, i: number) => ({ x: i, y, r: 5 }));
+              }
+              return data;
+            })(),
+            ...(bgPalette ? { backgroundColor: bgPalette } : {}),
+            ...(primary ? { borderColor: alpha(primary, 1) } : {}),
             borderWidth,
-            ...(chartType === 'bar' ? { borderRadius: Number(chartsStyle?.bar?.borderRadius) || 6, borderSkipped: (typeof chartsStyle?.bar?.borderSkipped === 'boolean' ? chartsStyle.bar.borderSkipped : false) } : {}),
-            ...(chartType === 'line' ? { tension: Number(chartsStyle?.line?.tension) || 0.35, fill: true, pointRadius: Number(chartsStyle?.line?.pointRadius) || 3, pointHoverRadius: Number(chartsStyle?.line?.pointHoverRadius) || 4, backgroundColor: alpha(primary, Number(chartsStyle?.line?.fillAlpha) || 0.15) } : {}),
+            ...(baseType === 'bar' ? { ...(Number.isFinite(Number(chartsStyle?.bar?.borderRadius)) ? { borderRadius: Number(chartsStyle?.bar?.borderRadius) } : {}), ...(typeof chartsStyle?.bar?.borderSkipped === 'boolean' ? { borderSkipped: chartsStyle.bar.borderSkipped } : {}) } : {}),
+            ...(baseType === 'line' ? { ...(Number.isFinite(Number(chartsStyle?.line?.tension)) ? { tension: Number(chartsStyle?.line?.tension) } : {}), fill: (chartType === 'area') || undefined, ...(Number.isFinite(Number(chartsStyle?.line?.pointRadius)) ? { pointRadius: Number(chartsStyle?.line?.pointRadius) } : {}), ...(Number.isFinite(Number(chartsStyle?.line?.pointHoverRadius)) ? { pointHoverRadius: Number(chartsStyle?.line?.pointHoverRadius) } : {}), ...(primary && Number.isFinite(Number(chartsStyle?.line?.fillAlpha)) ? { backgroundColor: alpha(primary, Number(chartsStyle?.line?.fillAlpha)) } : {}) } : {}),
           }],
         },
-        plugins: (chartType === 'bar' && barValuePlugin) ? [barValuePlugin as any] : undefined,
+        plugins: ((baseType === 'bar') && barValuePlugin) ? [barValuePlugin as any] : undefined,
         options: {
           responsive: false,
           maintainAspectRatio: false,
-          layout: { padding },
+          ...(Number.isFinite(padding) ? { layout: { padding } as any } : {}),
           plugins: {
-            title: { display: true, text: title, font: { size: titleSize, family: 'Noto Sans JP', weight: 'bold' as any } as any, color: '#111', padding: { top: 10, bottom: 16 } as any },
-            legend: { display: (chartType === 'pie' || chartType === 'doughnut'), position: legendPosition as any, labels: { font: { family: 'Noto Sans JP' } } },
+            title: { display: true, text: title, font: { ...(Number.isFinite(titleSize) ? { size: titleSize } : {}), family: 'Noto Sans JP', weight: 'bold' as any } as any, color: '#111', padding: { top: 10, bottom: 16 } as any },
+            ...(legendPosition ? { legend: { position: legendPosition as any, labels: { font: { family: 'Noto Sans JP' } } } as any } : {}),
           },
         },
       };
 
-      if (chartType !== 'pie' && chartType !== 'doughnut') {
-        chartConfig.options!.scales = {
-          x: { grid: { display: false }, ticks: { font: { family: 'Noto Sans JP', size: axisFontSizeX } } },
-          y: { beginAtZero: true, grid: { color: gridColor }, ticks: { font: { family: 'Noto Sans JP', size: axisFontSizeY } } },
-        } as any;
+      if (baseType === 'radar') {
+        (chartConfig.options as any).scales = { r: { ...(gridColor ? { angleLines: { color: gridColor } } : {}), ...(gridColor ? { grid: { color: gridColor } } : {}), ticks: { font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSize) ? { size: axisFontSize } : {}) } } } } as any;
+      } else if (baseType === 'polarArea') {
+        (chartConfig.options as any).scales = { r: { ...(gridColor ? { grid: { color: gridColor } } : {}), ticks: { font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSize) ? { size: axisFontSize } : {}) } } } } as any;
+      } else if (baseType !== 'pie' && baseType !== 'doughnut') {
+        const scales: any = {
+          x: { ...(gridColor ? { grid: { display: false } } : {}), ticks: { font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSizeX) ? { size: axisFontSizeX } : {}) } } },
+          y: { ...(gridColor ? { grid: { color: gridColor } } : {}), ticks: { font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSizeY) ? { size: axisFontSizeY } : {}) } } },
+        };
+        if (chartType === 'horizontalBar') {
+          (chartConfig.options as any).indexAxis = 'y';
+        }
+        if (chartType === 'stackedBar') {
+          scales.x.stacked = true; scales.y.stacked = true;
+        }
+        (chartConfig.options as any).scales = scales;
       }
 
       const key = makeKey({ chartType, title, labels, data, primary, secondary, chartsStyle });

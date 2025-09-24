@@ -20,7 +20,7 @@ import { logger } from '../../logger';
 import { googleTextToSpeechTool } from '../audio/googleTextToSpeech';
 import { getSpeechConfigByGender } from './speachConfig';
 import { config } from '../xibo-agent/config';
-import { genarateImage } from './genarateImage';
+import { generateImage } from './generateImage';
 
 const execFileAsync = promisify(execFile);
 
@@ -555,7 +555,7 @@ async function generateOpeningAndClosingContent(
 async function generateOpeningImage(tempDir: string, baseName: string): Promise<string> {
   const openingImagePath = path.join(tempDir, `${baseName}_opening.png`);
   
-  const result = await genarateImage({
+  const result = await generateImage({
     prompt: 'Professional presentation opening image, elegant curtain opening scene, stage with spotlight, microphone and podium, audience silhouettes, theatrical presentation setup, sophisticated business presentation scene, warm lighting, cinematic quality, 16:9 aspect ratio',
     negativePrompt: 'text, watermark, logo, low quality, blurry',
     aspectRatio: '16:9'
@@ -580,7 +580,7 @@ async function generateOpeningImage(tempDir: string, baseName: string): Promise<
 async function generateClosingImage(tempDir: string, baseName: string): Promise<string> {
   const closingImagePath = path.join(tempDir, `${baseName}_closing.png`);
   
-  const result = await genarateImage({
+  const result = await generateImage({
     prompt: 'Professional presentation closing image with thank you message, elegant curtain closing scene, stage with spotlight, audience applause, theatrical presentation ending, sophisticated business presentation scene, warm lighting, cinematic quality, 16:9 aspect ratio',
     negativePrompt: 'text, watermark, logo, low quality, blurry',
     aspectRatio: '16:9'

@@ -443,11 +443,11 @@ ${planMarkdown}
           const key = `${t}|${ar}|${hint}`;
           if (sampleImageCache.has(key)) return sampleImageCache.get(key) || null;
           try {
-            const { genarateImage } = await import('../../tools/presenter/genarateImage');
+            const { generateImage } = await import('../../tools/presenter/generateImage');
             const clean = sanitizeHint(hint);
             const prompt = `Hand-drawn watercolor illustration mock of a digital signage ${t || 'image'} for: ${clean}. Soft pastel colors, paper texture, sketchy outlines, non-photorealistic, clearly a mockup. No text.`;
             const negativePrompt = 'photorealistic, realistic, glossy, 3d render, text, words, letters, typography, characters, subtitles, captions, numbers, numerals, UI, watermark, signature, logo, Japanese characters, 文字, テキスト, ロゴ, 透かし, 字幕, キャプション, 数字, 数字列, 英字, 記号';
-            const res = await genarateImage({ prompt, aspectRatio: ar as any, negativePrompt });
+            const res = await generateImage({ prompt, aspectRatio: ar as any, negativePrompt });
             if (res.success && res.path) {
               sampleImageCache.set(key, res.path);
               return res.path;
@@ -816,11 +816,11 @@ ${planMarkdown}
         const sanitizeHint = (s: string): string => String(s).replace(/「[^」]*」/g,'').replace(/『[^』]*』/g,'').replace(/"[^"]*"/g,'').replace(/'[^']*'/g,'').trim() || 'abstract scene background';
         const tryOnce = async (t: string): Promise<string | null> => {
           const key = `${t}|${ar}|${hint}`; if (sampleImageCache.has(key)) return sampleImageCache.get(key) || null;
-          try { const { genarateImage } = await import('../../tools/presenter/genarateImage');
+          try { const { generateImage } = await import('../../tools/presenter/generateImage');
             const clean = sanitizeHint(hint);
             const prompt = `Hand-drawn watercolor illustration mock of a digital signage ${t || 'image'} for: ${clean}. Soft pastel colors, paper texture, sketchy outlines, non-photorealistic, clearly a mockup. No text.`;
             const negativePrompt = 'photorealistic, realistic, glossy, 3d render, text, words, letters, typography, characters, subtitles, captions, numbers, numerals, UI, watermark, signature, logo, Japanese characters, 文字, テキスト, ロゴ, 透かし, 字幕, キャプション, 数字, 数字列, 英字, 記号';
-            const res = await genarateImage({ prompt, aspectRatio: ar as any, negativePrompt });
+            const res = await generateImage({ prompt, aspectRatio: ar as any, negativePrompt });
             if (res.success && res.path) { sampleImageCache.set(key, res.path); return res.path; }
           } catch {}
           return null;

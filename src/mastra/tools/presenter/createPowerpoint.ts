@@ -16,6 +16,9 @@ import PptxGenJS from 'pptxgenjs';
 import path from 'path';
 import { config } from '../xibo-agent/config';
 import fs from 'fs/promises';
+import nodeFs from 'fs';
+import https from 'https';
+import http from 'http';
 
 
 //
@@ -69,6 +72,65 @@ function pickTextColorForBackground(hex: string): '000000' | 'FFFFFF' {
   const rl = toLinear(r), gl = toLinear(g), bl = toLinear(b);
   const luminance = 0.2126 * rl + 0.7152 * gl + 0.0722 * bl; // 0 (black) .. 1 (white)
   return luminance > 0.6 ? '000000' : 'FFFFFF';
+}
+
+// Accept #RRGGBB | #RRGGBBAA | rgba(r,g,b,a) and return 6-digit hex (no '#')
+function relaxedToHex6(input?: string): string | undefined {
+  if (!input) return undefined;
+  const s = String(input).trim();
+  if (!s) return undefined;
+  // #RRGGBB
+  if (/^#?[0-9a-fA-F]{6}$/.test(s)) return s.replace('#','').toUpperCase();
+  // #RRGGBBAA -> take RGB only
+  if (/^#?[0-9a-fA-F]{8}$/.test(s)) return s.replace('#','').toUpperCase().slice(0,6);
+  // rgba(r,g,b,a)
+  const m = s.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/i);
+  if (m) {
+    const r = Math.max(0, Math.min(255, Number(m[1])));
+    const g = Math.max(0, Math.min(255, Number(m[2])));
+    const b = Math.max(0, Math.min(255, Number(m[3])));
+    const to2 = (n: number) => n.toString(16).padStart(2,'0').toUpperCase();
+    return `${to2(r)}${to2(g)}${to2(b)}`;
+  }
+  return undefined;
+}
+
+// Download remote image to temp and return local path
+async function downloadImageIfUrl(maybeUrl: string): Promise<string> {
+  try {
+    if (!/^https?:\/\//i.test(maybeUrl)) return maybeUrl;
+    const tmpDir = path.join(config.tempDir, 'images');
+    try { await fs.mkdir(tmpDir, { recursive: true }); } catch {}
+    const ext = (maybeUrl.match(/\.(png|jpg|jpeg|webp)$/i)?.[0] || '.jpg');
+    const fileName = `urlimg-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
+    const fullPath = path.join(tmpDir, fileName);
+    const client = maybeUrl.startsWith('https') ? https : http;
+    await new Promise<void>((resolve, reject) => {
+      const req = client.get(maybeUrl, res => {
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          // follow one redirect
+          const r2 = client.get(res.headers.location, res2 => {
+            if ((res2.statusCode || 0) >= 400) { reject(new Error(`HTTP ${res2.statusCode}`)); return; }
+            const out = nodeFs.createWriteStream(fullPath);
+            res2.pipe(out);
+            out.on('finish', () => out.close(() => resolve()));
+            out.on('error', reject);
+          });
+          r2.on('error', reject);
+          return;
+        }
+        if ((res.statusCode || 0) >= 400) { reject(new Error(`HTTP ${res.statusCode}`)); return; }
+        const out = nodeFs.createWriteStream(fullPath);
+        res.pipe(out);
+        out.on('finish', () => out.close(() => resolve()));
+        out.on('error', reject);
+      });
+      req.on('error', reject);
+    });
+    return fullPath;
+  } catch {
+    return maybeUrl; // fallback: let pptxgen try
+  }
 }
 
 // Normalize common CSS color formats to PPTX hex without '#'
@@ -671,7 +733,7 @@ export const createPowerpointTool = createTool({
     const companyCopyright: string | undefined = (context as any).companyCopyright;
     const companyAbout: string | undefined = (context as any).companyAbout;
     const templateConfig: any = (context as any).templateConfig || {};
-    logger.info({ hasLogo: !!companyLogoPath, hasCopyright: !!companyCopyright, hasAbout: !!companyAbout }, 'Branding options received for PowerPoint generation.');
+      logger.debug({ hasLogo: !!companyLogoPath, hasCopyright: !!companyCopyright, hasAbout: !!companyAbout }, 'Branding options received for PowerPoint generation.');
     const styleTokens = (context as any).styleTokens || {};
     const tk = templateConfig?.tokens || {};
     const aiColorPolicy = (templateConfig?.rules && typeof templateConfig.rules.aiColorPolicy === 'string')
@@ -1068,6 +1130,7 @@ export const createPowerpointTool = createTool({
         } as any;
         const renderElementsFromTemplate = async (slideObj: any, layoutKey: string, elements: any[], areaOverrides?: Record<string, { x: number; y: number; w: number; h: number }>) => {
           if (!Array.isArray(elements) || !elements.length) return;
+          const areaBgHex: Record<string,string> = {};
           for (const el of elements) {
             const areaName = String(el?.area || '');
             if (!areaName) continue;
@@ -1091,6 +1154,29 @@ export const createPowerpointTool = createTool({
             }
             const style = resolveStyle(...styleRefObjs, el?.style);
             const type = String(el?.type || '');
+            if (type === 'visual') {
+              // Resolve recipe from slide data using recipeRef (default: visual_recipe)
+              const recipeRef = typeof el?.recipeRef === 'string' && el.recipeRef.trim() ? el.recipeRef.trim() : 'visual_recipe';
+              let recipe: any = getByPath((slideObj as any).__data || {}, recipeRef) || el?.recipe || null;
+              // Fallback: use context_for_visual as image generation prompt
+              if (!recipe && (slideObj as any).__data?.context_for_visual) {
+                recipe = { type: 'image', prompt: String((slideObj as any).__data.context_for_visual) };
+              }
+              if (recipe && typeof recipe === 'object' && recipe.type) {
+                try { logger.debug({ layout: layoutKey, area: areaName, recipeType: String(recipe.type) }, 'render:visual:dispatch'); } catch {}
+                // If recipe has a direct URL path, download before render
+                if (recipe.path && typeof recipe.path === 'string') {
+                  recipe = { ...recipe, path: await downloadImageIfUrl(String(recipe.path)) };
+                }
+                await drawInfographic(slideObj, String(recipe.type), recipe, { x, y, w, h });
+              } else if ((slideObj as any).__data?.imagePath) {
+                const local = await downloadImageIfUrl(String((slideObj as any).__data.imagePath));
+                slideObj.addImage({ path: local, x, y, w, h, sizing: { type: style?.sizing || 'contain', w, h } as any, shadow: shadowOf(style?.shadow, shadowPreset) });
+              } else {
+                try { logger.warn({ layout: layoutKey, area: areaName, recipeRef }, 'render:visual:missing recipe - skipping'); } catch {}
+              }
+              continue;
+            }
             if (type === 'shape') {
               const shpName = String(el?.shapeType || style?.shapeType || 'rect');
               const shp = shapeTypeMap[shpName] || 'rect';
@@ -1101,6 +1187,9 @@ export const createPowerpointTool = createTool({
               if (Number.isFinite(style?.rotate)) opts.rotate = Number(style.rotate);
               if (shp === 'pie' && Number.isFinite(style?.angle)) opts.angle = Number(style.angle);
               slideObj.addShape(shp, opts);
+              // remember background fill hex per area for later text contrast
+              const fillHex = resolveThemedColorToken(style?.fill) || relaxedToHex6(typeof style?.fill === 'string' ? style.fill : undefined);
+              if (fillHex) areaBgHex[areaName] = fillHex;
               continue;
             }
             if (type === 'text') {
@@ -1113,14 +1202,18 @@ export const createPowerpointTool = createTool({
               }
               if (!textVal) textVal = String(el?.text || '');
               if (!textVal) continue;
-              try { logger.info({ layoutKey, contentPath, sample: textVal.slice(0,64), length: textVal.length }, 'render:text:prepare'); } catch {}
-              const textOptions: any = { x, y, w, h, fontFace: String(style?.fontFace || headFont), fontSize: Number(style?.fontSize) || 20, bold: !!style?.bold, color: normalizeColorToPptxHex(style?.color) || '000000', align: style?.align || 'left', valign: style?.valign || 'top', shadow: shadowOf(style?.shadow, shadowPreset) };
+      try { logger.debug({ layoutKey, contentPath, sample: textVal.slice(0,64), length: textVal.length }, 'render:text:prepare'); } catch {}
+              // Auto text color: if color未指定かつ背景(fill)がある場合、背景に応じて黒/白を自動選択
+              let bgHexForText = normalizeColorToPptxHex(style?.fill) || relaxedToHex6(typeof style?.fill === 'string' ? style.fill : undefined);
+              if (!bgHexForText) bgHexForText = areaBgHex[areaName];
+              const resolvedTextColor = normalizeColorToPptxHex(style?.color) || (bgHexForText ? pickTextColorForBackground(`#${bgHexForText}`) : '000000');
+              const textOptions: any = { x, y, w, h, fontFace: String(style?.fontFace || headFont), fontSize: Number(style?.fontSize) || 20, bold: !!style?.bold, color: resolvedTextColor, align: style?.align || 'left', valign: style?.valign || 'top', shadow: shadowOf(style?.shadow, shadowPreset) };
               // Special layout adjustment: in comparison_cards, push bullets below the title within the card area
               if (layoutKey === 'comparison_cards' && (contentPath === 'bulletsA' || contentPath === 'bulletsB')) {
                 const titleReserve = 0.6; // inches reserved for card title within the card
                 textOptions.y = y + titleReserve;
                 textOptions.h = Math.max(0.2, h - titleReserve);
-                try { logger.info({ contentPath, textLen: textVal.length, box: { x, y: textOptions.y, w, h: textOptions.h } }, 'comparison_cards bullets box'); } catch {}
+      try { logger.debug({ contentPath, textLen: textVal.length, box: { x, y: textOptions.y, w, h: textOptions.h } }, 'comparison_cards bullets box'); } catch {}
                 try {
                   (slideObj as any).__renderedFlags = (slideObj as any).__renderedFlags || {};
                   (slideObj as any).__renderedFlags[`comparison_cards_${contentPath}`] = true;
@@ -1138,22 +1231,57 @@ export const createPowerpointTool = createTool({
               if (Number.isFinite(style?.paraSpaceAfter)) textOptions.paraSpaceAfter = Number(style.paraSpaceAfter);
               // background and outline
               if (style?.fill) textOptions.fill = buildFill(style.fill);
+              // If this is the bullets area, prefer areaStyles.bullets.bg (template-driven override)
+              if (areaName === 'bullets') {
+                const areaBulletsBg = (templateConfig?.areaStyles?.bullets?.bg);
+                if (typeof areaBulletsBg === 'string' && areaBulletsBg.trim()) {
+                  textOptions.fill = buildFill(areaBulletsBg);
+                }
+              }
               if (style?.lineColor || Number.isFinite(style?.lineWidth)) textOptions.line = { color: normalizeColorToPptxHex(style?.lineColor) || (normalizeColorToPptxHex(style?.fill) || 'FFFFFF'), width: Number(style?.lineWidth) || 0 };
               // When bullets are requested, pass plain string; for comparison_cards bullets force plain (no bullet dots)
               if (wantsBullets && !isCompCardsBullets) {
-                try { logger.info({ contentPath, options: { x: textOptions.x, y: textOptions.y, w: textOptions.w, h: textOptions.h, fontSize: textOptions.fontSize } }, 'render:text:addText:bullets'); } catch {}
+              try { logger.debug({ contentPath, options: { x: textOptions.x, y: textOptions.y, w: textOptions.w, h: textOptions.h, fontSize: textOptions.fontSize } }, 'render:text:addText:bullets'); } catch {}
                 slideObj.addText(textVal, textOptions);
               } else {
-                try { logger.info({ contentPath, options: { x: textOptions.x, y: textOptions.y, w: textOptions.w, h: textOptions.h, fontSize: textOptions.fontSize } }, 'render:text:addText:plain'); } catch {}
+              try { logger.debug({ contentPath, options: { x: textOptions.x, y: textOptions.y, w: textOptions.w, h: textOptions.h, fontSize: textOptions.fontSize } }, 'render:text:addText:plain'); } catch {}
                 slideObj.addText(toBoldRunsFromMarkdown(textVal) as any, textOptions);
               }
-              try { logger.info({ contentPath }, 'render:text:done'); } catch {}
+              try { logger.debug({ contentPath }, 'render:text:done'); } catch {}
               continue;
             }
             if (type === 'image') {
-              const pathStr = String(el?.path || '');
+              let pathStr = String(el?.path || '');
               if (pathStr) {
-                slideObj.addImage({ path: pathStr, x, y, w, h, sizing: { type: style?.sizing || 'contain', w, h } as any, shadow: shadowOf(style?.shadow, shadowPreset) });
+                // Prefer template-defined shadow, else default.json visualStyles.image.shadow; no code-side hard default
+                const imgStyle = (templateConfig?.visualStyles?.image) || {};
+                const shadowSpec = (style?.shadow !== undefined ? style?.shadow : imgStyle.shadow);
+                pathStr = await downloadImageIfUrl(pathStr);
+                slideObj.addImage({ path: pathStr, x, y, w, h, sizing: { type: style?.sizing || 'contain', w, h } as any, shadow: shadowOf(shadowSpec, shadowPreset) });
+                continue;
+              }
+              // No explicit path in template: try imagePath, then recipe/context_for_visual
+              const fromImagePath = (slideObj as any).__data?.imagePath as (string|undefined);
+              if (fromImagePath && typeof fromImagePath === 'string') {
+                const local = await downloadImageIfUrl(fromImagePath);
+                const imgStyle = (templateConfig?.visualStyles?.image) || {};
+                const shadowSpec = (style?.shadow !== undefined ? style?.shadow : imgStyle.shadow);
+                slideObj.addImage({ path: local, x, y, w, h, sizing: { type: style?.sizing || 'contain', w, h } as any, shadow: shadowOf(shadowSpec, shadowPreset) });
+                continue;
+              }
+              // Fallback: recipe or context_for_visual
+              let recipeImg: any = (slideObj as any).__data?.visual_recipe;
+              if (!recipeImg && (slideObj as any).__data?.context_for_visual) {
+                recipeImg = { type: 'image', prompt: String((slideObj as any).__data.context_for_visual) };
+              }
+              if (recipeImg) {
+                // If recipe carries a direct URL path, download first
+                if (recipeImg.path && typeof recipeImg.path === 'string') {
+                  recipeImg = { ...recipeImg, path: await downloadImageIfUrl(String(recipeImg.path)) };
+                }
+                await drawInfographic(slideObj, 'image', recipeImg, { x, y, w, h });
+              } else {
+                try { logger.warn({ area: { x, y, w, h } }, 'Template image element has neither path nor prompt/recipe'); } catch {}
               }
               continue;
             }
@@ -1220,11 +1348,15 @@ export const createPowerpointTool = createTool({
             if (type === 'visual') {
               // Quote layout intentionally avoids visuals unless explicitly provided; ignore silently
               if (layoutKey === 'quote') {
-                try { logger.info({ layout: layoutKey, area: { x, y, w, h } }, 'Quote layout: ignoring template visual element by design.'); } catch {}
+                try { logger.debug({ layout: layoutKey, area: { x, y, w, h } }, 'Quote layout: ignoring template visual element by design.'); } catch {}
                 continue;
               }
-              const recipe = typeof el?.recipeRef === 'string' ? getByPath((slideObj as any).__data || {}, el.recipeRef) : ((slideObj as any).__data?.visual_recipe);
-              try { logger.info({ layout: layoutKey, hasRecipe: !!recipe, recipeType: recipe?.type, area: { x, y, w, h } }, 'Template visual element encountered'); } catch {}
+              let recipe = typeof el?.recipeRef === 'string' ? getByPath((slideObj as any).__data || {}, el.recipeRef) : ((slideObj as any).__data?.visual_recipe);
+              // Fallback: use context_for_visual as image generation prompt
+              if (!recipe && (slideObj as any).__data?.context_for_visual) {
+                recipe = { type: 'image', prompt: String((slideObj as any).__data.context_for_visual) };
+              }
+              try { logger.debug({ layout: layoutKey, hasRecipe: !!recipe, recipeType: recipe?.type, area: { x, y, w, h } }, 'Template visual element encountered'); } catch {}
               // Prevent overlap with reserved bottom branding area
               let vy = y, vh = h;
               const reservedBottom = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
@@ -1234,9 +1366,9 @@ export const createPowerpointTool = createTool({
               }
               // no-op; rely on fallback warnings when needed
               if (recipe && typeof recipe === 'object') {
-                try { logger.info({ type: String(recipe.type||'') }, 'drawInfographic(start)'); } catch {}
+                try { logger.debug({ type: String(recipe.type||'') }, 'drawInfographic(start)'); } catch {}
                 await drawInfographic(slideObj, String(recipe.type || ''), recipe, { x, y: vy, w, h: vh });
-                try { logger.info('drawInfographic(done)'); } catch {}
+                try { logger.debug('drawInfographic(done)'); } catch {}
               } else if ((slideObj as any).__data?.imagePath) {
                 slideObj.addImage({ path: (slideObj as any).__data.imagePath, x, y: vy, w, h: vh, sizing: { type: style?.sizing || 'contain', w, h: vh } as any, shadow: shadowOf(style?.shadow, shadowPreset) });
               } else {
@@ -1253,11 +1385,24 @@ export const createPowerpointTool = createTool({
 
         // Draw infographic primitives on the given slide
         const ChartType: any = (pres as any).ChartType;
-        async function drawInfographic(targetSlide: any, type: string, payload: any, region?: { x: number; y: number; w: number; h: number }) {
+                async function drawInfographic(targetSlide: any, type: string, payload: any, region?: { x: number; y: number; w: number; h: number }) {
             const rx = region?.x ?? 0.8;
             const ry = region?.y ?? 3.6;
             const rw = region?.w ?? 8.4;
             const rh = region?.h ?? 2.2;
+                    // Registry-driven rendering first
+                    try {
+                      const { render: renderFromRegistry } = await import('./infographicRegistry');
+                      const ok = await renderFromRegistry({
+                        slide: targetSlide,
+                        type: String(type || ''),
+                        payload,
+                        region: { x: rx, y: ry, w: rw, h: rh },
+                        templateConfig,
+                        helpers: { pickTextColorForBackground, getPaletteColor }
+                      });
+                      if (ok) return;
+                    } catch {}
             const renderChartImage = async (ct: 'bar'|'pie'|'line', labels: string[], values: number[], titleText?: string): Promise<string | null> => {
               try {
                 const mod = await import('./generateChart');
@@ -2553,7 +2698,7 @@ export const createPowerpointTool = createTool({
                             // Render template elements; when preferBottom is true, skip template visual element
                             const elementsToRender = preferBottom ? (tmplElements.filter((e: any) => String(e?.type) !== 'visual')) : tmplElements;
                             // Provide slide data to renderer
-                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
+                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath, context_for_visual: (slideData as any).context_for_visual };
                             await renderElementsFromTemplate(slide as any, 'content_with_visual', elementsToRender);
                             delete (slide as any).__data;
                             // If template doesn't include a visual element or we intentionally skipped it, render either right-panel or bottom-band
@@ -2566,12 +2711,17 @@ export const createPowerpointTool = createTool({
                             if (preferBottom) {
                                     // Use explicit bottom band rectangle to avoid content_with_visual template area override
                                     const va = { x: marginX, y: bottomBandY, w: contentW, h: bottomBandH };
+                                    const reservedBottomA = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
+                                    if ((va.y + va.h) > (pageH - reservedBottomA)) {
+                                        const minY = contentTopY + 0.7;
+                                        (va as any).y = Math.max(minY, (pageH - reservedBottomA) - va.h);
+                                    }
                                     const bulletsBottom = (contentTopY + 0.5) + Math.max(2.5, twoColTextH - 0.5);
                                     (va as any).y = Math.max(va.y, bulletsBottom + 0.2);
-                                    const reservedBottom = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
-                                    if ((va.y + va.h) > (pageH - reservedBottom)) {
+                                    const reservedBottomB = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
+                                    if ((va.y + va.h) > (pageH - reservedBottomB)) {
                                         const minY = contentTopY + 0.7;
-                                        (va as any).y = Math.max(minY, (pageH - reservedBottom) - va.h);
+                                        (va as any).y = Math.max(minY, (pageH - reservedBottomB) - va.h);
                                     }
                                     if (perSlideRecipeHere && typeof perSlideRecipeHere === 'object') {
                                         await drawInfographic(slide as any, String(typeStr), perSlideRecipeHere, va);
@@ -2643,7 +2793,34 @@ export const createPowerpointTool = createTool({
                             __templateHasElementsForLayout = true;
                             try { logger.info({ layout: 'content_with_bottom_visual' }, 'Template elements present: skipping code-rendered defaults for content_with_bottom_visual'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
-                            await renderElementsFromTemplate(slide as any, 'content_with_bottom_visual', tmplElements);
+                            // Dynamically enlarge visual area based on rendered bullet height
+                            const areasTpl: any = templateConfig?.layouts?.content_with_bottom_visual?.areas || {};
+                            const bA = areasTpl.bullets || { x: twoColTextX, y: contentTopY + 0.5, w: contentW, h: 2.4 };
+                            const vA = areasTpl.visual || { x: marginX, y: bottomBandY, w: contentW, h: bottomBandH };
+                            const bulletsArr = Array.isArray(slideData.bullets) ? slideData.bullets.map((b:any)=>String(b||'').trim()).filter(Boolean) : [];
+                            const estimateBulletsHeightInches = (items: string[], widthIn: number, fontPt: number, paraAfterPtLocal: number): number => {
+                                if (!items || !items.length) return 0;
+                                const charWidthIn = fontPt / 144; // approx visual width per char
+                                const maxCharsPerLine = Math.max(8, Math.floor(widthIn / Math.max(0.06, charWidthIn)));
+                                const lineHeightIn = (fontPt * 1.2) / 72; // 1.2em
+                                const paraAfterIn = (paraAfterPtLocal || 0) / 72;
+                                let total = 0;
+                                for (const raw of items) {
+                                    const t = String(raw || '').trim();
+                                    if (!t) { total += lineHeightIn; continue; }
+                                    const lines = Math.max(1, Math.ceil(t.length / maxCharsPerLine));
+                                    total += lines * lineHeightIn + paraAfterIn;
+                                }
+                                return total;
+                            };
+                            const estBulletsH = estimateBulletsHeightInches(bulletsArr, Number(bA.w) || contentW, 20, 12);
+                            const bulletsBottomY = (Number(bA.y) || (contentTopY + 0.5)) + Math.min(Number(bA.h) || 2.4, estBulletsH);
+                            const reservedBottom = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
+                            const yStartDyn = Math.max(contentTopY + 0.7, bulletsBottomY + 0.2);
+                            const maxBottom = pageH - reservedBottom;
+                            const availHDyn = Math.max(0.6, maxBottom - yStartDyn);
+                            const areaOverrides = { visual: { x: Number(vA.x) || marginX, y: yStartDyn, w: Number(vA.w) || contentW, h: availHDyn } } as any;
+                            await renderElementsFromTemplate(slide as any, 'content_with_bottom_visual', tmplElements, areaOverrides);
                             // Fallback render only if template lacks a visual element
                             const hasVisualEl = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
                             __templateHasVisualElForLayout = __templateHasVisualElForLayout || hasVisualEl;
@@ -2652,6 +2829,12 @@ export const createPowerpointTool = createTool({
                                 visualRendered = true;
                             } else {
                                 const va = resolveArea('visual', marginX, bottomBandY, contentW, bottomBandH);
+                                // Keep bottom visual fully visible above reserved footer area
+                                const reservedBottom = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
+                                if ((va.y + va.h) > (pageH - reservedBottom)) {
+                                    const minY = contentTopY + 0.7;
+                                    (va as any).y = Math.max(minY, (pageH - reservedBottom) - va.h);
+                                }
                                 logger.warn({ layout: 'content_with_bottom_visual', area: va, recipeType: (slideData as any)?.visual_recipe?.type || null }, 'Template elements missing visual. Falling back to code-rendered bottom visual region');
                                 if ((slideData as any).visual_recipe) {
                                     await drawInfographic(slide as any, String(((slideData as any).visual_recipe?.type) || ''), (slideData as any).visual_recipe, va);
@@ -2677,15 +2860,34 @@ export const createPowerpointTool = createTool({
                         const bArea = resolveArea('bullets', twoColTextX, contentTopY + 0.5, contentW, 2.4);
                         const cleanedBullets = mergeQuotedContinuations((slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim()));
                         const bulletText = cleanedBullets.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
-                        slide.addText(bulletText, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                        const bulletFontPt = 20; const paraAfterPt = 12;
+                        slide.addText(bulletText, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: bulletFontPt, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: paraAfterPt, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                        // Estimate rendered bullet height to maximize visual area below
+                        const estimateBulletsHeightInches = (items: string[], widthIn: number, fontPt: number, paraAfterPtLocal: number): number => {
+                            if (!items || !items.length) return 0;
+                            const charWidthIn = fontPt / 144; // ~0.5em per char in inches
+                            const maxCharsPerLine = Math.max(8, Math.floor(widthIn / Math.max(0.06, charWidthIn)));
+                            const lineHeightIn = (fontPt * 1.2) / 72; // 1.2em line height in inches
+                            const paraAfterIn = (paraAfterPtLocal || 0) / 72;
+                            let total = 0;
+                            for (const raw of items) {
+                                const t = String(raw || '').trim();
+                                if (!t) { total += lineHeightIn; continue; }
+                                const lines = Math.max(1, Math.ceil(t.length / maxCharsPerLine));
+                                total += lines * lineHeightIn + paraAfterIn;
+                            }
+                            return total;
+                        };
+                        const estBulletsH = Math.min(bArea.h, estimateBulletsHeightInches(cleanedBullets, bArea.w, bulletFontPt, paraAfterPt));
+                        (slide as any).__bottomOfBullets = bArea.y + estBulletsH;
                     }
                     {
-                        const aVisual = resolveArea('visual', marginX, bottomBandY, contentW, bottomBandH);
                         const reservedBottom = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
-                        if ((aVisual.y + aVisual.h) > (pageH - reservedBottom)) {
-                            const minY = contentTopY + 0.7;
-                            (aVisual as any).y = Math.max(minY, (pageH - reservedBottom) - aVisual.h);
-                        }
+                        const bulletsBottomY = (slide as any).__bottomOfBullets ?? ((contentTopY + 0.5) + Math.max(2.5, twoColTextH - 0.5));
+                        const yStart = Math.max(bottomBandY, bulletsBottomY + 0.2);
+                        const maxBottom = pageH - reservedBottom;
+                        const availH = Math.max(0.6, maxBottom - yStart);
+                        const aVisual = resolveArea('visual', marginX, yStart, contentW, availH);
                         const perSlideRecipeHere = (slideData as any).visual_recipe;
                         if (perSlideRecipeHere && typeof perSlideRecipeHere === 'object') {
                             await drawInfographic(slide as any, String(perSlideRecipeHere.type || ''), perSlideRecipeHere, aVisual);
@@ -2700,7 +2902,7 @@ export const createPowerpointTool = createTool({
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
                             try { logger.info({ layout: 'content_with_image' }, 'Template elements present: skipping code-rendered defaults for content_with_image'); } catch {}
-                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, imagePath: slideData.imagePath };
+                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, imagePath: slideData.imagePath, context_for_visual: (slideData as any).context_for_visual };
                             await renderElementsFromTemplate(slide as any, 'content_with_image', tmplElements);
                             delete (slide as any).__data;
                             break;
@@ -2734,7 +2936,10 @@ export const createPowerpointTool = createTool({
                             } catch {}
                         }
                         if (imagePath) {
-                            slide.addImage({ path: imagePath, x: imgArea.x, y: imgArea.y, w: imgArea.w, h: imgArea.h, sizing: { type: 'cover', w: imgArea.w, h: imgArea.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                            // Normalize shadow to right-bottom (soft preset)
+                            const imgStyle = (templateConfig?.visualStyles?.image) || {};
+                            const shadowSpec = imgStyle.shadow ?? 'soft';
+                            slide.addImage({ path: imagePath, x: imgArea.x, y: imgArea.y, w: imgArea.w, h: imgArea.h, sizing: { type: 'cover', w: imgArea.w, h: imgArea.h } as any, shadow: shadowOf(shadowSpec) });
                         }
                         // Bullets on the right
                         const bulletsText = (slideData.bullets || []).map((b:any)=>String(b||'').replace(/\n[ \t　]*/g,' ').trim()).join('\n').replace(/\*\*([^*]+)\*\*/g,'$1');
@@ -2747,7 +2952,7 @@ export const createPowerpointTool = createTool({
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
                             try { logger.info({ layout: 'visual_only' }, 'Template elements present: skipping code-rendered defaults for visual_only'); } catch {}
-                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
+                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath, context_for_visual: (slideData as any).context_for_visual };
                             await renderElementsFromTemplate(slide as any, 'visual_only', tmplElements);
                             delete (slide as any).__data;
                             break;
@@ -2767,7 +2972,7 @@ export const createPowerpointTool = createTool({
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
                             try { logger.info({ layout: 'visual_hero_split' }, 'Rendering from template elements'); } catch {}
-                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, imagePath: slideData.imagePath };
+                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, imagePath: slideData.imagePath, context_for_visual: (slideData as any).context_for_visual };
                             await renderElementsFromTemplate(slide as any, 'visual_hero_split', tmplElements);
                             delete (slide as any).__data;
                             break;

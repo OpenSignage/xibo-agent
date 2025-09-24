@@ -106,7 +106,14 @@ const visualRecipePyramidSchema = z.object({
 });
 const visualRecipeWaterfallSchema = z.object({
   type: z.literal('waterfall'),
-  items: z.array(z.object({ label: z.string(), delta: z.number() })).min(1),
+  items: z.array(z.object({
+    label: z.string(),
+    delta: z.number().optional(),
+    // Support explicit total step
+    isTotal: z.boolean().optional(),
+    setAsTotal: z.boolean().optional(),
+    total: z.number().optional(),
+  })).min(1),
 });
 const visualRecipeBulletSchema = z.object({
   type: z.literal('bullet'),
@@ -325,19 +332,19 @@ export const intelligentPresenterWorkflow = createWorkflow({
         const { reportContent, fileNameBase, errorMessage, companyName } = params.inputData;
         const templateNameIn = (params.inputData as any).templateName as string | undefined;
         const safeTemplateName = (templateNameIn && templateNameIn.trim()) ? templateNameIn.trim() : 'default.json';
-        try { logger.info({ templateNameIn, safeTemplateName }, 'Using template for design-presentation'); } catch {}
+try { logger.debug({ templateNameIn, safeTemplateName }, 'Using template for design-presentation'); } catch {}
         if (errorMessage) {
             let templateConfig: any = undefined;
             try {
                 const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
-                try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
+try { logger.debug({ tplPath }, 'Loading template JSON'); } catch {}
                 const raw = await fs.readFile(tplPath, 'utf-8');
                 templateConfig = JSON.parse(raw);
             } catch {}
             return { presentationDesign: [], reportContent, fileNameBase, companyName, errorMessage, themeColor1: '#F1F1F1', themeColor2: '#CCCCCC', templateConfig };
         }
         
-        logger.info("🤖 [Designer AI] Analyzing report and designing presentation structure...");
+logger.debug("🤖 [Designer AI] Analyzing report and designing presentation structure...");
         let designResult;
         try {
             // Prompt for the Designer AI to create the presentation structure and theme.
@@ -392,7 +399,11 @@ export const intelligentPresenterWorkflow = createWorkflow({
                 11) ヒートマップ2D: { "type": "heatmap", "x": string[], "y": string[], "z": number[][] }
                 12) ベン図(2要素): { "type": "venn2", "a": {"label": string, "size": number}, "b": {"label": string, "size": number}, "overlap": number }
                 13) ピラミッド: { "type": "pyramid", "steps": [{"label": string, "value"?: number}] }
-                14) ウォーターフォール: { "type": "waterfall", "items": [{"label": string, "delta": number}] }
+            14) ウォーターフォール: { "type": "waterfall", "items": [
+                  {"label": string, "delta": number},
+                  // 合計（total）を棒として表示したい場合は以下のいずれかを付与
+                  {"label": string, "isTotal": true, "total"?: number } | {"label": string, "setAsTotal": true, "total"?: number }
+                ] }
                 15) バレット: { "type": "bullet", "items": [{"label": string, "value": number, "target": number}] }
                 16) ロケーション(地図風): { "type": "map_markers", "markers": [{"label": string, "x": number(0-1), "y": number(0-1)}] }
                 17) コールアウト/バッジ: { "type": "callouts", "items": [{"label": string, "value"?: string, "icon"?: string}] }
@@ -605,8 +616,8 @@ export const intelligentPresenterWorkflow = createWorkflow({
                 const tplBgSrc: any = ((params.inputData as any).templateConfig?.layouts?.title_slide?.background?.source) || {};
                 const negativePrompt = String(tplBgSrc.negativePrompt || 'text, watermark, logo').trim() || undefined;
                 logger.info({ prompt: composedPrompt, negativePrompt }, 'Title background image (pre-gen): sending prompt to generator');
-                const { genarateImage } = await import('../../tools/presenter/genarateImage');
-                const imageResult = await genarateImage({ prompt: composedPrompt, aspectRatio: '16:9', negativePrompt });
+                const { generateImage } = await import('../../tools/presenter/generateImage');
+                const imageResult = await generateImage({ prompt: composedPrompt, aspectRatio: '16:9', negativePrompt });
                 if (imageResult.success && imageResult.path) return { buffer: undefined as any, imagePath: imageResult.path };
                 return { buffer: undefined as any, imagePath: undefined };
             } catch {
