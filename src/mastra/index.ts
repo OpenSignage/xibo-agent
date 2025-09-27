@@ -35,6 +35,8 @@ import { strategyPlannerWorkflow } from './workflows/strategy-planner/strategyPl
 import { podcastPlannerWorkflow } from './workflows/podcast/podcastPlanner';
 import { signageAdsPlannerWorkflow } from './workflows/signage-ads/signageAdsPlanner';
 import { recipeToPptxWorkflow } from './workflows/presenter/recipeToPptx';
+import { mdToRecipeWorkflow } from './workflows/presenter/mdToRecipe';
+
 
 // Load environment variables from .env.development
 const envPath = resolve(process.cwd(), '.env.development');
@@ -94,6 +96,7 @@ export const mastra = new Mastra({
     podcastPlanner: podcastPlannerWorkflow,
     signageAdsPlanner: signageAdsPlannerWorkflow,
     recipeToPptx: recipeToPptxWorkflow,
+    mdToRecipe: mdToRecipeWorkflow
   },
   // Set shared logger
   logger: logger,

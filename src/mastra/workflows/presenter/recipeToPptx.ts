@@ -56,7 +56,7 @@ export const recipeToPptxWorkflow = createWorkflow({
   execute: async (params) => {
     const { recipeFileName, fileNameBase } = params.inputData;
     const recipePath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'recipes', recipeFileName);
-    logger.info({ recipePath }, 'Reading slides recipe JSON');
+logger.debug({ recipePath }, 'Reading slides recipe JSON');
     let json: any;
     try {
       const raw = await fs.readFile(recipePath, 'utf-8');
@@ -69,13 +69,35 @@ export const recipeToPptxWorkflow = createWorkflow({
     const slides: any[] = Array.isArray(json?.slides) ? json.slides : [];
     const themeColor1: string | undefined = typeof json?.themeColor1 === 'string' ? json.themeColor1 : undefined;
     const themeColor2: string | undefined = typeof json?.themeColor2 === 'string' ? json.themeColor2 : undefined;
-    // Load template
+    // Load template with default layering (default.json as base, then override by selected template)
     let templateConfig: any = undefined;
     const tplName = (params.inputData as any).templateName || 'default.json';
+    const tplDir = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates');
+    const deepMerge = (base: any, override: any): any => {
+      if (Array.isArray(base) && Array.isArray(override)) return override.slice();
+      if (base && typeof base === 'object' && override && typeof override === 'object') {
+        const out: any = { ...base };
+        for (const k of Object.keys(override)) {
+          out[k] = deepMerge(base[k], override[k]);
+        }
+        return out;
+      }
+      return override !== undefined ? override : base;
+    };
     try {
-      const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', tplName);
-      const raw = await fs.readFile(tplPath, 'utf-8');
-      templateConfig = JSON.parse(raw);
+      const baseRaw = await fs.readFile(path.join(tplDir, 'default.json'), 'utf-8');
+      const baseTpl = JSON.parse(baseRaw);
+      if (tplName && tplName !== 'default.json') {
+        try {
+          const selRaw = await fs.readFile(path.join(tplDir, tplName), 'utf-8');
+          const selTpl = JSON.parse(selRaw);
+          templateConfig = deepMerge(baseTpl, selTpl);
+        } catch {
+          templateConfig = baseTpl;
+        }
+      } else {
+        templateConfig = baseTpl;
+      }
     } catch {}
     return { slides, fileNameBase, templateConfig, themeColor1, themeColor2 } as any;
   },

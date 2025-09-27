@@ -42,7 +42,7 @@ async function cropToAspect(buffer: Buffer, target: Aspect): Promise<Buffer> {
   }
 }
 
-export async function genarateImage(params: {
+export async function generateImage(params: {
   prompt: string;
   aspectRatio: Aspect;
   negativePrompt?: string;
@@ -78,14 +78,14 @@ export async function genarateImage(params: {
       const filename = `pptimg-${uuidv4()}.png`;
       const fullPath = path.join(tempImagesDir, filename);
       await fsp.writeFile(fullPath, cropped);
-      logger.info(`genarateImage: wrote ${fullPath}`);
+      logger.info(`generateImage: wrote ${fullPath}`);
       return { success: true, path: fullPath, width: dims.width, height: dims.height };
     }
 
     return { success: false, message: 'No inline image returned from Gemini' };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    logger.error({ error: message }, 'genarateImage failed');
+    logger.error({ error: message }, 'generateImage failed');
     return { success: false, message };
   }
 }

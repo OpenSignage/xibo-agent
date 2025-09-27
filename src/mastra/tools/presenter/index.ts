@@ -14,4 +14,4 @@ export { createPowerpointTool } from './createPowerpoint';
 export { generateTemplateAiTool } from './generateTemplateAi';
 export { createNarrationWavTool } from './createNarrationWav';
 export { createPresentationVideoTool } from './createPresentationVideo';
-export { genarateImage } from './genarateImage';
+export { generateImage } from './generateImage';

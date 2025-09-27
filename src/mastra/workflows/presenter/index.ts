@@ -11,3 +11,4 @@
  */
 export { intelligentPresenterWorkflow } from './intelligentPresenter';
 export { recipeToPptxWorkflow } from './recipeToPptx';
+export { mdToRecipeWorkflow } from './mdToRecipe';
