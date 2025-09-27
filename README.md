@@ -493,8 +493,16 @@ APP_ROOT=/path/to/your/project
 | キー | 型 | 既定値 | 説明 |
 |---|---|---|---|
 | layers | number | 4 | 段数 |
-| layerShrinkRatio | number | 0.15 | 段ごとの幅縮小率 |
-| labelFontSize | number | 12 | ラベルサイズ |
+| layerShrinkRatio | number | 0.15 | 段ごとの幅縮小率（幾何的配置の基準） |
+| labelFontSize | number | 18 | 左側ラベルのフォントサイズ |
+| valueFontSize | number | 20 | セグメント中央の値フォントサイズ |
+| baseColor | hex | #0B5CAB | 勾配の基準色（上段ほど明るく、下段ほど暗く） |
+| gradientMinRatio | number(0-1) | 0.3 | 勾配の暗さ下限（0に近いほど濃淡差が大きい） |
+
+実装上の挙動:
+- 台形は `flipV: true` で上辺>下辺のファネルを描画
+- 配色は `baseColor` を基準に、上→下で比率 [gradientMinRatio, 1.0] に線形で暗化
+- ラベルと値の文字色はテンプレで黒を前提（可読性を重視）
 
 #### timeline
 | キー | 型 | 既定値 | 説明 |
@@ -542,6 +550,85 @@ APP_ROOT=/path/to/your/project
 - line_chart/area_chart: `gridColor`, `line.*`, `legend.position`
 - pie_chart: `legend.position`, `alpha.pieDoughnut`
 - radar_chart/polar_area_chart/scatter_chart/bubble_chart: `gridColor`, `legend.position`
+
+#### チャートタイトルのフォントサイズ指定（重要）
+
+- bar_chart: `titleFontSizeBar`
+- 上記以外（kpi_donut/pie_chart/line_chart/polar_area_chart/radar_chart/scatter_chart/bubble_chart/horizontal_bar_chart/stacked_bar_chart/area_chart）: `titleFontSizeDefault`
+
+備考:
+- 未指定時は Chart.js の既定フォントサイズが使われます。
+- 例）kpi_donut のタイトルを大きくするには `visualStyles.kpi_donut.titleFontSizeDefault` を設定してください。
+
+### 主要チャートタイプのレシピ仕様とスタイルキー（追補）
+
+以下はテンプレート駆動レンダリング（TDR）でサポートしているチャート種別のレシピ（recipe）構造と、代表的なスタイルキーです。レシピは `slides[].visual_recipe` にそのまま記述します。
+
+#### stacked_bar_chart
+- レシピ例（推奨: series 形式）
+```json
+{
+  "type": "stacked_bar_chart",
+  "labels": ["Q1","Q2","Q3","Q4"],
+  "series": [
+    { "label": "製品A", "data": [12,18,9,15] },
+    { "label": "製品B", "data": [8,14,7,10] },
+    { "label": "製品C", "data": [10,13,9,15] }
+  ],
+  "title": "スタック棒（見た目確認）"
+}
+```
+- 2D 配列も可: `values: number[][]`
+- スタイル（`visualStyles.stacked_bar_chart`）: `gridColor`, `bar.borderRadius`, `legend.position`, `dataLabelFontSize`, `dataLabelColor`, `titleFontSizeDefault`
+- 値ラベルはバーの内側に表示（横棒/縦棒とも）。
+
+#### horizontal_bar_chart
+- 構造は `bar_chart` と同一（単系列: `labels` + `values`、または `series`）
+- タイトルサイズは `titleFontSizeBar`、値ラベルはバー右内側に表示
+
+#### area_chart
+- 構造は `line_chart` と同等（`labels` + `values` or `series`）
+- タイトルサイズは `titleFontSizeDefault`（bar 専用の `titleFontSizeBar` は無効）
+
+#### scatter_chart
+- レシピ例
+```json
+{
+  "type": "scatter_chart",
+  "labels": ["P1","P2","P3"],
+  "values": [ { "x": 1, "y": 10 }, { "x": 2, "y": 15 }, { "x": 3, "y": 9 } ],
+  "title": "サンプル散布図"
+}
+```
+- スタイル（`visualStyles.scatter_chart`）: `labelFontSize`, `labelColor`, `labelOffsetY`, `pointRadius`, `pointHoverRadius`, `pointColor`, `pointBorderColor`, `pointBorderWidth`, `gridColor`, `titleFontSizeDefault`
+- 0より大きい値が大半でレンジ比が大きい場合、軸を自動で対数化（X/Y 別々に判定）
+- 各点ラベルはプロット位置付近に表示
+
+#### bubble_chart
+- レシピ例（z を半径に自動スケーリング）
+```json
+{
+  "type": "bubble_chart",
+  "labels": ["B1","B2","B3"],
+  "values": [
+    { "x": 10, "y": 8,  "z": 120 },
+    { "x": 20, "y": 12, "z": 300 },
+    { "x": 30, "y": 5,  "z": 80 }
+  ],
+  "title": "サンプルバブル"
+}
+```
+- `z` の代わりに `r`（ピクセル半径）を直接指定も可
+- スタイル（`visualStyles.bubble_chart`）: `pointMinRadius`, `pointMaxRadius`, `labelFontSize`, `labelColor`, `labelOffsetY`, `gridColor`, `titleFontSizeDefault`
+- 各点ラベルはプロット位置付近に表示
+
+#### bar_chart / line_chart / pie_chart / radar_chart / polar_area_chart / kpi_donut
+- 既存の構造に加え、タイトルサイズは上記「チャートタイトルのフォントサイズ指定」を参照
+- `bar_chart` の各バーの値は上側内側に表示
+
+### データラベル（値表示）の方針
+- `bar_chart`/`horizontal_bar_chart`/`stacked_bar_chart` では、各データの値をバーの内側に描画します（横棒は終端から内側、縦棒は上端から内側）。
+- フォント・色は各チャートの `dataLabelFontSize`, `dataLabelColor` で制御します。
 
 
 `visualStyles.waterfall` で基準線（ベースライン）やグリッド表示を制御できます。
@@ -616,3 +703,19 @@ npm run build
 ## ライセンス
 
 Elastic License 2.0 (ELv2) 
+
+#### kpi_donut
+| キー | 型 | 既定値 | 説明 |
+|---|---|---|---|
+| labelFontSize | number | 11 | ラベルサイズ |
+| holeScale | number(0-1) | 0.6 | ドーナツの内側の比率（0で穴なし〜1で全て穴） |
+| leaderLineWidth | number | 1 | リーダー線の太さ |
+| legend.position | 't'|'r'|'b'|'l' | r | 凡例の位置 |
+| legend.fontSize | number | 18 | 凡例ラベルのフォントサイズ |
+| transparent | boolean | true | 背景透過（PNG） |
+| titleFontSizeDefault | number | なし | タイトルフォントサイズ（未指定はChart.js既定） |
+
+実装上の挙動:
+- Chart.jsの `doughnut` を使用。`holeScale` から `cutout` を自動設定
+- 全チャートを正方キャンバス（1200x1200）で生成し、スライド貼付け時は元アスペクト比を維持したままフィット（上揃え）
+- `transparent: true` で背景は透過、falseなら白背景

@@ -5,6 +5,7 @@
  */
 
 import { getVisualStyle, asNumber, asBoolean, asAlign, normalizeHex, asString } from './styleResolver';
+import { logger } from '../../logger';
 
 export type RenderRegion = { x: number; y: number; w: number; h: number };
 
@@ -28,8 +29,57 @@ export function register(type: string, renderer: Renderer) {
 
 export async function render(args: Parameters<Renderer>[0]): Promise<boolean> {
   const r = registry[args.type];
+  try { logger.info({ type: args.type }, 'infographicRegistry.render dispatch'); } catch {}
   if (!r) return false;
   return await r(args);
+}
+
+// --- Shared helpers (label width / padding estimators) ---
+function estimateEffectiveTextLength(text: string): number {
+  // Full-width chars ~1.0, half-width (ASCIIなど) ~0.5
+  let eff = 0; for (const ch of String(text || '')) eff += (/[^\u0000-\u00FF]/.test(ch) ? 1 : 0.5);
+  return eff;
+}
+
+function computeMaxEffectiveLength(labels: string[]): number {
+  let maxEff = 0; for (const s of (labels || [])) maxEff = Math.max(maxEff, estimateEffectiveTextLength(s));
+  return maxEff;
+}
+
+// 共通: ラベル列から左パディングを算出（heatmap等）
+function computeDynamicPadLeft(labels: string[], basePadIn: number, fontPt: number, options?: { fudge?: number; extra?: number; maxRatio?: number; containerW?: number }): number {
+  const fudge = Number(options?.fudge) || 1.15;
+  const approxCharIn = 0.14 * (fontPt / 10); // full-width char width (in)
+  const extra = Number(options?.extra) || 0.3; // 左の余白
+  const maxEff = computeMaxEffectiveLength(labels);
+  const proposed = maxEff * approxCharIn * fudge + extra;
+  const base = Math.max(0, Number(basePadIn) || 0);
+  const raw = Math.max(base, proposed);
+  if (options?.containerW && options?.maxRatio) {
+    const cap = Math.max(0.1, options.containerW * options.maxRatio);
+    return Math.min(raw, cap);
+  }
+  return raw;
+}
+
+// 共通: プログレス等のラベル領域幅を算出
+function computeLabelAreaWidth(labels: string[], fontPt: number, gapIn: number, containerW: number, options?: { min?: number; maxRatio?: number; fudge?: number }): number {
+  const minW = Number(options?.min) || 0.8;
+  const maxRatio = Number(options?.maxRatio) || 0.62;
+  const fudge = Number(options?.fudge) || 1.25;
+  const approxCharIn = 0.14 * (fontPt / 10);
+  const maxEff = computeMaxEffectiveLength(labels);
+  const estimated = maxEff * approxCharIn * fudge + (gapIn || 0);
+  return Math.max(minW, Math.min(containerW * maxRatio, estimated));
+}
+
+function parseNumeric(value: any): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const s = String(value ?? '').trim();
+  if (!s) return 0;
+  const m = s.replace(/[^0-9+\-.]/g, '');
+  const n = Number(m);
+  return Number.isFinite(n) ? n : 0;
 }
 
 // --- Local helpers ---
@@ -277,17 +327,20 @@ register('heatmap', ({ slide, payload, region, templateConfig }) => {
   const rows = Math.max(1, yLabels.length);
   const style = getVisualStyle(templateConfig, 'heatmap');
   const baseHex = normalizeHex(style.baseColor);
+  const negHex = normalizeHex((style as any).negativeColor) || 'E67E22';
   const borderHex = normalizeHex(style.borderColor);
-  const gridPadLeft = Number(style.padLeft);
+  const padLeftBase = Number(style.padLeft);
   const gridPadTop = Number(style.padTop);
   const labelFs = Number(style.labelFontSize);
-  if (!baseHex || !borderHex || !Number.isFinite(gridPadLeft) || !Number.isFinite(gridPadTop) || !Number.isFinite(labelFs)) {
+  if (!baseHex || !borderHex || !Number.isFinite(padLeftBase) || !Number.isFinite(gridPadTop) || !Number.isFinite(labelFs)) {
     try { console.warn('heatmap: missing style values in template'); } catch {}
     return false;
   }
-  const gridX = rx + gridPadLeft;
+  // Dynamically widen left padding to fit longest Y label without wrap（共通ヘルパー使用）
+  const dynamicPadLeft = computeDynamicPadLeft(yLabels, padLeftBase, labelFs, { fudge: 1.15, extra: 0.3, maxRatio: 0.4, containerW: rw });
+  const gridX = rx + dynamicPadLeft;
   const gridY = ry + gridPadTop;
-  const gridW = Math.max(0.1, rw - gridPadLeft);
+  const gridW = Math.max(0.1, rw - dynamicPadLeft);
   const gridH = Math.max(0.1, rh - gridPadTop);
   const cellW = gridW / Math.max(1, cols);
   const cellH = gridH / Math.max(1, rows);
@@ -308,17 +361,25 @@ register('heatmap', ({ slide, payload, region, templateConfig }) => {
     const B = Math.round(255 + (b - 255) * clamp).toString(16).padStart(2,'0').toUpperCase();
     return `#${R}${G}${B}`;
   };
+  const posMax = Math.max(0, maxZ);
+  const negMin = Math.min(0, minZ);
   for (let c = 0; c < cols; c++) {
     slide.addText(String(xLabels[c] ?? ''), { x: gridX + c * cellW, y: ry + 0.05, w: cellW, h: 0.35, fontSize: labelFs, align: 'center', fontFace: 'Noto Sans JP' });
   }
   for (let r = 0; r < rows; r++) {
-    slide.addText(String(yLabels[r] ?? ''), { x: rx + 0.05, y: gridY + r * cellH + (cellH - 0.3)/2, w: gridPadLeft - 0.1, h: 0.3, fontSize: labelFs, align: 'right', fontFace: 'Noto Sans JP' });
+    slide.addText(String(yLabels[r] ?? ''), { x: rx + 0.05, y: gridY + r * cellH + (cellH - 0.3)/2, w: Math.max(0.2, dynamicPadLeft - 0.1), h: 0.3, fontSize: labelFs, align: 'right', fontFace: 'Noto Sans JP', autoFit: true });
   }
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const vv = Number((z[r] || [])[c] ?? 0);
-      const t = (vv - minZ) / (maxZ - minZ);
-      const color = blend(`#${baseHex}`, t);
+      let color: string;
+      if (vv >= 0) {
+        const tp = posMax > 0 ? (vv / posMax) : 0;
+        color = blend(`#${baseHex}`, tp);
+      } else {
+        const tn = negMin < 0 ? (Math.abs(vv) / Math.abs(negMin)) : 0;
+        color = blend(`#${negHex}`, tn);
+      }
       const cx = gridX + c * cellW, cy = gridY + r * cellH;
       slide.addShape('rect', { x: cx, y: cy, w: cellW, h: cellH, fill: { color }, line: { color: `#${borderHex}`, width: 0.75 } });
     }
@@ -338,6 +399,7 @@ register('progress', ({ slide, payload, region, templateConfig }) => {
   const barHMax = Number(barCfg.heightMax);
   const barBg = normalizeHex(barCfg.bg);
   const barBgLine = normalizeHex(barCfg.bgLine);
+  const showTrack = (barCfg.showTrack === true);
   const valCfg: any = style.value || {};
   const showVal = (valCfg.show === true);
   const valSuffix = typeof valCfg.suffix === 'string' ? valCfg.suffix : '%';
@@ -348,28 +410,118 @@ register('progress', ({ slide, payload, region, templateConfig }) => {
     try { console.warn('progress: missing style values in template'); } catch {}
     return false;
   }
-  const barAreaX = rx + rw * 0.40;
-  const barAreaW = rw * 0.55;
-  const labelW = rw * 0.35;
+  // Dynamically estimate label width based on the longest label（共通ヘルパー使用）
+  const estLabelW = computeLabelAreaWidth(items.map((it:any)=>String(it?.label??'')), labelFs, labelGap as number, rw, { min: 0.8, maxRatio: 0.62, fudge: 1.25 });
+  const labelW = estLabelW;
+  const barAreaX = rx + labelW;
+  const barAreaW = Math.max(0.6, rw - labelW);
   const rows = Math.max(1, Math.min(8, items.length));
   const barH = Math.min(barHMax as number, (rh - 0.12 * (rows - 1)) / rows);
+  // Build vivid color palette (fills with alpha and solid borders)
+  const alphaBar = Number((style as any)?.alpha?.barFill);
+  const barFillA = Number.isFinite(alphaBar) ? (alphaBar as number) : 0.2;
+  const hsvToRgb = (h: number, s: number, v: number) => {
+    const i = Math.floor(h * 6); const f = h * 6 - i;
+    const p = v * (1 - s); const q = v * (1 - f * s); const t = v * (1 - (1 - f) * s);
+    let r=0,g=0,b=0; switch (i % 6) { case 0: r=v; g=t; b=p; break; case 1: r=q; g=v; b=p; break; case 2: r=p; g=v; b=t; break; case 3: r=p; g=q; b=v; break; case 4: r=t; g=p; b=v; break; case 5: r=v; g=p; b=q; break; }
+    return { r: Math.round(r*255), g: Math.round(g*255), b: Math.round(b*255) };
+  };
+  const golden = 0.61803398875; let hSeed = 0.137; // deterministic but not tied to theme
+  const toHex2 = (n: number) => n.toString(16).padStart(2,'0').toUpperCase();
+  const fills: Array<{ hex: string; alpha: number }> = []; const borders: string[] = [];
+  for (let i = 0; i < Math.max(1, items.length); i++) {
+    hSeed = (hSeed + golden) % 1; const { r, g, b } = hsvToRgb(hSeed, 0.85, 0.95);
+    const hex = `${toHex2(r)}${toHex2(g)}${toHex2(b)}`;
+    fills.push({ hex, alpha: barFillA }); borders.push(hex);
+  }
+  // Determine a common scale by the maximum target (fallback 100)
+  let maxTarget = 100;
+  for (const it of items) {
+    const t = Math.max(1, Number((it as any)?.target ?? 100));
+    if (t > maxTarget) maxTarget = t;
+  }
   items.slice(0, 8).forEach((it: any, i: number) => {
     const y = ry + i * (barH + 0.12);
-    slide.addText(String(it?.label ?? ''), { x: rx, y, w: labelW - (labelGap as number), h: barH, fontSize: labelFs as number, fontFace: 'Noto Sans JP', align: labelAlign, valign: 'middle' });
-    slide.addShape('rect', { x: barAreaX, y, w: barAreaW, h: barH, fill: { color: `#${barBg}` }, line: { color: `#${barBgLine}`, width: 0.5 } });
-    const v = Math.max(0, Math.min(100, Number(it?.value ?? 0)));
-    const filledW = barAreaW * (v / 100);
-    const col = normalizeHex(style.fillColor);
-    if (!col) { try { console.warn('progress: missing fillColor'); } catch {} return false; }
-    slide.addShape('rect', { x: barAreaX, y, w: filledW, h: barH, fill: { color: `#${col}` }, line: { color: `#${col}`, width: 0 } });
+    slide.addText(String(it?.label ?? ''), { x: rx, y, w: Math.max(0.2, labelW - (labelGap as number)), h: barH, fontSize: labelFs as number, fontFace: 'Noto Sans JP', align: labelAlign, valign: 'middle', autoFit: true, paraSpaceAfter: 0 });
+    // Full track (optional)
+    if (showTrack) {
+      slide.addShape('rect', { x: barAreaX, y, w: barAreaW, h: barH, fill: { color: `#${barBg}` }, line: { color: `#${barBgLine}`, width: 0.5 } });
+    }
+    const target = Math.max(1, Number(it?.target ?? 100));
+    const valueRaw = Math.max(0, Number(it?.value ?? 0));
+    const vClamped = Math.min(valueRaw, target);
+    const targetW = barAreaW * (target / maxTarget);
+    const valueW = barAreaW * (vClamped / maxTarget);
+    // Colored fill + border (like bar_chart with framed color)
+    const fillSpec = fills[i % fills.length];
+    const borderCol = borders[i % borders.length];
+    const transparency = Math.round((1 - Math.max(0, Math.min(1, fillSpec.alpha))) * 100);
+    // Target box (outline)
+    slide.addShape('rect', { x: barAreaX, y, w: targetW, h: barH, fill: { color: `#${barBg}` }, line: { color: `#${borderCol}`, width: 2 } });
+    // Achieved fill inside target
+    slide.addShape('rect', { x: barAreaX, y, w: valueW, h: barH, fill: { color: `#${fillSpec.hex}`, transparency }, line: { color: `#${borderCol}`, width: 1 } });
+    // Remaining to target (light)
+    if (targetW > valueW + 0.02) {
+      const remX = barAreaX + valueW;
+      const remW = Math.max(0, targetW - valueW);
+      slide.addShape('rect', { x: remX, y, w: remW, h: barH, fill: { color: `#${fillSpec.hex}`, transparency: Math.min(100, transparency + 40) }, line: { color: `#${borderCol}`, width: 1 } });
+    }
     if (showVal) {
-      const valText = `${v}${valSuffix}`;
-      const tx = valAlignRight ? (barAreaX + filledW - (valOffset as number)) : (barAreaX + filledW + (valOffset as number));
-      const tw = Math.max(0.5, rw * 0.12);
-      const color = normalizeHex(valCfg.color);
-      if (color) slide.addText(valText, { x: tx - (valAlignRight? tw : 0), y, w: tw, h: barH, fontSize: valFs as number, fontFace: 'Noto Sans JP', align: valAlignRight ? 'right' : 'left', valign: 'middle', color: `#${color}` });
+      const pct = Math.round((valueRaw / Math.max(1, target)) * 100);
+      const color = normalizeHex(valCfg.color) || '111111';
+      // 1) Percent at left inside achieved bar
+      if (valueW > 0.3) {
+        slide.addText(`${pct}${valSuffix}`, { x: barAreaX + 0.06, y, w: Math.max(0.4, valueW - 0.12), h: barH, fontSize: valFs as number, fontFace: 'Noto Sans JP', align: 'left', valign: 'middle', color: `#${color}` });
+      } else {
+        // If filled is too short, show percent just at boundary
+        slide.addText(`${pct}${valSuffix}`, { x: barAreaX + valueW + 0.04, y, w: 0.6, h: barH, fontSize: valFs as number, fontFace: 'Noto Sans JP', align: 'left', valign: 'middle', color: `#${color}` });
+      }
+      // 2) Raw value near the achieved boundary (to the right of percent)
+      const valueBoxW = 0.6;
+      const valueBoxX = Math.max(barAreaX + 0.04, barAreaX + valueW - valueBoxW/2);
+      slide.addText(`${Math.round(valueRaw)}`, { x: valueBoxX, y, w: valueBoxW, h: barH, fontSize: valFs as number, fontFace: 'Noto Sans JP', align: 'center', valign: 'middle', color: `#${color}` });
+      // 3) Target value at the right end of the target box
+      const targetBoxW = 0.8;
+      const targetTextX = barAreaX + Math.max(0, targetW - targetBoxW - 0.04);
+      slide.addText(`${Math.round(target)}`, { x: targetTextX, y, w: targetBoxW, h: barH, fontSize: valFs as number, fontFace: 'Noto Sans JP', align: 'right', valign: 'middle', color: `#${color}` });
     }
   });
+
+  // Draw x-axis with ticks and labels below the bars
+  const axisCfg: any = (style as any).axis || {};
+  const axisShow = (axisCfg.show !== false);
+  if (axisShow) {
+    const axisColor = normalizeHex(axisCfg.color) || '666666';
+    const gridColor = normalizeHex(axisCfg.gridColor) || 'E0E6ED';
+    const tickFont = Number(axisCfg.fontSize) || 10;
+    const desiredTicks = Number(axisCfg.ticks) || 6;
+    // axis Y position just beneath last bar
+    const lastY = ry + (rows - 1) * (barH + 0.12);
+    let axisY = lastY + barH + 0.10;
+    // keep inside region
+    if (axisY > ry + rh - 0.24) axisY = ry + rh - 0.24;
+    // nice step based on maxTarget
+    const rawStep = maxTarget / Math.max(2, desiredTicks);
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const norm = rawStep / mag;
+    let nice;
+    if (norm <= 1) nice = 1; else if (norm <= 2) nice = 2; else if (norm <= 5) nice = 5; else nice = 10;
+    const step = nice * mag;
+    // baseline
+    slide.addShape('line', { x: barAreaX, y: axisY, w: barAreaW, h: 0, line: { color: `#${axisColor}`, width: 1 } });
+    for (let t = 0; t <= maxTarget + 1e-6; t += step) {
+      const ratio = t / maxTarget;
+      const x = barAreaX + barAreaW * Math.min(1, Math.max(0, ratio));
+      // tick mark
+      slide.addShape('line', { x, y: axisY, w: 0, h: 0.06, line: { color: `#${axisColor}`, width: 1 } });
+      // optional light grid above axis to the top of bars area
+      if (axisCfg.grid === true) {
+        slide.addShape('line', { x, y: ry - 0.04, w: 0, h: (axisY - (ry - 0.04)), line: { color: `#${gridColor}`, width: 0.5 } });
+      }
+      // label under tick
+      slide.addText(String(Math.round(t)), { x: x - 0.4, y: axisY + 0.06, w: 0.8, h: 0.24, fontSize: tickFont, align: 'center', fontFace: 'Noto Sans JP', color: `#${axisColor}` });
+    }
+  }
   return true;
 });
 
@@ -495,9 +647,9 @@ register('matrix', ({ slide, payload, region, templateConfig }) => {
 
 // Charts via generateChart tool
 async function renderChartImage(
-  kind: 'bar'|'pie'|'line'|'radar'|'polarArea'|'scatter'|'bubble'|'horizontalBar'|'stackedBar'|'area',
+  kind: 'bar'|'pie'|'doughnut'|'line'|'radar'|'polarArea'|'scatter'|'bubble'|'horizontalBar'|'stackedBar'|'area',
   labels: string[],
-  values: number[],
+  values: any,
   title?: string,
   chartsStyle?: any
 ): Promise<string|null> {
@@ -512,12 +664,22 @@ async function renderChartImage(
   } catch { return null; }
 }
 
+function addImageContain(slide: any, path: string, region: { x: number; y: number; w: number; h: number }, chartType: string, shadow?: any, valignTop?: boolean) {
+  const imgW = 1200; const imgH = 1200; // unified canvas
+  const scale = Math.min(region.w / imgW, region.h / imgH);
+  const w = Math.max(0.1, imgW * scale);
+  const h = Math.max(0.1, imgH * scale);
+  const x = region.x + (region.w - w) / 2;
+  const y = valignTop ? region.y : (region.y + (region.h - h) / 2);
+  slide.addImage({ path, x, y, w, h, shadow });
+}
+
 register('bar_chart', async ({ slide, payload, region, templateConfig }) => {
   const labels: string[] = Array.isArray(payload?.labels) ? payload.labels : (Array.isArray(payload?.items) ? payload.items.map((it: any)=>String(it?.label||'')) : []);
   const values: number[] = Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.value||0)) : []);
   const chartsStyle = (templateConfig?.visualStyles?.bar_chart) || {};
   const img = await renderChartImage('bar', labels, values, payload?.title, chartsStyle);
-  if (img) slide.addImage({ path: img, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: 'contain', w: region.w, h: region.h } as any, shadow: (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined) });
+  if (img) addImageContain(slide, img, region, 'bar', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
 
@@ -526,7 +688,7 @@ register('pie_chart', async ({ slide, payload, region, templateConfig }) => {
   const values: number[] = Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.value||0)) : []);
   const chartsStyle = (templateConfig?.visualStyles?.pie_chart) || {};
   const img = await renderChartImage('pie', labels, values, payload?.title, chartsStyle);
-  if (img) slide.addImage({ path: img, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: 'contain', w: region.w, h: region.h } as any, shadow: (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined) });
+  if (img) addImageContain(slide, img, region, 'pie', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
 
@@ -535,7 +697,7 @@ register('line_chart', async ({ slide, payload, region, templateConfig }) => {
   const values: number[] = Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.value||0)) : []);
   const chartsStyle = (templateConfig?.visualStyles?.line_chart) || {};
   const img = await renderChartImage('line', labels, values, payload?.title, chartsStyle);
-  if (img) slide.addImage({ path: img, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: 'contain', w: region.w, h: region.h } as any, shadow: (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined) });
+  if (img) addImageContain(slide, img, region, 'line', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
 
@@ -544,7 +706,7 @@ register('radar_chart', async ({ slide, payload, region, templateConfig }) => {
   const values: number[] = Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.value||0)) : []);
   const chartsStyle = (templateConfig?.visualStyles?.radar_chart) || {};
   const img = await renderChartImage('radar', labels, values, payload?.title, chartsStyle);
-  if (img) slide.addImage({ path: img, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: 'contain', w: region.w, h: region.h } as any, shadow: (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined) });
+  if (img) addImageContain(slide, img, region, 'radar', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
 
@@ -553,25 +715,27 @@ register('polar_area_chart', async ({ slide, payload, region, templateConfig }) 
   const values: number[] = Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.value||0)) : []);
   const chartsStyle = (templateConfig?.visualStyles?.polar_area_chart) || {};
   const img = await renderChartImage('polarArea', labels, values, payload?.title, chartsStyle);
-  if (img) slide.addImage({ path: img, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: 'contain', w: region.w, h: region.h } as any, shadow: (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined) });
+  if (img) addImageContain(slide, img, region, 'polarArea', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
 
 register('scatter_chart', async ({ slide, payload, region, templateConfig }) => {
   const labels: string[] = Array.isArray(payload?.labels) ? payload.labels : (Array.isArray(payload?.items) ? payload.items.map((_: any, i:number)=>`P${i+1}`) : []);
-  const values: number[] = Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.y||0)) : []);
+  const values: any[] = Array.isArray(payload?.values) ? payload.values : (Array.isArray(payload?.items) ? payload.items : []);
   const chartsStyle = (templateConfig?.visualStyles?.scatter_chart) || {};
+  try { logger.info({ labelsCount: labels.length, valuesPreview: Array.isArray(values) ? values.slice(0, 5) : null }, 'scatter: before render'); } catch {}
   const img = await renderChartImage('scatter', labels, values, payload?.title, chartsStyle);
-  if (img) slide.addImage({ path: img, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: 'contain', w: region.w, h: region.h } as any, shadow: (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined) });
+  if (!img) { try { logger.info('scatter: renderChartImage returned null'); } catch {} }
+  if (img) addImageContain(slide, img, region, 'scatter', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
 
 register('bubble_chart', async ({ slide, payload, region, templateConfig }) => {
   const labels: string[] = Array.isArray(payload?.labels) ? payload.labels : (Array.isArray(payload?.items) ? payload.items.map((_: any, i:number)=>`B${i+1}`) : []);
-  const values: number[] = Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.y||0)) : []);
+  const values: any[] = Array.isArray(payload?.values) ? payload.values : (Array.isArray(payload?.items) ? payload.items : []);
   const chartsStyle = (templateConfig?.visualStyles?.bubble_chart) || {};
   const img = await renderChartImage('bubble', labels, values, payload?.title, chartsStyle);
-  if (img) slide.addImage({ path: img, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: 'contain', w: region.w, h: region.h } as any, shadow: (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined) });
+  if (img) addImageContain(slide, img, region, 'bubble', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
 
@@ -580,16 +744,26 @@ register('horizontal_bar_chart', async ({ slide, payload, region, templateConfig
   const values: number[] = Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.value||0)) : []);
   const chartsStyle = (templateConfig?.visualStyles?.horizontal_bar_chart) || {};
   const img = await renderChartImage('horizontalBar', labels, values, payload?.title, chartsStyle);
-  if (img) slide.addImage({ path: img, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: 'contain', w: region.w, h: region.h } as any, shadow: (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined) });
+  if (img) addImageContain(slide, img, region, 'horizontalBar', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
 
 register('stacked_bar_chart', async ({ slide, payload, region, templateConfig }) => {
   const labels: string[] = Array.isArray(payload?.labels) ? payload.labels : (Array.isArray(payload?.items) ? payload.items.map((it: any)=>String(it?.label||'')) : []);
-  const values: number[] = Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.value||0)) : []);
+  // Support stacked series via payload.series or 2D values
+  let values: any = [];
+  if (Array.isArray(payload?.series)) {
+    values = payload.series; // expect [{label, data:number[]}, ...]
+  } else if (Array.isArray(payload?.values) && Array.isArray(payload?.values[0])) {
+    values = payload.values; // 2D array
+  } else if (Array.isArray(payload?.values)) {
+    values = payload.values.map((n:any)=>Number(n)||0); // single series
+  } else if (Array.isArray(payload?.items)) {
+    values = payload.items.map((it:any)=>Number(it?.value||0));
+  }
   const chartsStyle = (templateConfig?.visualStyles?.stacked_bar_chart) || {};
   const img = await renderChartImage('stackedBar', labels, values, payload?.title, chartsStyle);
-  if (img) slide.addImage({ path: img, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: 'contain', w: region.w, h: region.h } as any, shadow: (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined) });
+  if (img) addImageContain(slide, img, region, 'stackedBar', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
 
@@ -598,7 +772,7 @@ register('area_chart', async ({ slide, payload, region, templateConfig }) => {
   const values: number[] = Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.value||0)) : []);
   const chartsStyle = (templateConfig?.visualStyles?.area_chart) || {};
   const img = await renderChartImage('area', labels, values, payload?.title, chartsStyle);
-  if (img) slide.addImage({ path: img, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: 'contain', w: region.w, h: region.h } as any, shadow: (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined) });
+  if (img) addImageContain(slide, img, region, 'area', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
 
@@ -638,8 +812,10 @@ register('comparison', ({ slide, payload, region, templateConfig, helpers }) => 
       slide.addShape('rect', { x: rx + padX, y: ry + padY, w: boxW - padX*2, h: labelHeight as number, fill: { color: hex }, line: { color: hex, width: 0 } } as any);
     }
   }
-  slide.addText(String(a?.label ?? ''), { x: rx + padX, y: ry + padY, w: boxW - padX*2, h: (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36), fontSize: labelFs, bold: true, color: labelColorLeft, fontFace: 'Noto Sans JP', align: (labelAlign as any), valign: 'middle' });
-  slide.addText(String(a?.value ?? ''), { x: rx + padX, y: ry + padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36), w: boxW - padX*2, h: boxH - (padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36)), fontSize: valueFs, color: valueColorLeft, fontFace: 'Noto Sans JP', align: 'center', valign: 'top' });
+  const labelBold = (st as any)?.labelBold === true;
+  slide.addText(String(a?.label ?? ''), { x: rx + padX, y: ry + padY, w: boxW - padX*2, h: (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36), fontSize: labelFs, bold: labelBold, color: labelColorLeft, fontFace: 'Noto Sans JP', align: (labelAlign as any), valign: 'middle', shadow: undefined });
+  const valueOffsetY = Number((st as any).valueOffsetY);
+  slide.addText(String(a?.value ?? ''), { x: rx + padX, y: ry + padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36) + (Number.isFinite(valueOffsetY) ? valueOffsetY : 0), w: boxW - padX*2, h: boxH - (padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36)), fontSize: valueFs, color: valueColorLeft, fontFace: 'Noto Sans JP', align: 'center', valign: 'top' });
   // Right
   slide.addShape('rect', { x: rx + boxW + gapX, y: ry, w: boxW, h: boxH, fill: { color: `#${rightFill}` }, line: { color: `#${boxLine}`, width: 0.5 } });
   const labelColorRight = labelColorTpl ? `#${labelColorTpl}` : (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(`#${rightFill}`) : '#FFFFFF');
@@ -654,8 +830,8 @@ register('comparison', ({ slide, payload, region, templateConfig, helpers }) => 
       slide.addShape('rect', { x: rx + boxW + gapX + padX, y: ry + padY, w: boxW - padX*2, h: labelHeight as number, fill: { color: hex }, line: { color: hex, width: 0 } } as any);
     }
   }
-  slide.addText(String(b?.label ?? ''), { x: rx + boxW + gapX + padX, y: ry + padY, w: boxW - padX*2, h: (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36), fontSize: labelFs, bold: true, color: labelColorRight, fontFace: 'Noto Sans JP', align: (labelAlign as any), valign: 'middle' });
-  slide.addText(String(b?.value ?? ''), { x: rx + boxW + gapX + padX, y: ry + padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36), w: boxW - padX*2, h: boxH - (padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36)), fontSize: valueFs, color: valueColorRight, fontFace: 'Noto Sans JP', align: 'center', valign: 'top' });
+  slide.addText(String(b?.label ?? ''), { x: rx + boxW + gapX + padX, y: ry + padY, w: boxW - padX*2, h: (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36), fontSize: labelFs, bold: labelBold, color: labelColorRight, fontFace: 'Noto Sans JP', align: (labelAlign as any), valign: 'middle', shadow: undefined });
+  slide.addText(String(b?.value ?? ''), { x: rx + boxW + gapX + padX, y: ry + padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36) + (Number.isFinite(valueOffsetY) ? valueOffsetY : 0), w: boxW - padX*2, h: boxH - (padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36)), fontSize: valueFs, color: valueColorRight, fontFace: 'Noto Sans JP', align: 'center', valign: 'top' });
   return true;
 });
 
@@ -787,24 +963,94 @@ register('kpi_donut', async ({ slide, payload, region, templateConfig }) => {
   const items = Array.isArray(payload?.items) ? payload.items : [];
   const labels = items.map((it:any)=>String(it?.label ?? ''));
   const values = items.map((it:any)=>Number(it?.value ?? 0));
-  // Forward charts style from template if present
-  const chartsStyle = (templateConfig?.visualStyles?.charts) || undefined;
-  const img = await renderChartImage('pie', labels, values, payload?.title || '', chartsStyle);
-  if (img) slide.addImage({ path: img, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: 'contain', w: region.w, h: region.h } as any });
+  const chartsStyle = (templateConfig?.visualStyles?.kpi_donut) || {};
+  // Align color alpha behavior with other pie-like charts (use alpha.pieDoughnut)
+  const chartsStyleMerged = { ...chartsStyle };
+  if (chartsStyleMerged.alpha == null && (templateConfig?.visualStyles?.pie_chart?.alpha)) {
+    chartsStyleMerged.alpha = templateConfig.visualStyles.pie_chart.alpha;
+  }
+  const img = await renderChartImage('doughnut', labels, values, payload?.title || '', chartsStyleMerged);
+  if (img) {
+    // Use square placement to avoid ellipse distortion (PPTX stretch)
+    const pad = Math.max(0, Number((chartsStyle as any)?.pad) || 0.12);
+    const innerW = Math.max(0.2, region.w - pad * 2);
+    const innerH = Math.max(0.2, region.h - pad * 2);
+    const side = Math.min(innerW, innerH);
+    const x = region.x + (region.w - side) / 2; // center horizontally
+    const y = region.y + pad; // top-align vertically within padded region
+    slide.addImage({
+      path: img,
+      x,
+      y,
+      w: side,
+      h: side,
+      shadow: ((chartsStyle as any)?.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined)
+    });
+  }
   return true;
 });
 
 // Funnel
 register('funnel', ({ slide, payload, region, templateConfig, helpers }) => {
+  // Draw proportional funnel based on steps[].value, with Y-axis labels on the left and value centered in each band
   const rx = region.x, ry = region.y, rw = region.w, rh = Math.max(0.2, region.h - 0.05);
   const steps = Array.isArray(payload?.steps) ? payload.steps : [];
-  const layers = Math.min(5, steps.length || 5);
-  for (let i = 0; i < layers; i++) {
-    const segH = (rh - 0.04 * (layers - 1)) / layers;
-    const y = ry + i * (segH + 0.04); const tW = rw * (1 - i * 0.15); const bW = rw * (1 - (i + 1) * 0.15);
-    const col = helpers.getPaletteColor(i).replace('#','');
-    slide.addShape('trapezoid', { x: rx + (rw - tW)/2, y, w: tW, h: segH, fill: { color: col }, line: { color: 'FFFFFF', width: 0.5 } } as any);
-    slide.addText(String(steps[i]?.label ?? ''), { x: rx + 0.15, y: y + 0.02, w: rw - 0.3, h: segH - 0.06, fontSize: 12, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: 'Noto Sans JP' });
+  const n = Math.max(1, Math.min(steps.length || 1, 12));
+  const st = getVisualStyle(templateConfig, 'funnel');
+  const labelFsRaw = Number((st as any)?.labelFontSize) || 14;
+  const labelFs = Math.max(labelFsRaw, 18); // make labels larger by default
+  const valueFs = Math.max(Number((st as any)?.valueFontSize) || (labelFs + 2), 20); // value larger than label
+  // Allocate left label area dynamically（折返し回避しつつ取りすぎない）
+  const labels = steps.slice(0, n).map((s: any)=>String(s?.label ?? ''));
+  let labelW = computeLabelAreaWidth(labels, labelFs, 0.10, rw, { min: 1.0, maxRatio: 0.25, fudge: 1.25 });
+  const rightPad = 0.2;
+  if (rw < 3) {
+    // Safety for unexpectedly narrow regions
+    labelW = Math.min(labelW, Math.max(0.8, rw * 0.2));
+  }
+  let chartX = rx + labelW; let chartW = Math.max(rw * 0.6, rw - labelW - rightPad);
+  if (rw < 3) {
+    chartW = Math.max(1.5, rw - labelW - rightPad);
+    chartX = rx + (rw - chartW) / 2; // center visually if extremely narrow region
+  }
+  // Compute maxVal first for safe logging
+  const normalizedValues: number[] = [];
+  let maxVal = 0; for (let i = 0; i < n; i++) { const v = parseNumeric(steps[i]?.value ?? 0); normalizedValues.push(v); maxVal = Math.max(maxVal, v); }
+  if (!Number.isFinite(maxVal) || maxVal <= 0) maxVal = 1;
+  const segGap = 0.04; const segH = (rh - segGap * (n - 1)) / n;
+  // Value scaling
+  // maxVal already computed above
+  // Determine base color (single hue), fall back to theme primary then palette[0]
+  const stBase = normalizeHex((st as any)?.baseColor);
+  const themePrimary = normalizeHex((templateConfig?.tokens?.primary));
+  const baseHex = (stBase || themePrimary || helpers.getPaletteColor(0).replace('#','')) as string;
+  // Shade function: make darker as index increases
+  const shade = (hex: string, ratio: number): string => {
+    const h = (hex || '2E86DE').replace('#','');
+    const r = Math.min(255, Math.max(0, Math.round(parseInt(h.slice(0,2) || '00', 16) * ratio)));
+    const g = Math.min(255, Math.max(0, Math.round(parseInt(h.slice(2,4) || '00', 16) * ratio)));
+    const b = Math.min(255, Math.max(0, Math.round(parseInt(h.slice(4,6) || '00', 16) * ratio)));
+    const toHex = (n:number)=>n.toString(16).padStart(2,'0').toUpperCase();
+    return `${toHex(r)}${toHex(g)}${toHex(b)}`;
+  };
+  for (let i = 0; i < n; i++) {
+    const it: any = steps[i] || {};
+    const y = ry + i * (segH + segGap);
+    const v = Math.max(0, parseNumeric(it?.value ?? 0));
+    const w = Math.max(0.2, chartW * (v / maxVal));
+    const x = chartX + (chartW - w) / 2;
+    // Top is lighter, bottom is darker → ratio decreases from ~1.0 to ~0.6
+    const t = n <= 1 ? 1 : (1 - i / Math.max(1, n - 1));
+    const minR = (() => { const r = Number((st as any)?.gradientMinRatio); return (r > 0 && r < 1) ? r : 0.3; })();
+    const ratio = minR + (1 - minR) * t; // stronger gradient: [minR,1.0]
+    const col = shade(baseHex, ratio);
+    const txt = helpers.pickTextColorForBackground(col);
+    // band trapezoid (centered), flipped vertically so top is wider than bottom
+    slide.addShape('trapezoid', { x, y, w, h: segH, fill: { color: col }, line: { color: 'FFFFFF', width: 0.8 }, flipV: true } as any);
+    // value centered (larger) - auto contrast (black/white)
+    slide.addText(String(v), { x, y, w, h: segH, fontSize: valueFs, fontFace: 'Noto Sans JP', align: 'center', valign: 'middle', color: `#${txt}` });
+    // y-axis label at left（autoFitで折返し回避） - force black and larger
+    slide.addText(String(it?.label ?? ''), { x: rx, y, w: Math.max(0.2, labelW - 0.1), h: segH, fontSize: labelFs, fontFace: 'Noto Sans JP', align: 'right', valign: 'middle', autoFit: true, color: '#000000' });
   }
   return true;
 });

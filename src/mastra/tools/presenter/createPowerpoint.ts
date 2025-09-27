@@ -1163,7 +1163,7 @@ export const createPowerpointTool = createTool({
                 recipe = { type: 'image', prompt: String((slideObj as any).__data.context_for_visual) };
               }
               if (recipe && typeof recipe === 'object' && recipe.type) {
-                try { logger.debug({ layout: layoutKey, area: areaName, recipeType: String(recipe.type) }, 'render:visual:dispatch'); } catch {}
+                try { logger.info({ layout: layoutKey, area: areaName, recipeType: String(recipe.type) }, 'render:visual:dispatch'); } catch {}
                 // If recipe has a direct URL path, download before render
                 if (recipe.path && typeof recipe.path === 'string') {
                   recipe = { ...recipe, path: await downloadImageIfUrl(String(recipe.path)) };
@@ -1366,9 +1366,9 @@ export const createPowerpointTool = createTool({
               }
               // no-op; rely on fallback warnings when needed
               if (recipe && typeof recipe === 'object') {
-                try { logger.debug({ type: String(recipe.type||'') }, 'drawInfographic(start)'); } catch {}
+                try { logger.info({ type: String(recipe.type||''), region: { x, y: vy, w, h: vh } }, 'drawInfographic(start)'); } catch {}
                 await drawInfographic(slideObj, String(recipe.type || ''), recipe, { x, y: vy, w, h: vh });
-                try { logger.debug('drawInfographic(done)'); } catch {}
+                try { logger.info('drawInfographic(done)'); } catch {}
               } else if ((slideObj as any).__data?.imagePath) {
                 slideObj.addImage({ path: (slideObj as any).__data.imagePath, x, y: vy, w, h: vh, sizing: { type: style?.sizing || 'contain', w, h: vh } as any, shadow: shadowOf(style?.shadow, shadowPreset) });
               } else {
@@ -1390,6 +1390,8 @@ export const createPowerpointTool = createTool({
             const ry = region?.y ?? 3.6;
             const rw = region?.w ?? 8.4;
             const rh = region?.h ?? 2.2;
+            // debug dispatch log removed after verification
+            try { logger.info({ type: String(type||''), region: { x: rx, y: ry, w: rw, h: rh } }, 'drawInfographic(entry)'); } catch {}
                     // Registry-driven rendering first
                     try {
                       const { render: renderFromRegistry } = await import('./infographicRegistry');
@@ -1401,8 +1403,9 @@ export const createPowerpointTool = createTool({
                         templateConfig,
                         helpers: { pickTextColorForBackground, getPaletteColor }
                       });
-                      if (ok) return;
-                    } catch {}
+                      if (ok) { try { logger.info('drawInfographic(done:registry)'); } catch {} return; }
+                    } catch (e) { /* swallow to allow fallback; errors are visible upstream when needed */ }
+            try { logger.info('drawInfographic(fallback)'); } catch {}
             const renderChartImage = async (ct: 'bar'|'pie'|'line', labels: string[], values: number[], titleText?: string): Promise<string | null> => {
               try {
                 const mod = await import('./generateChart');
@@ -2700,6 +2703,7 @@ export const createPowerpointTool = createTool({
                             // Provide slide data to renderer
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath, context_for_visual: (slideData as any).context_for_visual };
                             await renderElementsFromTemplate(slide as any, 'content_with_visual', elementsToRender);
+                            try { logger.info({ layout: 'content_with_visual', preferBottom, hadVisualEl: Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual') }, 'Template elements rendered for content_with_visual'); } catch {}
                             delete (slide as any).__data;
                             // If template doesn't include a visual element or we intentionally skipped it, render either right-panel or bottom-band
                             const templateHadVisualEl = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
@@ -2709,20 +2713,30 @@ export const createPowerpointTool = createTool({
                                 visualRendered = true;
                             } else {
                             if (preferBottom) {
-                                    // Use explicit bottom band rectangle to avoid content_with_visual template area override
-                                    const va = { x: marginX, y: bottomBandY, w: contentW, h: bottomBandH };
-                                    const reservedBottomA = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
-                                    if ((va.y + va.h) > (pageH - reservedBottomA)) {
-                                        const minY = contentTopY + 0.7;
-                                        (va as any).y = Math.max(minY, (pageH - reservedBottomA) - va.h);
-                                    }
-                                    const bulletsBottom = (contentTopY + 0.5) + Math.max(2.5, twoColTextH - 0.5);
-                                    (va as any).y = Math.max(va.y, bulletsBottom + 0.2);
-                                    const reservedBottomB = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
-                                    if ((va.y + va.h) > (pageH - reservedBottomB)) {
-                                        const minY = contentTopY + 0.7;
-                                        (va as any).y = Math.max(minY, (pageH - reservedBottomB) - va.h);
-                                    }
+                                    // Dynamically place visual under bullets with available height
+                                    const estimateBulletsHeightInches = (items: string[], widthIn: number, fontPt: number, paraAfterPtLocal: number): number => {
+                                        if (!items || !items.length) return 0;
+                                        const charWidthIn = fontPt / 144;
+                                        const maxCharsPerLine = Math.max(8, Math.floor(widthIn / Math.max(0.06, charWidthIn)));
+                                        const lineHeightIn = (fontPt * 1.2) / 72;
+                                        const paraAfterIn = (paraAfterPtLocal || 0) / 72;
+                                        let total = 0;
+                                        for (const raw of (slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim())) {
+                                            const t = raw;
+                                            if (!t) { total += lineHeightIn; continue; }
+                                            const lines = Math.max(1, Math.ceil(t.length / maxCharsPerLine));
+                                            total += lines * lineHeightIn + paraAfterIn;
+                                        }
+                                        return total;
+                                    };
+                                    const tmpBulletsW = twoColTextW;
+                                    const estH = estimateBulletsHeightInches(slideData.bullets || [], tmpBulletsW, 18, 12);
+                                    const bulletsBottom = (contentTopY + 0.5) + Math.min(Math.max(2.5, twoColTextH - 0.5), estH);
+                                    const reservedBottomDyn = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
+                                    const yStart = Math.max(contentTopY + 0.7, bulletsBottom + 0.2);
+                                    const maxBottom = pageH - reservedBottomDyn;
+                                    const availH = Math.max(0.6, maxBottom - yStart);
+                                    const va = { x: marginX, y: yStart, w: contentW, h: availH };
                                     if (perSlideRecipeHere && typeof perSlideRecipeHere === 'object') {
                                         await drawInfographic(slide as any, String(typeStr), perSlideRecipeHere, va);
                                         visualRendered = true;
@@ -2763,27 +2777,43 @@ export const createPowerpointTool = createTool({
                     }
                     // Non-template path: if visual exists and is crowded for right-panel, draw into bottom band instead
                     if (perSlideRecipeHere) {
-                        const typeStr = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
-                        const preferBottom = shouldPlaceVisualBottom(typeStr, perSlideRecipeHere);
-                        if (preferBottom) {
-                            const va = resolveArea('visual', marginX, bottomBandY, contentW, bottomBandH);
-                            const bulletsBottom = (contentTopY + 0.5) + Math.max(2.5, twoColTextH - 0.5);
-                            (va as any).y = Math.max(va.y, bulletsBottom + 0.2);
+                        const typeStr = String(perSlideRecipeHere.type || '');
+                        const willBottom = shouldPlaceVisualBottom(typeStr, perSlideRecipeHere);
+                        if (willBottom) {
+                            // Compute bullets actual bottom and expand visual area to available height
+                            const bAreaTmp = resolveArea('bullets', twoColTextX, contentTopY + 0.5, twoColTextW, Math.max(2.5, twoColTextH - 0.5));
+                            const estimateBulletsHeightInches = (items: string[], widthIn: number, fontPt: number, paraAfterPtLocal: number): number => {
+                                if (!items || !items.length) return 0;
+                                const charWidthIn = fontPt / 144;
+                                const maxCharsPerLine = Math.max(8, Math.floor(widthIn / Math.max(0.06, charWidthIn)));
+                                const lineHeightIn = (fontPt * 1.2) / 72; // 1.2em
+                                const paraAfterIn = (paraAfterPtLocal || 0) / 72;
+                                let total = 0;
+                                for (const raw of (slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim())) {
+                                    const t = raw;
+                                    if (!t) { total += lineHeightIn; continue; }
+                                    const lines = Math.max(1, Math.ceil(t.length / maxCharsPerLine));
+                                    total += lines * lineHeightIn + paraAfterIn;
+                                }
+                                return total;
+                            };
+                            const estH = estimateBulletsHeightInches(slideData.bullets || [], Number(bAreaTmp.w) || twoColTextW, 18, 12);
+                            // debug bullets metrics removed after verification
+                            const bulletsBottom = (Number(bAreaTmp.y) || (contentTopY + 0.5)) + Math.min(Number(bAreaTmp.h) || 2.4, estH);
                             const reservedBottom = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
-                            if ((va.y + va.h) > (pageH - reservedBottom)) {
-                                const minY = contentTopY + 0.7;
-                                (va as any).y = Math.max(minY, (pageH - reservedBottom) - va.h);
-                            }
-                            await drawInfographic(slide as any, typeStr, perSlideRecipeHere as any, va);
+                            const yStartDyn = Math.max(contentTopY + 0.7, bulletsBottom + 0.2);
+                            const maxBottom = pageH - reservedBottom;
+                            const availHDyn = Math.max(0.6, maxBottom - yStartDyn);
+                            const vAreaDyn = { x: marginX, y: yStartDyn, w: contentW, h: availHDyn };
+                            // debug computed area removed after verification
+                            await drawInfographic(slide as any, String(typeStr || ''), perSlideRecipeHere, vAreaDyn);
                             visualRendered = true;
-                        } else if (!isBottomVisual) {
-                            const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.6, twoColVisualW, 3.4);
-                            await drawInfographic(slide as any, typeStr, perSlideRecipeHere as any, vArea);
+                        } else {
+                            // Right-panel recipe → two-column as before
+                            const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.7, twoColVisualW, twoColVisualH);
+                            await drawInfographic(slide as any, String(typeStr || ''), perSlideRecipeHere, vArea);
                             visualRendered = true;
                         }
-                    } else if (!isBottomVisual && slideData.imagePath) {
-                        const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.6, twoColVisualW, 3.4);
-                        slide.addImage({ path: slideData.imagePath, x: vArea.x, y: vArea.y, w: vArea.w, h: vArea.h, sizing: { type: 'contain', w: vArea.w, h: vArea.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
                     }
                     break;
                 case 'content_with_bottom_visual':
