@@ -9,6 +9,24 @@
         "width": 1024,
         "height": 576,
         "createdAt": "2025-09-07T15:52:04.610Z"
+      },
+      {
+        "id": 2,
+        "filename": "image-9142ef65-de14-436b-b3dd-6ea4898393f5.png",
+        "prompt": "濃い色のピラミッドチャート (Aspect ratio: 16:9, Dimensions: 1024x576)",
+        "aspectRatio": "16:9",
+        "width": 1024,
+        "height": 576,
+        "createdAt": "2025-09-30T06:01:16.213Z"
+      },
+      {
+        "id": 3,
+        "filename": "image-f533f062-4378-418a-81dc-45566ed62541.png",
+        "prompt": "もっと色の濃いピラミッドチャート (Aspect ratio: 16:9, Dimensions: 1024x576)",
+        "aspectRatio": "16:9",
+        "width": 1024,
+        "height": 576,
+        "createdAt": "2025-09-30T06:02:34.531Z"
       }
     ]
   },

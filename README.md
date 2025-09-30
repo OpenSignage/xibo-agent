@@ -377,6 +377,9 @@ APP_ROOT=/path/to/your/project
 | showOverlapPercent | boolean | true | 重なり率テキストの表示 |
 | overlapFontSize | number | 14 | 重なり率テキストのフォントサイズ |
 
+レシピ拡張:
+- `visual_recipe` に `overlapLabel: string` を与えると、重なり領域のテキストを任意の文言で表示できます（`showOverlapPercent` より優先）。
+
 #### heatmap
 | キー | 型 | 既定値 | 説明 |
 |---|---|---|---|
@@ -429,6 +432,13 @@ APP_ROOT=/path/to/your/project
 | pointSize | number(in) | 0.16 | 点のサイズ |
 | labelFontSize | number | 10 | ラベルサイズ |
 
+実装上の挙動（更新）:
+- グリッド（2×2）の外側に上下左右のラベル帯を確保し、その帯の中に軸ラベルを配置します。
+  - Y軸: 上側に `yLabels[0]`（上寄せ・中央）、下側に `yLabels[1]`（下寄せ・中央）。
+  - X軸: 左側に `xLabels[0]`（中寄せ・左）、右側に `xLabels[1]`（中寄せ・右）。
+- 座標は `items[].x`/`items[].y` を [-1, +1] で受け付け、グリッド内の [0,1] に正規化して配置します。
+- `items[].z` が 0〜1 のとき、点サイズを `pointSize*0.6`〜`pointSize*1.6` に線形マッピングします（省略時は既定サイズ）。
+
 #### comparison
 | キー | 型 | 既定値 | 説明 |
 |---|---|---|---|
@@ -446,6 +456,12 @@ APP_ROOT=/path/to/your/project
 | icon.enabled | boolean | true | アイコン生成の有無 |
 | icon.size | number(in) | 0.36 | アイコンサイズ |
 | icon.padding | number(in) | 0.08 | アイコン周りのパディング |
+
+追加仕様（更新）:
+- カード下部右隅にアクセント三角形（右下が直角）を描画します。サイズは `accentHeightRatio`（0〜1）でカード短辺比により決定、塗りは半透明（`accentAlpha`）。
+- カードの枠線色はアクセント三角と同一パレット色で描画します。`borderWidth` で太さを指定。
+- アイコンはアクセント三角の内部に `contain` で収め、背景は可能な限り透明化（生成プロンプト＋白近似色の自動透過処理）します。
+- テンプレ追加キー（`visualStyles.callouts`）: `cornerRadius`, `borderWidth`, `accentHeightRatio`, `accentAlpha`。
 
 #### kpi
 | キー | 型 | 既定値 | 説明 |
@@ -484,25 +500,27 @@ APP_ROOT=/path/to/your/project
 | キー | 型 | 既定値 | 説明 |
 |---|---|---|---|
 | maxLayers | number | 3 | 層数の上限 |
-| layerShrinkRatio | number | 0.15 | 層ごとの幅縮小率 |
 | labelFontSize | number | 11 | ラベルサイズ |
-| labelColor | hex | #FFFFFF | ラベル色 |
+| labelColor | 'auto' or hex | 'auto' | ラベル色（'auto'は背景コントラストで自動） |
 | borderColor | hex | #FFFFFF | 枠線色 |
 
 #### funnel
 | キー | 型 | 既定値 | 説明 |
 |---|---|---|---|
 | layers | number | 4 | 段数 |
-| layerShrinkRatio | number | 0.15 | 段ごとの幅縮小率（幾何的配置の基準） |
 | labelFontSize | number | 18 | 左側ラベルのフォントサイズ |
 | valueFontSize | number | 20 | セグメント中央の値フォントサイズ |
 | baseColor | hex | #0B5CAB | 勾配の基準色（上段ほど明るく、下段ほど暗く） |
-| gradientMinRatio | number(0-1) | 0.3 | 勾配の暗さ下限（0に近いほど濃淡差が大きい） |
+| gradientMinRatio | number(0-1) | 0.05 | 勾配の暗さ下限（0に近いほど濃淡差が大きい） |
+| gradientMaxRatio | number(0-1) | 1.0 | 勾配の明るさ上限 |
+| gradientGamma | number(>0) | 0.7 | 勾配カーブのガンマ補正（小さいほど上部をより明るく） |
+| gradientTopColor | hex | #FFFFFF | 上部へブレンドする色（既定は白） |
+| alpha.barFill | number(0-1) | 0.4 | 塗りの透明度（枠は同色不透明） |
 
 実装上の挙動:
-- 台形は `flipV: true` で上辺>下辺のファネルを描画
-- 配色は `baseColor` を基準に、上→下で比率 [gradientMinRatio, 1.0] に線形で暗化
-- ラベルと値の文字色はテンプレで黒を前提（可読性を重視）
+- 台形は `flipV: true` で上辺>下辺のファネルを描画。
+- 配色は `baseColor` を基準に、上側は `gradientTopColor` へブレンド、下側は基準色寄りに。比率は `gradientMinRatio`〜`gradientMaxRatio` を `gradientGamma` で補正して決定。
+- 塗りは半透明（`alpha.barFill`）、枠は同色の不透明。
 
 #### timeline
 | キー | 型 | 既定値 | 説明 |
@@ -513,7 +531,7 @@ APP_ROOT=/path/to/your/project
 | pointLine | hex | #FFFFFF | ポイント枠色 |
 | pointSize | number(in) | 0.16 | ポイントサイズ |
 | labelFontSize | number | 11 | ラベルサイズ |
-| labelColor | hex | #333333 | ラベル色 |
+| labelColor | 'auto' or hex | 'auto' | ラベル色（'auto'は背景コントラストで自動） |
 
 #### roadmap
 | キー | 型 | 既定値 | 説明 |
@@ -524,6 +542,12 @@ APP_ROOT=/path/to/your/project
 | labelFontSize | number | 11 | マイルストーンラベルサイズ |
 | dateFontSize | number | 9 | 日付サイズ |
 | dateColor | hex | #666666 | 日付色 |
+### labelColor の共通ルール
+- ほとんどのビジュアルで `labelColor` を受け付けます。
+- 値は `'auto'` または 6桁HEX を指定できます。
+- `'auto'` の場合は背景色とのコントラストから黒/白を自動選択します（チャート系はプロット背景/目盛り背景を基準に、その他は該当ボックス/レイヤの実効背景色を基準）。
+
+チャート系（scatter/bubble など）のポイントラベルも `labelColor: 'auto'` を受け入れ、背景が明るい前提では自動的にダーク系（#333）に、明示色指定時はその色を使用します。
 
 #### heatmap
 | キー | 型 | 既定値 | 説明 |
@@ -629,6 +653,7 @@ APP_ROOT=/path/to/your/project
 ### データラベル（値表示）の方針
 - `bar_chart`/`horizontal_bar_chart`/`stacked_bar_chart` では、各データの値をバーの内側に描画します（横棒は終端から内側、縦棒は上端から内側）。
 - フォント・色は各チャートの `dataLabelFontSize`, `dataLabelColor` で制御します。
+ - `progress` は値（%）をバーの内側右端に右寄せで表示（バーが短い場合は外側に退避）。
 
 
 `visualStyles.waterfall` で基準線（ベースライン）やグリッド表示を制御できます。
@@ -719,3 +744,23 @@ Elastic License 2.0 (ELv2)
 - Chart.jsの `doughnut` を使用。`holeScale` から `cutout` を自動設定
 - 全チャートを正方キャンバス（1200x1200）で生成し、スライド貼付け時は元アスペクト比を維持したままフィット（上揃え）
 - `transparent: true` で背景は透過、falseなら白背景
+
+### 追加・更新（テンプレートおよび描画ポリシー）
+
+- 共通パレット
+  - `visualStyles.palette.colors: string[]` を定義すると、KPI/Chart.js系すべてのカラーピッカーに優先して使用されます（例: パステル10色のブランドパレット）。
+  - 未定義時は `rules.paletteStrategy` に従い AI/テーマ色から動的生成。
+
+- KPI（カード）
+  - `visualStyles.kpi.alpha.barFill: number(0-1)` 塗りの透明度（既定 0.4 推奨）。
+  - 表示ロジック: カードの下に白い下地 → 透明塗り → 同色の不透明枠（2px）。文字色は「白背景に対する実効色」から自動で黒/白を選択。
+
+- 棒グラフ（bar_chart / horizontal_bar_chart / stacked_bar_chart）
+  - `visualStyles.bar_chart.borderWidth: number` 既定 2。バーの枠は「塗りと同色の不透明」で描画し輪郭を強調。
+  - `visualStyles.bar_chart.alpha.barFill: number(0-1)` 塗りの透明度（既定 0.2）。
+
+- 円/ドーナツ/極（pie/doughnut/polarArea）
+  - 塗りは `alpha.pieDoughnut`、枠は同色不透明。
+
+- キャンバス/貼付け
+  - すべて 1200x1200 の正方キャンバス。スライド貼付けはアスペクト比維持・上揃え。

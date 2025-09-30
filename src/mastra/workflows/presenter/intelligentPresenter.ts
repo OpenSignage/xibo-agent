@@ -62,7 +62,8 @@ const visualRecipeTimelineSchema = z.object({
 const visualRecipeMatrixSchema = z.object({
   type: z.literal('matrix'),
   axes: z.object({ xLabels: z.tuple([z.string(), z.string()]), yLabels: z.tuple([z.string(), z.string()]) }),
-  items: z.array(z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), label: z.string() })).optional(),
+  // x,y in [-1,1] with optional z in [0,1] mapped to point size
+  items: z.array(z.object({ x: z.number().min(-1).max(1), y: z.number().min(-1).max(1), z: z.number().min(0).max(1).optional(), label: z.string() })).optional(),
 });
 const visualRecipeFunnelSchema = z.object({
   type: z.literal('funnel'),
@@ -216,7 +217,7 @@ const slideDesignSchema = z.object({
     density: z.enum(['compact','normal','airy']).optional(),
   }).optional().describe("Optional per-slide style directives for title bar rendering and content density."),
   elements: z.array(freeformElementSchema).optional().describe('When layout is freeform, render these elements instead of template.'),
-});
+}).passthrough();
 type SlideDesign = z.infer<typeof slideDesignSchema>;
 
 /**
@@ -291,7 +292,7 @@ export const intelligentPresenterWorkflow = createWorkflow({
         const { reportFileName, fileNameBase, companyName } = params.inputData;
         const resolvedFileNameBase = fileNameBase || path.parse(reportFileName).name;
         const filePath = path.join(config.reportsDir, reportFileName);
-        logger.info({ filePath, resolvedFileNameBase }, "📄 Reading report file...");
+        try { logger.debug({ filePath, resolvedFileNameBase }, "📄 Reading report file..."); } catch {}
         try {
             await fs.access(filePath);
             const reportContent = await fs.readFile(filePath, 'utf-8');
@@ -389,7 +390,7 @@ logger.debug("🤖 [Designer AI] Analyzing report and designing presentation str
                 1) KPI: { "type": "kpi", "items": [{"label": string, "value": string, "icon"?: string}] }
                 2) 比較: { "type": "comparison", "a": {"label": string, "value": string}, "b": {"label": string, "value": string} }
                 3) タイムライン: { "type": "timeline", "steps": [{"label": string}, ...] }
-                4) マトリクス: { "type": "matrix", "axes": { "xLabels": [string,string], "yLabels": [string,string] }, "items"?: [{"x":0|1, "y":0|1, "label": string}] }
+                4) マトリクス: { "type": "matrix", "axes": { "xLabels": [string,string], "yLabels": [string,string] }, "items"?: [{"x":-1..1, "y":-1..1, "z"?:0..1, "label": string}] }
                 5) ファネル: { "type": "funnel", "steps": [{"label": string, "value"?: string}, ...] }
                 6) プロセス: { "type": "process", "steps": [{"label": string}, ...] }
                 7) ロードマップ: { "type": "roadmap", "milestones": [{"label": string, "date"?: string}, ...] }
@@ -471,7 +472,7 @@ logger.debug("🤖 [Designer AI] Analyzing report and designing presentation str
                 let templateConfig: any = undefined;
                 try {
                     const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
-                    try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
+                    try { logger.debug({ tplPath }, 'Loading template JSON'); } catch {}
                     const raw = await fs.readFile(tplPath, 'utf-8');
                     templateConfig = JSON.parse(raw);
                 } catch {}
@@ -485,7 +486,7 @@ logger.debug("🤖 [Designer AI] Analyzing report and designing presentation str
                 let templateConfig: any = undefined;
                 try {
                     const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
-                    try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
+                    try { logger.debug({ tplPath }, 'Loading template JSON'); } catch {}
                     const raw = await fs.readFile(tplPath, 'utf-8');
                     templateConfig = JSON.parse(raw);
                 } catch {}
@@ -503,7 +504,7 @@ logger.debug("🤖 [Designer AI] Analyzing report and designing presentation str
                         let templateConfig: any = undefined;
                         try {
                             const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
-                            try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
+                            try { logger.debug({ tplPath }, 'Loading template JSON'); } catch {}
                             const raw = await fs.readFile(tplPath, 'utf-8');
                             templateConfig = JSON.parse(raw);
                         } catch {}
@@ -518,7 +519,7 @@ logger.debug("🤖 [Designer AI] Analyzing report and designing presentation str
             let templateConfig: any = undefined;
             try {
                 const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
-                try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
+                try { logger.debug({ tplPath }, 'Loading template JSON'); } catch {}
                 const raw = await fs.readFile(tplPath, 'utf-8');
                 templateConfig = JSON.parse(raw);
             } catch {}
@@ -529,7 +530,7 @@ logger.debug("🤖 [Designer AI] Analyzing report and designing presentation str
             let templateConfig: any = undefined;
             try {
                 const tplPath = path.join(config.projectRoot, 'persistent_data', 'presentations', 'templates', safeTemplateName);
-                try { logger.info({ tplPath }, 'Loading template JSON'); } catch {}
+                try { logger.debug({ tplPath }, 'Loading template JSON'); } catch {}
                 const raw = await fs.readFile(tplPath, 'utf-8');
                 templateConfig = JSON.parse(raw);
             } catch {}
@@ -584,7 +585,7 @@ logger.debug("🤖 [Designer AI] Analyzing report and designing presentation str
             return { enrichedSlides: [], fileNameBase, companyName, errorMessage, themeColor1, themeColor2, titleSlideImagePath, templateConfig } as any;
         }
 
-        logger.info("✍️ [Analyst & Speechwriter AIs] Generating content in batch...");
+        try { logger.debug("✍️ [Analyst & Speechwriter AIs] Generating content in batch..."); } catch {}
         const slidesInput = presentationDesign.map((s: any, idx: number) => ({
             idx,
             title: s.title,
@@ -615,7 +616,7 @@ logger.debug("🤖 [Designer AI] Analyzing report and designing presentation str
                 ].filter(Boolean).join(' ');
                 const tplBgSrc: any = ((params.inputData as any).templateConfig?.layouts?.title_slide?.background?.source) || {};
                 const negativePrompt = String(tplBgSrc.negativePrompt || 'text, watermark, logo').trim() || undefined;
-                logger.info({ prompt: composedPrompt, negativePrompt }, 'Title background image (pre-gen): sending prompt to generator');
+                try { logger.debug({ prompt: composedPrompt, negativePrompt }, 'Title background image (pre-gen): sending prompt to generator'); } catch {}
                 const { generateImage } = await import('../../tools/presenter/generateImage');
                 const imageResult = await generateImage({ prompt: composedPrompt, aspectRatio: '16:9', negativePrompt });
                 if (imageResult.success && imageResult.path) return { buffer: undefined as any, imagePath: imageResult.path };
@@ -779,38 +780,28 @@ Shortening and style constraints (Japanese):
             return { finalSlides: [], fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, templateConfig: (params.inputData as any).templateConfig } as any;
         }
         if (!companyName) {
-            logger.info('No companyName provided. Skipping company info enrichment.');
-            // Pass-through: convert enrichedSlides->finalSlides without change
+            try { logger.debug('No companyName provided. Skipping company info enrichment.'); } catch {}
+            // Pass-through: preserve all design fields (e.g., bulletsA/B/C, cards[]) and attach notes/imagePath
             const passthrough = (enrichedSlides || []).map((slide: any) => ({
-                title: slide.design.title,
-                bullets: slide.design.bullets,
+                ...slide.design,
                 imagePath: undefined,
                 notes: slide.speech,
-                layout: slide.design.layout,
-                special_content: slide.design.special_content,
-                visual_recipe: slide.design.visual_recipe,
-                context_for_visual: slide.design.context_for_visual,
-                elements: slide.design.elements,
             }));
             return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, templateConfig: (params.inputData as any).templateConfig } as any;
         }
         const baseDir = path.join(config.projectRoot, 'persistent_data', 'companies_info', companyName);
-        try { await fs.access(baseDir); } catch { logger.info({ baseDir }, 'Company dir not found. Skipping.'); return params.inputData as any; }
+        try { await fs.access(baseDir); } catch { try { logger.debug({ baseDir }, 'Company dir not found. Skipping.'); } catch {} return params.inputData as any; }
         // Prefer about.url
         let urlStr: string | undefined;
         const aboutUrlPath = path.join(baseDir, 'about.url');
-        try { const raw = await fs.readFile(aboutUrlPath, 'utf-8'); urlStr = String(raw||'').trim(); logger.info({ aboutUrlPath, urlStr }, 'Read about.url'); } catch {
-            try { const rawJ = await fs.readFile(path.join(baseDir, 'about.json'), 'utf-8'); const j = JSON.parse(rawJ); if (j && typeof j.url === 'string') urlStr = j.url; logger.info({ urlStr }, 'Read about.json'); } catch {}
+        try { const raw = await fs.readFile(aboutUrlPath, 'utf-8'); urlStr = String(raw||'').trim(); try { logger.debug({ aboutUrlPath, urlStr }, 'Read about.url'); } catch {} } catch {
+            try { const rawJ = await fs.readFile(path.join(baseDir, 'about.json'), 'utf-8'); const j = JSON.parse(rawJ); if (j && typeof j.url === 'string') urlStr = j.url; try { logger.debug({ urlStr }, 'Read about.json'); } catch {} } catch {}
         }
-        if (!urlStr) { logger.info('No about URL found. Skipping.');
+        if (!urlStr) { try { logger.debug('No about URL found. Skipping.'); } catch {}
             const passthrough = (enrichedSlides || []).map((slide: any) => ({
-                title: slide.design.title,
-                bullets: slide.design.bullets,
+                ...slide.design,
                 imagePath: undefined,
                 notes: slide.speech,
-                layout: slide.design.layout,
-                special_content: slide.design.special_content,
-                elements: slide.design.elements,
             }));
             return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, templateConfig: (params.inputData as any).templateConfig } as any; }
         // Scrape
@@ -818,17 +809,13 @@ Shortening and style constraints (Japanese):
         try {
             const res = await contentScrapeTool.execute({ ...params, context: { url: urlStr } });
             if (res.success) scraped = res.data.content;
-            logger.info({ bytes: scraped.length }, 'Scraped company page for AI extraction.');
+            try { logger.debug({ bytes: scraped.length }, 'Scraped company page for AI extraction.'); } catch {}
         } catch (e) { logger.warn({ e }, 'Scrape failed.'); }
         if (!scraped) {
             const passthrough = (enrichedSlides || []).map((slide: any) => ({
-                title: slide.design.title,
-                bullets: slide.design.bullets,
+                ...slide.design,
                 imagePath: undefined,
                 notes: slide.speech,
-                layout: slide.design.layout,
-                special_content: slide.design.special_content,
-                elements: slide.design.elements,
             }));
             return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, templateConfig: (params.inputData as any).templateConfig } as any; }
         // AI extract (structured)
@@ -845,7 +832,7 @@ Shortening and style constraints (Japanese):
             const logoPath = path.join(baseDir, 'logo.png');
             await fs.access(logoPath);
             companyLogoPath = logoPath;
-            logger.info({ logoPath }, 'Detected company logo for PPTX.');
+            try { logger.debug({ logoPath }, 'Detected company logo for PPTX.'); } catch {}
         } catch {}
         const passthrough = (enrichedSlides || []).map((s: any) => ({ title: s.design.title, bullets: s.design.bullets, imagePath: undefined, notes: s.speech, layout: s.design.layout, special_content: s.design.special_content, visual_recipe: s.design.visual_recipe, context_for_visual: s.design.context_for_visual, elements: s.design.elements }));
         const companyOverview = {
@@ -858,7 +845,7 @@ Shortening and style constraints (Japanese):
             contact: typeof parsed?.contact === 'string' ? parsed.contact : undefined,
             vision: typeof parsed?.vision === 'string' ? parsed.vision : undefined,
         };
-        logger.info({ name }, 'Prepared structured company overview.');
+        try { logger.debug({ name }, 'Prepared structured company overview.'); } catch {}
         return { finalSlides: passthrough, fileNameBase, themeColor1, themeColor2, titleSlideImagePath, companyLogoPath, 
             companyCopyright: copyrightLine, companyAbout: '', companyOverview, templateConfig: (params.inputData as any).templateConfig } as any;
     },
@@ -940,7 +927,7 @@ Shortening and style constraints (Japanese):
             return { finalSlides: [], fileNameBase, errorMessage, themeColor1, themeColor2, titleSlideImagePath, templateConfig: (params.inputData as any).templateConfig };
         }
 
-        logger.info("🖼️ [Chart Generator] Creating chart images...");
+        try { logger.debug("🖼️ [Chart Generator] Creating chart images..."); } catch {}
         const finalSlidesPromises = (inputSlides as any[]).map(async (slide, index) => {
             let imagePath: string | undefined = undefined;
             // Attempt to generate a chart if data is present (chartData no longer present here)
@@ -1030,7 +1017,7 @@ Shortening and style constraints (Japanese):
             return { success: false, message: errorMessage } as const;
         }
 
-        logger.info("📦 [Assembler] Creating final PowerPoint file with notes...");
+        try { logger.info("📦 [Assembler] Creating final PowerPoint file with notes..."); } catch {}
         const slidesForPpt = Array.isArray(finalSlides)
           ? finalSlides
           : finalSlides;
