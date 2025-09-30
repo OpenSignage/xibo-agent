@@ -29,7 +29,7 @@ export function register(type: string, renderer: Renderer) {
 
 export async function render(args: Parameters<Renderer>[0]): Promise<boolean> {
   const r = registry[args.type];
-  try { logger.info({ type: args.type }, 'infographicRegistry.render dispatch'); } catch {}
+  try { logger.debug({ type: args.type }, 'infographicRegistry.render dispatch'); } catch {}
   if (!r) return false;
   return await r(args);
 }
@@ -131,20 +131,25 @@ register('bullet', ({ slide, payload, region, templateConfig, helpers }) => {
     try { console.warn('bullet: missing required style numbers in template (default.json should define all)'); } catch {}
     return false;
   }
+  // 可変ラベル幅: progress と同様に最長ラベル長から見積り
+  const estLabelW = computeLabelAreaWidth(items.map((it:any)=>String(it?.label ?? '')), labelFs, 0.08, rw, { min: 0.8, maxRatio: 0.62, fudge: 1.25 });
+  const labelW = estLabelW;
+  const barAreaX = rx + labelW;
+  const barAreaW = Math.max(0.6, rw - labelW);
   items.slice(0, 5).forEach((it: any, i: number) => {
     const y = ry + i * (rowH + 0.12);
-    slide.addText(String(it?.label ?? ''), { x: rx + 0.1, y, w: rw * 0.25 - 0.1, h: rowH, fontSize: labelFs as number, fontFace: 'Noto Sans JP', align: labelAlign, valign: 'middle' });
-    const baseX = rx + rw * 0.30;
+    slide.addText(String(it?.label ?? ''), { x: rx + 0.1, y, w: labelW - 0.1, h: rowH, fontSize: labelFs as number, fontFace: 'Noto Sans JP', align: labelAlign, valign: 'middle' });
+    const baseX = barAreaX;
     // Background bar only if style provided
     const barBg = normalizeHex(style.barBgColor);
     const barBorder = normalizeHex(style.barBorderColor);
     if (barBg || barBorder) {
-      slide.addShape('rect', { x: baseX, y, w: rw * 0.58, h: rowH, fill: barBg ? { color: barBg } : undefined, line: (barBorder ? { color: barBorder, width: Number(style.barBorderWidth) || 0.5 } : { width: 0 }) });
+      slide.addShape('rect', { x: baseX, y, w: barAreaW, h: rowH, fill: barBg ? { color: barBg } : undefined, line: (barBorder ? { color: barBorder, width: Number(style.barBorderWidth) || 0.5 } : { width: 0 }) });
     }
     const val = Number(it?.value ?? 0), tgt = Number(it?.target ?? 0);
     const denom = Math.max(1, Math.max(val, tgt, 100));
-    const valW = Math.max(0, Math.min(rw * 0.58, (rw * 0.58) * (val / denom)));
-    const tgtX = baseX + Math.max(0, Math.min(rw * 0.58, (rw * 0.58) * (tgt / denom)));
+    const valW = Math.max(0, Math.min(barAreaW, barAreaW * (val / denom)));
+    const tgtX = baseX + Math.max(0, Math.min(barAreaW, barAreaW * (tgt / denom)));
     const barHex = helpers.getPaletteColor(i).replace('#','');
     slide.addShape('rect', { x: baseX, y, w: valW, h: rowH, fill: { color: barHex }, line: { color: barHex, width: 0 } });
     const tgtLineColor = normalizeHex(style.targetLineColor);
@@ -159,7 +164,11 @@ register('bullet', ({ slide, payload, region, templateConfig, helpers }) => {
     } else {
       slide.addText(valueLabel, { x: baseX + valW + (valueOutsidePad as number), y, w: valueBoxW as number, h: rowH, fontSize: valueFs as number, fontFace: 'Noto Sans JP', color: '#333333', align: 'left', valign: 'middle' });
     }
-    slide.addText(targetLabel, { x: tgtX - (valueBoxW as number)/2, y: y - (targetOffsetY as number), w: valueBoxW as number, h: 0.2, fontSize: targetFs as number, fontFace: 'Noto Sans JP', color: '#333333', align: 'center', valign: 'bottom' });
+    // Target text INSIDE bar area near the right side of target marker
+    const tgtTextW = Math.max(0.36, valueBoxW as number);
+    // Place inside bar near the right side of target marker, left-aligned
+    const tgtTextX = Math.min(baseX + barAreaW - tgtTextW, Math.max(baseX + 0.04, tgtX + 0.04));
+    slide.addText(targetLabel, { x: tgtTextX, y, w: tgtTextW, h: rowH, fontSize: targetFs as number, fontFace: 'Noto Sans JP', color: '#333333', align: 'left', valign: 'middle' });
   });
   return true;
 });
@@ -285,9 +294,10 @@ register('waterfall', ({ slide, payload, region, templateConfig, helpers }) => {
   return true;
 });
 
-register('venn2', ({ slide, payload, region, templateConfig }) => {
+register('venn2', ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const a = payload?.a, b = payload?.b, overlap = Math.max(0, Number(payload?.overlap ?? 0));
+  const overlapLabel: string | undefined = (typeof payload?.overlapLabel === 'string' && payload.overlapLabel.trim()) ? String(payload.overlapLabel).trim() : undefined;
   const r = Math.min(rw, rh) / 3;
   const cx1 = rx + rw / 2 - r * 0.6; const cx2 = rx + rw / 2 + r * 0.6; const cy = ry + rh / 2;
   const st = getVisualStyle(templateConfig, 'venn2');
@@ -302,17 +312,35 @@ register('venn2', ({ slide, payload, region, templateConfig }) => {
   const bFill = { color: bFillHex, transparency: Math.max(0, Math.min(100, bFillAlpha)) } as any;
   slide.addShape('ellipse', { x: cx1 - r, y: cy - r, w: 2*r, h: 2*r, fill: aFill, line: { color: aLine, width: 1 } });
   slide.addShape('ellipse', { x: cx2 - r, y: cy - r, w: 2*r, h: 2*r, fill: bFill, line: { color: bLine, width: 1 } });
-  if (Number.isFinite(overlap) && overlap > 0 && (st.showOverlapPercent === true)) {
-    const ovFs = Number(st.overlapFontSize);
-    const ovColor = normalizeHex(st.overlapTextColor);
-    if (Number.isFinite(ovFs) && ovColor) {
+  const ovFs = Number(st.overlapFontSize);
+  const ovColor = normalizeHex(st.overlapTextColor);
+  if (Number.isFinite(ovFs) && ovColor) {
+    if (overlapLabel) {
+      // Prefer explicit overlap label when provided
+      slide.addText(overlapLabel, { x: (cx1+cx2)/2 - 0.6, y: cy - 0.18, w: 1.2, h: 0.36, fontSize: ovFs, align: 'center', fontFace: 'Noto Sans JP', color: `#${ovColor}` });
+    } else if (Number.isFinite(overlap) && overlap > 0 && (st.showOverlapPercent === true)) {
       slide.addText(`${overlap}%`, { x: (cx1+cx2)/2 - 0.4, y: cy - 0.15, w: 0.8, h: 0.3, fontSize: ovFs, align: 'center', fontFace: 'Noto Sans JP', color: `#${ovColor}` });
     }
   }
-  const labFs = Number(st.labelFontSize); const labColor = normalizeHex(st.labelTextColor);
-  if (Number.isFinite(labFs) && labColor) {
-    slide.addText(String(a?.label ?? ''), { x: cx1 - r, y: cy + r + 0.05, w: 2*r, h: 0.25, fontSize: labFs, align: 'center', fontFace: 'Noto Sans JP', color: `#${labColor}` });
-    slide.addText(String(b?.label ?? ''), { x: cx2 - r, y: cy + r + 0.05, w: 2*r, h: 0.25, fontSize: labFs, align: 'center', fontFace: 'Noto Sans JP', color: `#${labColor}` });
+  const labFs = Number(st.labelFontSize);
+  if (Number.isFinite(labFs)) {
+    // Compute effective blended background over white for readable auto text color
+    const blendOverWhite = (hex6: string, transparencyPercent: number): string => {
+      const rC = parseInt(hex6.slice(0,2), 16), gC = parseInt(hex6.slice(2,4), 16), bC = parseInt(hex6.slice(4,6), 16);
+      const alpha = 1 - Math.max(0, Math.min(100, transparencyPercent)) / 100; // 0..1 fill opacity
+      const blend = (c:number)=> Math.round(alpha*c + (1-alpha)*255);
+      const toHex2 = (n:number)=> n.toString(16).padStart(2,'0').toUpperCase();
+      return `${toHex2(blend(rC))}${toHex2(blend(gC))}${toHex2(blend(bC))}`;
+    };
+    const effA = blendOverWhite(aFillHex, aFillAlpha);
+    const effB = blendOverWhite(bFillHex, bFillAlpha);
+    const colA = `#${helpers.pickTextColorForBackground(`#${effA}`)}`;
+    const colB = `#${helpers.pickTextColorForBackground(`#${effB}`)}`;
+    // Place labels INSIDE each circle, away from the overlap
+    const aLabelX = cx1 - r * 0.35; const aLabelY = cy - labFs/200; // slight vertical tweak
+    const bLabelX = cx2 + r * 0.35; const bLabelY = cy - labFs/200;
+    slide.addText(String(a?.label ?? ''), { x: aLabelX - 0.6, y: aLabelY - 0.18, w: 1.2, h: 0.36, fontSize: labFs, align: 'center', fontFace: 'Noto Sans JP', color: colA });
+    slide.addText(String(b?.label ?? ''), { x: bLabelX - 0.6, y: bLabelY - 0.18, w: 1.2, h: 0.36, fontSize: labFs, align: 'center', fontFace: 'Noto Sans JP', color: colB });
   }
   return true;
 });
@@ -476,10 +504,16 @@ register('progress', ({ slide, payload, region, templateConfig }) => {
         // If filled is too short, show percent just at boundary
         slide.addText(`${pct}${valSuffix}`, { x: barAreaX + valueW + 0.04, y, w: 0.6, h: barH, fontSize: valFs as number, fontFace: 'Noto Sans JP', align: 'left', valign: 'middle', color: `#${color}` });
       }
-      // 2) Raw value near the achieved boundary (to the right of percent)
-      const valueBoxW = 0.6;
-      const valueBoxX = Math.max(barAreaX + 0.04, barAreaX + valueW - valueBoxW/2);
-      slide.addText(`${Math.round(valueRaw)}`, { x: valueBoxX, y, w: valueBoxW, h: barH, fontSize: valFs as number, fontFace: 'Noto Sans JP', align: 'center', valign: 'middle', color: `#${color}` });
+      // 2) Raw value inside the bar at the right edge (right-aligned), with fallback
+      const inset = 0.06;
+      if (valueW > 0.4) {
+        // Place inside filled area, right-aligned to its right edge
+        const innerW = Math.max(0.36, valueW - inset * 2);
+        slide.addText(`${Math.round(valueRaw)}`, { x: barAreaX + inset, y, w: innerW, h: barH, fontSize: valFs as number, fontFace: 'Noto Sans JP', align: 'right', valign: 'middle', color: `#${color}` });
+      } else {
+        // Too short to fit inside: place just outside to the right
+        slide.addText(`${Math.round(valueRaw)}`, { x: barAreaX + valueW + 0.04, y, w: 0.6, h: barH, fontSize: valFs as number, fontFace: 'Noto Sans JP', align: 'left', valign: 'middle', color: `#${color}` });
+      }
       // 3) Target value at the right end of the target box
       const targetBoxW = 0.8;
       const targetTextX = barAreaX + Math.max(0, targetW - targetBoxW - 0.04);
@@ -597,7 +631,9 @@ register('checklist', ({ slide, payload, region, templateConfig }) => {
   const st = getVisualStyle(templateConfig, 'checklist');
   const gapY = Number(st.gapY);
   const markSize = Number(st.markSize);
-  const fontSize = Number(st.fontSize);
+  const fontSize = Number.isFinite(Number((st as any).fontSize))
+    ? Number((st as any).fontSize)
+    : (Number.isFinite(Number((st as any).fontSizeInitial)) ? Number((st as any).fontSizeInitial) : 18);
   const rowHBase = Number(st.baseRowHeight);
   const markLine = normalizeHex(st.markLineColor);
   const markFill = normalizeHex(st.markFillColor);
@@ -606,8 +642,36 @@ register('checklist', ({ slide, payload, region, templateConfig }) => {
   let y = ry;
   items.slice(0, 10).forEach((it: any) => {
     const h = rowHBase;
-    slide.addShape('rect', { x: rx, y: y + (h - markSize)/2, w: markSize, h: markSize, fill: { color: '#FFFFFF' }, line: { color: `#${markLine}`, width: 1 }, rectRadius: 4 });
-    slide.addShape('chevron', { x: rx + 0.04, y: y + (h - markSize)/2 + 0.06, w: markSize - 0.08, h: markSize - 0.12, fill: { color: `#${markFill}` }, line: { color: `#${markFill}`, width: 0 } } as any);
+    // custom image mark
+    try {
+      // Resolve projectRoot via runtime resolver used elsewhere
+      const path = require('path');
+      const fs = require('fs');
+      const cfgMod = require('../xibo-agent/config');
+      const cfg = (cfgMod && (cfgMod.config || cfgMod.default)) ? (cfgMod.config || cfgMod.default) : undefined;
+      const root = cfg?.projectRoot || process.cwd();
+      const imgPath = path.join(root, 'persistent_data', 'assets', 'images', 'checkBox.png');
+      const exists = (fs && typeof fs.existsSync === 'function') ? fs.existsSync(imgPath) : false;
+      if (exists) {
+        // Preserve original aspect ratio by computing scaled width from template's expected aspect ratio if provided
+        const asp = Number((st as any).markAspect);
+        if (Number.isFinite(asp) && asp > 0) {
+          // asp = originalWidth / originalHeight
+          const targetH = markSize;
+          const targetW = targetH * asp;
+          const boxY = y + (h - targetH) / 2;
+          slide.addImage({ path: imgPath, x: rx, y: boxY, w: targetW, h: targetH });
+        } else {
+          const boxY = y + (h - markSize) / 2;
+          slide.addImage({ path: imgPath, x: rx, y: boxY, w: markSize, h: markSize, sizing: { type: 'contain', w: markSize, h: markSize } as any });
+        }
+      } else {
+        throw new Error('checkBox.png not found');
+      }
+    } catch {
+      slide.addShape('rect', { x: rx, y: y + (h - markSize)/2, w: markSize, h: markSize, fill: { color: '#FFFFFF' }, line: { color: `#${markLine}`, width: 1 }, rectRadius: 4 });
+      slide.addShape('chevron', { x: rx + 0.04, y: y + (h - markSize)/2 + 0.06, w: markSize - 0.08, h: markSize - 0.12, fill: { color: `#${markFill}` }, line: { color: `#${markFill}`, width: 0 } } as any);
+    }
     slide.addText(String(it?.label ?? ''), { x: rx + markSize + 0.2, y, w: rw - (markSize + 0.4), h, fontSize: fontSize as number, fontFace: 'Noto Sans JP', color: `#${textColor}` });
     y += h + gapY;
   });
@@ -628,19 +692,44 @@ register('matrix', ({ slide, payload, region, templateConfig }) => {
   const pointSize = Number(st.pointSize);
   const labelFontSize = Number(st.labelFontSize);
   if (!frameLine || !axisLine || !Number.isFinite(axisFontSize) || !pointFill || !pointLine || !Number.isFinite(pointSize) || !Number.isFinite(labelFontSize)) { try { console.warn('matrix: missing style values'); } catch {} return false; }
-  slide.addShape('rect', { x: rx, y: ry, w: rw, h: rh, fill: { color: '#FFFFFF' }, line: { color: `#${frameLine}`, width: 1 } });
-  slide.addShape('line', { x: rx + rw/2, y: ry, w: 0, h: rh, line: { color: `#${axisLine}`, width: 1 } });
-  slide.addShape('line', { x: rx, y: ry + rh/2, w: rw, h: 0, line: { color: `#${axisLine}`, width: 1 } });
-  slide.addText(String(xL[0] || ''), { x: rx + 0.1, y: ry - 0.3, w: rw/2 - 0.2, h: 0.25, fontSize: axisFontSize, align: 'left', fontFace: 'Noto Sans JP' });
-  slide.addText(String(xL[1] || ''), { x: rx + rw/2 + 0.1, y: ry - 0.3, w: rw/2 - 0.2, h: 0.25, fontSize: axisFontSize, align: 'right', fontFace: 'Noto Sans JP' });
-  slide.addText(String(yL[0] || ''), { x: rx - 0.45, y: ry + 0.1, w: 0.45, h: rh/2 - 0.1, fontSize: axisFontSize, valign: 'top', fontFace: 'Noto Sans JP' });
-  slide.addText(String(yL[1] || ''), { x: rx - 0.45, y: ry + rh/2 + 0.1, w: 0.45, h: rh/2 - 0.1, fontSize: axisFontSize, valign: 'top', fontFace: 'Noto Sans JP' });
+  // Reserve outside bands for axis labels, while keeping everything within region
+  const band = Math.max(0.28, Math.min(0.6, axisFontSize / 18)); // rough mapping pt->in
+  const padTop = band;
+  const padBottom = band;
+  const padLeft = band;
+  const padRight = band;
+  // Grid area inside the four bands
+  const gx = rx + padLeft;
+  const gy = ry + padTop;
+  const gw = Math.max(0.2, rw - padLeft - padRight);
+  const gh = Math.max(0.2, rh - padTop - padBottom);
+  // Draw grid frame and axes inside grid area
+  slide.addShape('rect', { x: gx, y: gy, w: gw, h: gh, fill: { color: '#FFFFFF' }, line: { color: `#${frameLine}`, width: 1 } });
+  slide.addShape('line', { x: gx + gw/2, y: gy, w: 0, h: gh, line: { color: `#${axisLine}`, width: 1 } });
+  slide.addShape('line', { x: gx, y: gy + gh/2, w: gw, h: 0, line: { color: `#${axisLine}`, width: 1 } });
+  // Axis labels placed OUTSIDE the grid but INSIDE the overall region
+  // y-axis labels: top center (yL[0]), bottom center (yL[1])
+  slide.addText(String(yL[0] || ''), { x: gx, y: ry + Math.max(0, (padTop - 0.3) / 2), w: gw, h: padTop, fontSize: axisFontSize, align: 'center', valign: 'top', fontFace: 'Noto Sans JP' });
+  slide.addText(String(yL[1] || ''), { x: gx, y: gy + gh + Math.max(0, (padBottom - 0.3) / 2), w: gw, h: padBottom, fontSize: axisFontSize, align: 'center', valign: 'bottom', fontFace: 'Noto Sans JP' });
+  // x-axis labels: left middle (xL[0]), right middle (xL[1])
+  slide.addText(String(xL[0] || ''), { x: rx + Math.max(0, (padLeft - 0.6) / 2), y: gy, w: padLeft, h: gh, fontSize: axisFontSize, align: 'left', valign: 'middle', fontFace: 'Noto Sans JP' });
+  slide.addText(String(xL[1] || ''), { x: gx + gw + Math.max(0, (padRight - 0.6) / 2), y: gy, w: padRight, h: gh, fontSize: axisFontSize, align: 'right', valign: 'middle', fontFace: 'Noto Sans JP' });
+  const clamp = (v:number, min:number, max:number)=>Math.min(max, Math.max(min, v));
+  const sizeMin = pointSize * 0.6;
+  const sizeMax = pointSize * 1.6;
+  const toPx = (nz:number, a:number, b:number)=> a + nz * (b - a);
+  const norm = (v:number)=> (v + 1) / 2; // [-1,1] -> [0,1]
   const items = Array.isArray(payload?.items) ? payload.items : [];
-  items.slice(0, 6).forEach((it: any) => {
-    const cx = rx + (it?.x === 1 ? 3*rw/4 : rw/4);
-    const cy = ry + (it?.y === 1 ? 3*rh/4 : rh/4);
-    slide.addShape('ellipse', { x: cx - (pointSize/2), y: cy - (pointSize/2), w: pointSize, h: pointSize, fill: { color: `#${pointFill}` }, line: { color: `#${pointLine}`, width: 0.75 } });
-    slide.addText(String(it?.label ?? ''), { x: cx + 0.12, y: cy - 0.12, w: Math.min(1.8, rw/2 - 0.3), h: 0.3, fontSize: labelFontSize, fontFace: 'Noto Sans JP' });
+  items.slice(0, 12).forEach((it: any) => {
+    const nx = clamp(Number(it?.x ?? 0), -1, 1);
+    const ny = clamp(Number(it?.y ?? 0), -1, 1);
+    const nzRaw = Number(it?.z);
+    const nz = Number.isFinite(nzRaw) ? clamp(nzRaw, 0, 1) : NaN;
+    const cx = gx + norm(nx) * gw;
+    const cy = gy + norm(ny) * gh;
+    const pSize = Number.isFinite(nz) ? toPx(nz, sizeMin, sizeMax) : pointSize;
+    slide.addShape('ellipse', { x: cx - (pSize/2), y: cy - (pSize/2), w: pSize, h: pSize, fill: { color: `#${pointFill}` }, line: { color: `#${pointLine}`, width: 0.75 } });
+    slide.addText(String(it?.label ?? ''), { x: cx + 0.12, y: cy - 0.12, w: Math.min(1.8, gw/2 - 0.3), h: 0.3, fontSize: labelFontSize, fontFace: 'Noto Sans JP' });
   });
   return true;
 });
@@ -723,9 +812,9 @@ register('scatter_chart', async ({ slide, payload, region, templateConfig }) => 
   const labels: string[] = Array.isArray(payload?.labels) ? payload.labels : (Array.isArray(payload?.items) ? payload.items.map((_: any, i:number)=>`P${i+1}`) : []);
   const values: any[] = Array.isArray(payload?.values) ? payload.values : (Array.isArray(payload?.items) ? payload.items : []);
   const chartsStyle = (templateConfig?.visualStyles?.scatter_chart) || {};
-  try { logger.info({ labelsCount: labels.length, valuesPreview: Array.isArray(values) ? values.slice(0, 5) : null }, 'scatter: before render'); } catch {}
+  try { logger.debug({ labelsCount: labels.length, valuesPreview: Array.isArray(values) ? values.slice(0, 5) : null }, 'scatter: before render'); } catch {}
   const img = await renderChartImage('scatter', labels, values, payload?.title, chartsStyle);
-  if (!img) { try { logger.info('scatter: renderChartImage returned null'); } catch {} }
+  if (!img) { /* no-op: scatter fallback disabled to reduce noise */ }
   if (img) addImageContain(slide, img, region, 'scatter', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
@@ -798,10 +887,24 @@ register('comparison', ({ slide, payload, region, templateConfig, helpers }) => 
   const rawLabelBg: any = (st as any).labelBackground ?? (st as any).labelBg;
   if (!Number.isFinite(labelFs) || !Number.isFinite(valueFs) || !Number.isFinite(gapX) || !Number.isFinite(padX) || !Number.isFinite(padY) || !leftFill || !rightFill || !boxLine) { try { console.warn('comparison: missing style values'); } catch {} return false; }
   const boxW = (rw - gapX)/2; const boxH = rh;
+  // card underlay + pastel fill + solid border (match KPI)
+  const fallbackBarAlpha = Number((templateConfig?.visualStyles?.bar_chart?.alpha?.barFill)) || 0.2;
+  const kpiAlpha = Number((templateConfig?.visualStyles?.kpi as any)?.alpha?.barFill);
+  const cmpAlpha = Number((st as any)?.alpha?.barFill);
+  const fillAlpha = Number.isFinite(cmpAlpha)
+    ? (cmpAlpha as number)
+    : (Number.isFinite(kpiAlpha) ? (kpiAlpha as number) : fallbackBarAlpha);
+  const toTransp = (a:number) => Math.round((1 - Math.max(0, Math.min(1, a))) * 100);
   // Left
-  slide.addShape('rect', { x: rx, y: ry, w: boxW, h: boxH, fill: { color: `#${leftFill}` }, line: { color: `#${boxLine}`, width: 0.5 } });
+  slide.addShape('rect', { x: rx, y: ry, w: boxW, h: boxH, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 }, rectRadius: 6 });
+  slide.addShape('rect', { x: rx, y: ry, w: boxW, h: boxH, fill: { color: `#${leftFill}`, transparency: toTransp(fillAlpha) }, line: { color: `#${leftFill}`, width: 2 }, rectRadius: 6 });
   const labelColorLeft = labelColorTpl ? `#${labelColorTpl}` : (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(`#${leftFill}`) : '#FFFFFF');
-  const valueColorLeft = (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(`#${leftFill}`) : '#FFFFFF');
+  // Compute effective background (semi-transparent fill over white) for value text contrast
+  const leftR = parseInt(leftFill.slice(0,2),16), leftG = parseInt(leftFill.slice(2,4),16), leftB = parseInt(leftFill.slice(4,6),16);
+  const aLeft = Math.max(0, Math.min(1, fillAlpha));
+  const blendLeft = (c:number) => Math.round(aLeft*c + (1-aLeft)*255);
+  const effLeftHex = `#${[blendLeft(leftR), blendLeft(leftG), blendLeft(leftB)].map(n=>n.toString(16).padStart(2,'0').toUpperCase()).join('')}`;
+  const valueColorLeft = (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(effLeftHex) : '#111111');
   if (rawLabelBg && Number.isFinite(labelHeight)) {
     const parsed = parseColorWithAlpha(String(rawLabelBg));
     if (parsed) {
@@ -817,9 +920,14 @@ register('comparison', ({ slide, payload, region, templateConfig, helpers }) => 
   const valueOffsetY = Number((st as any).valueOffsetY);
   slide.addText(String(a?.value ?? ''), { x: rx + padX, y: ry + padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36) + (Number.isFinite(valueOffsetY) ? valueOffsetY : 0), w: boxW - padX*2, h: boxH - (padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36)), fontSize: valueFs, color: valueColorLeft, fontFace: 'Noto Sans JP', align: 'center', valign: 'top' });
   // Right
-  slide.addShape('rect', { x: rx + boxW + gapX, y: ry, w: boxW, h: boxH, fill: { color: `#${rightFill}` }, line: { color: `#${boxLine}`, width: 0.5 } });
+  slide.addShape('rect', { x: rx + boxW + gapX, y: ry, w: boxW, h: boxH, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 }, rectRadius: 6 });
+  slide.addShape('rect', { x: rx + boxW + gapX, y: ry, w: boxW, h: boxH, fill: { color: `#${rightFill}`, transparency: toTransp(fillAlpha) }, line: { color: `#${rightFill}`, width: 2 }, rectRadius: 6 });
   const labelColorRight = labelColorTpl ? `#${labelColorTpl}` : (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(`#${rightFill}`) : '#FFFFFF');
-  const valueColorRight = (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(`#${rightFill}`) : '#FFFFFF');
+  const rightR = parseInt(rightFill.slice(0,2),16), rightG = parseInt(rightFill.slice(2,4),16), rightB = parseInt(rightFill.slice(4,6),16);
+  const aRight = Math.max(0, Math.min(1, fillAlpha));
+  const blendRight = (c:number) => Math.round(aRight*c + (1-aRight)*255);
+  const effRightHex = `#${[blendRight(rightR), blendRight(rightG), blendRight(rightB)].map(n=>n.toString(16).padStart(2,'0').toUpperCase()).join('')}`;
+  const valueColorRight = (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(effRightHex) : '#111111');
   if (rawLabelBg && Number.isFinite(labelHeight)) {
     const parsedR = parseColorWithAlpha(String(rawLabelBg));
     if (parsedR) {
@@ -836,7 +944,7 @@ register('comparison', ({ slide, payload, region, templateConfig, helpers }) => 
 });
 
 // Callouts (4 boxes)
-register('callouts', async ({ slide, payload, region, templateConfig }) => {
+register('callouts', async ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const items = Array.isArray(payload?.items) ? payload.items : [];
   const st = getVisualStyle(templateConfig, 'callouts');
@@ -846,10 +954,38 @@ register('callouts', async ({ slide, payload, region, templateConfig }) => {
   const line = normalizeHex(st.boxLineColor);
   const labelFs = Number(st.labelFontSize); const valueFs = Number(st.valueFontSize);
   const labelColor = normalizeHex(st.labelColor); const valueColor = normalizeHex(st.valueColor);
-  if (!bg || !line || !Number.isFinite(labelFs) || !Number.isFinite(valueFs) || !labelColor || !valueColor || !Number.isFinite(iconSize) || !Number.isFinite(iconPad)) { try { console.warn('callouts: missing style values'); } catch {} return false; }
-  for (let i = 0; i < Math.min(4, items.length); i++) {
-    const it: any = items[i] || {}; const x = rx + (i % 2) * (rw/2) + 0.1; const y = ry + Math.floor(i/2) * (rh/2) + 0.1; const boxW = rw/2 - 0.2; const boxH = rh/2 - 0.2;
-    slide.addShape('rect', { x, y, w: boxW, h: boxH, fill: { color: `#${bg}` }, line: { color: `#${line}`, width: 0.5 } });
+  const cornerRadius = Number(st.cornerRadius) || 10;
+  const borderWidth = Number(st.borderWidth) || 3;
+  const accentHeightRatio = Number(st.accentHeightRatio) || 0.28;
+  const accentAlpha = Math.max(0, Math.min(1, Number(st.accentAlpha) || 0.25));
+  // connectors are no longer used per user request
+  if (!bg || !line || !Number.isFinite(labelFs) || !Number.isFinite(valueFs) || !Number.isFinite(iconSize) || !Number.isFinite(iconPad)) { try { console.warn('callouts: missing style values'); } catch {} return false; }
+  const count = Math.max(0, items.length);
+  if (count === 0) return true;
+  // decide grid (columns x rows) dynamically
+  let columns = 1; let rows = 1;
+  if (count <= 2) { columns = count; rows = 1; }
+  else if (count <= 4) { columns = 2; rows = Math.ceil(count / 2); }
+  else { columns = 3; rows = Math.ceil(count / 3); }
+  const outer = 0.08; const gapX = 0.16; const gapY = 0.16;
+  const boxW = Math.max(0.6, (rw - outer * 2 - gapX * (columns - 1)) / columns);
+  const boxH = Math.max(0.6, (rh - outer * 2 - gapY * (rows - 1)) / rows);
+  for (let i = 0; i < count; i++) {
+    const it: any = items[i] || {};
+    const row = Math.floor(i / columns); const col = i % columns;
+    const x = rx + outer + col * (boxW + gapX);
+    const y = ry + outer + row * (boxH + gapY);
+    // Resolve per-card accent/base color from palette (used for both border and triangle)
+    const baseHex = helpers.getPaletteColor(i).replace('#','');
+    // White card with rounded border; border uses same color as triangle
+    slide.addShape('rect', { x, y, w: boxW, h: boxH, fill: { color: `#${bg}` }, line: { color: `#${baseHex}`, width: borderWidth }, rectRadius: cornerRadius });
+    // Accent isosceles triangle at bottom-right within a square (equilateral-ish by size)
+    const transparency = Math.round((1 - accentAlpha) * 100);
+    // Right triangle (直角三角形) at bottom-right corner: legs along bottom and right edges
+    const accSize = Math.max(0.2, Math.min(boxW, boxH) * accentHeightRatio);
+    const triX = x + boxW - accSize;
+    const triY = y + boxH - accSize;
+    slide.addShape('rtTriangle', { x: triX, y: triY, w: accSize, h: accSize, fill: { color: `#${baseHex}`, transparency }, line: { color: `#${baseHex}`, width: 2 }, flipH: true, flipV: false } as any);
     let iconPath: string | null = null;
     if (iconEnabled) {
       const rawIcon = (it?.iconPath || it?.icon || it?.iconName || '').toString().trim();
@@ -859,20 +995,66 @@ register('callouts', async ({ slide, payload, region, templateConfig }) => {
         } else {
           try {
             const { generateImage } = await import('./generateImage');
-            const prompt = `${rawIcon}, minimal line icon, monochrome`;
+            const prompt = `${rawIcon}, minimal line icon, monochrome, transparent background`;
             const out = await generateImage({ prompt, aspectRatio: '1:1' });
             if (out && out.success && out.path) iconPath = out.path;
           } catch {}
         }
       }
     }
-    const textLeftX = iconPath ? (x + iconPad + iconSize + iconPad) : (x + 0.1);
-    const textWidth = iconPath ? (boxW - (textLeftX - x) - 0.1) : (boxW - 0.2);
+    // Attempt to enforce transparency for white backgrounds after generation
+    const ensureTransparent = async (p: string | null): Promise<string | null> => {
+      if (!p) return p;
+      try {
+        const sharp = (await import('sharp')).default;
+        const img = sharp(p).png();
+        // Replace near-white pixels with transparency using chroma key-like approach
+        const { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
+        const out = Buffer.from(data);
+        for (let i = 0; i < out.length; i += info.channels) {
+          const r = out[i], g = out[i+1], b = out[i+2];
+          const aIdx = i + (info.channels - 1);
+          const nearWhite = r > 245 && g > 245 && b > 245;
+          if (nearWhite) out[aIdx] = 0; // set alpha to 0
+        }
+        const outPath = p.replace(/\.(jpg|jpeg)$/i, '.png');
+        await sharp(out, { raw: { width: info.width, height: info.height, channels: info.channels } }).png().toFile(outPath);
+        return outPath;
+      } catch { return p; }
+    };
     if (iconPath) {
-      slide.addImage({ path: iconPath, x: x + iconPad, y: y + iconPad, w: Math.min(iconSize, boxW*0.3), h: Math.min(iconSize, boxH*0.5), sizing: { type: 'contain', w: iconSize, h: iconSize } as any });
+      try { iconPath = await ensureTransparent(iconPath); } catch {}
     }
-    slide.addText(String(it?.label ?? ''), { x: textLeftX, y: y + 0.1, w: textWidth, h: 0.4, fontSize: labelFs, bold: true, fontFace: 'Noto Sans JP', color: `#${labelColor}` });
-    if (it?.value) slide.addText(String(it.value), { x: textLeftX, y: y + 0.55, w: textWidth, h: 0.4, fontSize: valueFs, fontFace: 'Noto Sans JP', color: `#${valueColor}` });
+    // Title centered at top
+    const labelColorFinal = ((): string => {
+      if (typeof (st as any)?.labelColor === 'string' && String((st as any).labelColor).trim().toLowerCase() !== 'auto') {
+        const hex = normalizeHex((st as any).labelColor);
+        if (hex) return `#${hex}`;
+      }
+      const autoTxtOnCard = (helpers && helpers.pickTextColorForBackground) ? helpers.pickTextColorForBackground(`#${bg}`) : '#111111';
+      return autoTxtOnCard;
+    })();
+    slide.addText(String(it?.label ?? ''), { x: x + 0.16, y: y + 0.18, w: boxW - 0.32, h: 0.4, fontSize: labelFs, bold: true, fontFace: 'Noto Sans JP', color: labelColorFinal, align: 'center' });
+    // Icon inside the right triangle near centroid
+    if (iconPath) {
+      const iconBox = accSize * 0.5;
+      const cx = triX + (2 * accSize) / 3; // centroid x
+      const cy = triY + (2 * accSize) / 3; // centroid y
+      const iconX = cx - iconBox / 2;
+      const iconY = cy - iconBox / 2;
+      slide.addImage({ path: iconPath, x: iconX, y: iconY, w: iconBox, h: iconBox, sizing: { type: 'contain', w: iconBox, h: iconBox } as any });
+    }
+    // Body text area (full width minus margins). Use `value` for consistency across visuals.
+    const bodyText = String((it as any)?.value ?? '');
+    const valueColorFinal = ((): string => {
+      if (typeof (st as any)?.valueColor === 'string' && String((st as any).valueColor).trim().toLowerCase() !== 'auto') {
+        const hex = normalizeHex((st as any).valueColor);
+        if (hex) return `#${hex}`;
+      }
+      const autoTxtOnCard = (helpers && helpers.pickTextColorForBackground) ? helpers.pickTextColorForBackground(`#${bg}`) : '#111111';
+      return autoTxtOnCard;
+    })();
+    slide.addText(bodyText, { x: x + 0.22, y: y + 0.58, w: boxW - 0.44, h: boxH - 1.1, fontSize: valueFs, fontFace: 'Noto Sans JP', color: valueColorFinal, align: 'left', valign: 'top' });
   }
   return true;
 });
@@ -881,7 +1063,7 @@ register('callouts', async ({ slide, payload, region, templateConfig }) => {
 register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const items = Array.isArray(payload?.items) ? payload.items : [];
-  const count = Math.min(4, items.length);
+  const count = Math.min(6, items.length);
   if (!count) return true;
   const columns = (count <= 3) ? 1 : 2; const rows = Math.ceil(count / columns);
   const st = getVisualStyle(templateConfig, 'kpi');
@@ -896,6 +1078,10 @@ register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
   const labelHeight = Number(st.labelHeight);
   const valueTopOffset = Number(st.valueTopOffset);
   const valueBottomPad = Number(st.valueBottomPad);
+  // Pastel fill alpha (align with bar_chart alpha.barFill)
+  const fallbackBarAlpha = Number((templateConfig?.visualStyles?.bar_chart?.alpha?.barFill)) || 0.2;
+  const barAlpha = Number((st as any)?.alpha?.barFill);
+  const fillAlpha = Number.isFinite(barAlpha) ? (barAlpha as number) : fallbackBarAlpha;
   // Icon configuration (optional)
   const iconCfg: any = st.icon || {};
   const iconEnabled = iconCfg.enabled === true;
@@ -910,11 +1096,21 @@ register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
   for (let idx = 0; idx < count; idx++) {
     const it = items[idx] || {}; const row = Math.floor(idx / columns); const col = idx % columns;
     const x = rx + outerMargin + col * (cardW + gap); const y = ry + outerMargin + row * (cardH + gap);
-    const boxColor = helpers.getPaletteColor(idx).replace('#','');
-    slide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: boxColor }, line: { color: 'FFFFFF', width: 0.5 }, rectRadius: 6 });
+    // Generate pastel fill and solid border like bar_chart
+    const baseHex = helpers.getPaletteColor(idx).replace('#','');
+    const transparency = Math.round((1 - Math.max(0, Math.min(1, fillAlpha))) * 100);
+    // 1) White underlay to avoid background mixing
+    slide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 }, rectRadius: 6 });
+    // 2) Actual pastel card on top
+    slide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: baseHex, transparency }, line: { color: `#${baseHex}`, width: 2 }, rectRadius: 6 });
     const txtX = x + innerPadX; const txtW = Math.max(0.5, cardW - innerPadX * 2);
     const label = String(it?.label ?? ''); const value = String(it?.value ?? '');
-    const autoTxt = helpers.pickTextColorForBackground(`#${boxColor}`);
+    // Compute effective background color over white for contrast
+    const r = parseInt(baseHex.slice(0,2),16), g = parseInt(baseHex.slice(2,4),16), b = parseInt(baseHex.slice(4,6),16);
+    const a = Math.max(0, Math.min(1, fillAlpha));
+    const blend = (c:number) => Math.round(a*c + (1-a)*255);
+    const effHex = [blend(r), blend(g), blend(b)].map(n=>n.toString(16).padStart(2,'0').toUpperCase()).join('');
+    const autoTxt = helpers.pickTextColorForBackground(`#${effHex}`);
     // Optional icon rendering
     let iconRendered = false;
     if (iconEnabled && (it?.icon || it?.iconPath || it?.iconName)) {
@@ -1020,33 +1216,47 @@ register('funnel', ({ slide, payload, region, templateConfig, helpers }) => {
   const segGap = 0.04; const segH = (rh - segGap * (n - 1)) / n;
   // Value scaling
   // maxVal already computed above
-  // Determine base color (single hue), fall back to theme primary then palette[0]
+  // Determine base color (single hue), and top blend color (for bright top)
   const stBase = normalizeHex((st as any)?.baseColor);
   const themePrimary = normalizeHex((templateConfig?.tokens?.primary));
   const baseHex = (stBase || themePrimary || helpers.getPaletteColor(0).replace('#','')) as string;
+  const topBlendHex = normalizeHex((st as any)?.gradientTopColor) || 'FFFFFF';
   // Shade function: make darker as index increases
-  const shade = (hex: string, ratio: number): string => {
-    const h = (hex || '2E86DE').replace('#','');
-    const r = Math.min(255, Math.max(0, Math.round(parseInt(h.slice(0,2) || '00', 16) * ratio)));
-    const g = Math.min(255, Math.max(0, Math.round(parseInt(h.slice(2,4) || '00', 16) * ratio)));
-    const b = Math.min(255, Math.max(0, Math.round(parseInt(h.slice(4,6) || '00', 16) * ratio)));
-    const toHex = (n:number)=>n.toString(16).padStart(2,'0').toUpperCase();
-    return `${toHex(r)}${toHex(g)}${toHex(b)}`;
+  // Blend base toward white (or specified top color) for brighter top layers
+  const hexToRgb = (h: string) => ({ r: parseInt(h.slice(0,2),16), g: parseInt(h.slice(2,4),16), b: parseInt(h.slice(4,6),16) });
+  const toHex2 = (n:number)=>n.toString(16).padStart(2,'0').toUpperCase();
+  const blendToward = (fromHex: string, toHex: string, t: number): string => {
+    const a = hexToRgb(fromHex); const b = hexToRgb(toHex);
+    const r = Math.round(a.r + (b.r - a.r) * t);
+    const g = Math.round(a.g + (b.g - a.g) * t);
+    const bl = Math.round(a.b + (b.b - a.b) * t);
+    return `${toHex2(r)}${toHex2(g)}${toHex2(bl)}`;
   };
+  // Resolve alpha for fill from template (semi-transparent fill, opaque border)
+  const fillAlpha = (() => {
+    const a = Number((st as any)?.alpha?.barFill);
+    return Number.isFinite(a) ? Math.max(0, Math.min(1, a)) : 0.2;
+  })();
+  const toTransp = (a:number) => Math.round((1 - a) * 100);
+  // Gradient shaping controls
+  const minR = (() => { const r = Number((st as any)?.gradientMinRatio); return (r > 0 && r < 1) ? r : 0.1; })();
+  const maxR = (() => { const r = Number((st as any)?.gradientMaxRatio); return (r > 0 && r <= 1) ? r : 1.0; })();
+  const gamma = (() => { const g = Number((st as any)?.gradientGamma); return Number.isFinite(g) && g > 0 ? g : 1.0; })();
   for (let i = 0; i < n; i++) {
     const it: any = steps[i] || {};
     const y = ry + i * (segH + segGap);
     const v = Math.max(0, parseNumeric(it?.value ?? 0));
     const w = Math.max(0.2, chartW * (v / maxVal));
     const x = chartX + (chartW - w) / 2;
-    // Top is lighter, bottom is darker → ratio decreases from ~1.0 to ~0.6
-    const t = n <= 1 ? 1 : (1 - i / Math.max(1, n - 1));
-    const minR = (() => { const r = Number((st as any)?.gradientMinRatio); return (r > 0 && r < 1) ? r : 0.3; })();
-    const ratio = minR + (1 - minR) * t; // stronger gradient: [minR,1.0]
-    const col = shade(baseHex, ratio);
+    // Top is lighter, bottom is darker
+    const tLin = n <= 1 ? 1 : (1 - i / Math.max(1, n - 1));
+    const t = Math.pow(tLin, gamma);
+    const ratio = minR + (maxR - minR) * t; // range within 0..1
+    // First brighten toward top color using (1 - ratio), then ensure base tone influence by ratio
+    const col = blendToward(baseHex, topBlendHex, 1 - ratio);
     const txt = helpers.pickTextColorForBackground(col);
     // band trapezoid (centered), flipped vertically so top is wider than bottom
-    slide.addShape('trapezoid', { x, y, w, h: segH, fill: { color: col }, line: { color: 'FFFFFF', width: 0.8 }, flipV: true } as any);
+    slide.addShape('trapezoid', { x, y, w, h: segH, fill: { color: col, transparency: toTransp(fillAlpha) }, line: { color: `#${col}`, width: 2 }, flipV: true } as any);
     // value centered (larger) - auto contrast (black/white)
     slide.addText(String(v), { x, y, w, h: segH, fontSize: valueFs, fontFace: 'Noto Sans JP', align: 'center', valign: 'middle', color: `#${txt}` });
     // y-axis label at left（autoFitで折返し回避） - force black and larger
@@ -1066,8 +1276,8 @@ register('timeline', ({ slide, payload, region, templateConfig }) => {
   const pointLine = normalizeHex(st.pointLine);
   const pointSize = Number(st.pointSize);
   const labelFs = Number(st.labelFontSize);
-  const labelColor = normalizeHex(st.labelColor);
-  if (!axisLineColor || !Number.isFinite(axisLineWidth) || !pointFill || !pointLine || !Number.isFinite(pointSize) || !Number.isFinite(labelFs) || !labelColor) {
+  const labelColorSpec = (st as any)?.labelColor;
+  if (!axisLineColor || !Number.isFinite(axisLineWidth) || !pointFill || !pointLine || !Number.isFinite(pointSize) || !Number.isFinite(labelFs)) {
     try { console.warn('timeline: missing style values'); } catch {}
     return false;
   }
@@ -1075,7 +1285,14 @@ register('timeline', ({ slide, payload, region, templateConfig }) => {
   steps.slice(0, 6).forEach((s: any, i: number) => {
     const cx = rx + (i * (rw / Math.max(1, steps.length - 1)));
     slide.addShape('ellipse', { x: cx - (pointSize/2), y: ry + rh/2 - (pointSize/2), w: pointSize, h: pointSize, fill: { color: `#${pointFill}` }, line: { color: `#${pointLine}`, width: 0.8 } });
-    slide.addText(String(s?.label ?? ''), { x: Math.max(rx, cx - 0.9), y: ry + rh/2 + 0.18, w: Math.min(1.8, rw), h: 0.32, fontSize: labelFs, align: 'center', fontFace: 'Noto Sans JP', color: `#${labelColor}` });
+    const finalColor = ((): string => {
+      if (typeof labelColorSpec === 'string' && labelColorSpec.trim().toLowerCase() !== 'auto') {
+        const hex = normalizeHex(labelColorSpec);
+        if (hex) return `#${hex}`;
+      }
+      return '#111111';
+    })();
+    slide.addText(String(s?.label ?? ''), { x: Math.max(rx, cx - 0.9), y: ry + rh/2 + 0.18, w: Math.min(1.8, rw), h: 0.32, fontSize: labelFs, align: 'center', fontFace: 'Noto Sans JP', color: finalColor });
   });
   return true;
 });
@@ -1091,16 +1308,23 @@ register('process', ({ slide, payload, region, templateConfig, helpers }) => {
   const stepHMax = Number(st.stepHeightMax);
   const startYRatio = Number(st.startYRatio);
   const labelFs = Number(st.labelFontSize);
-  const labelColor = normalizeHex(st.labelColor);
+  const labelColorSpec = (st as any)?.labelColor;
   const arrowColor = normalizeHex(st.arrowColor);
-  if (![maxSteps, gap, stepWMax, stepHMax, startYRatio, labelFs].every(Number.isFinite) || !labelColor || !arrowColor) { try { console.warn('process: missing style values'); } catch {} return false; }
+  if (![maxSteps, gap, stepWMax, stepHMax, startYRatio, labelFs].every(Number.isFinite) || !arrowColor) { try { console.warn('process: missing style values'); } catch {} return false; }
   const totalGap = gap * Math.max(0, maxSteps - 1);
   const stepW = Math.min(stepWMax, (rw - totalGap) / Math.max(1, maxSteps));
   const stepH = Math.min(rh * 0.6, stepHMax); const startY = ry + rh * startYRatio;
   for (let i = 0; i < Math.min(maxSteps, steps.length || maxSteps); i++) {
     const x = rx + i * (stepW + gap); const col = helpers.getPaletteColor(i).replace('#','');
     slide.addShape('rect', { x, y: startY, w: stepW, h: stepH, fill: { color: col }, line: { color: '#FFFFFF', width: 0.5 } });
-    slide.addText(String(steps[i]?.label ?? ''), { x: x + 0.08, y: startY + 0.14, w: stepW - 0.16, h: stepH - 0.28, fontSize: labelFs, color: `#${labelColor}`, align: 'center', valign: 'middle', fontFace: 'Noto Sans JP' });
+    const procLabelColor = ((): string => {
+      if (typeof labelColorSpec === 'string' && labelColorSpec.trim().toLowerCase() !== 'auto') {
+        const hex = normalizeHex(labelColorSpec);
+        if (hex) return `#${hex}`;
+      }
+      return '#111111';
+    })();
+    slide.addText(String(steps[i]?.label ?? ''), { x: x + 0.08, y: startY + 0.14, w: stepW - 0.16, h: stepH - 0.28, fontSize: labelFs, color: procLabelColor, align: 'center', valign: 'middle', fontFace: 'Noto Sans JP' });
     if (i < Math.min(maxSteps, steps.length || maxSteps) - 1) slide.addShape('chevron', { x: x + stepW + (gap - 0.4)/2, y: startY + (stepH - 0.4)/2, w: 0.4, h: 0.4, fill: { color: `#${arrowColor}` }, line: { color: `#${arrowColor}`, width: 0 } } as any);
   }
   return true;
@@ -1109,63 +1333,288 @@ register('process', ({ slide, payload, region, templateConfig, helpers }) => {
 // Roadmap
 register('roadmap', ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
-  const milestones = Array.isArray(payload?.milestones) ? payload.milestones : [];
+  const milestones = (Array.isArray(payload?.milestones) ? payload.milestones : []).slice(0, 8);
+  if (!milestones.length) return true;
   const st = getVisualStyle(templateConfig, 'roadmap');
-  const axisLineColor = normalizeHex(st.axisLineColor);
-  const axisLineWidth = Number(st.axisLineWidth);
-  const pointLine = normalizeHex(st.pointLine);
-  const labelFs = Number(st.labelFontSize);
-  const dateFs = Number(st.dateFontSize);
-  const dateColor = normalizeHex(st.dateColor);
-  if (!axisLineColor || !Number.isFinite(axisLineWidth) || !pointLine || !Number.isFinite(labelFs) || !Number.isFinite(dateFs) || !dateColor) { try { console.warn('roadmap: missing style values'); } catch {} return false; }
-  slide.addShape('line', { x: rx, y: ry + rh/2, w: rw, h: 0, line: { color: `#${axisLineColor}`, width: axisLineWidth } });
-  milestones.slice(0, 6).forEach((m: any, i: number) => {
-    const cx = rx + (i * (rw / Math.max(1, milestones.length - 1)));
-    const col = helpers.getPaletteColor(i).replace('#','');
-    slide.addShape('ellipse', { x: cx - 0.08, y: ry + rh/2 - 0.08, w: 0.16, h: 0.16, fill: { color: col }, line: { color: `#${pointLine}`, width: 0.8 } });
-    const labelW = 1.6; const dateW = 1.2; const labelX = Math.max(rx, Math.min(rx + rw - labelW, cx - labelW/2)); const dateX = Math.max(rx, Math.min(rx + rw - dateW, cx - dateW/2));
-    slide.addText(String(m?.label ?? ''), { x: labelX, y: ry + rh/2 + 0.18, w: labelW, h: 0.36, fontSize: labelFs, align: 'center', fontFace: 'Noto Sans JP' });
-    if (m?.date) slide.addText(String(m.date), { x: dateX, y: ry + rh/2 + 0.56, w: dateW, h: 0.25, fontSize: dateFs, align: 'center', color: `#${dateColor}`, fontFace: 'Noto Sans JP' });
-  });
+  const labelFs = Number(st.labelFontSize) || 16;
+  const subFs = Number(st.dateFontSize) || 11;
+  const gap = Number.isFinite(Number((st as any)?.gapX)) ? Number((st as any)?.gapX) : 0.0; // in
+  const outerPad = 0.10; // fixed outer padding
+  const chevronAlpha = (() => { const a = Number((st as any)?.alpha?.barFill); return Number.isFinite(a) ? Math.max(0, Math.min(1, a)) : 0.2; })();
+  const toTransp = (a:number) => Math.round((1 - a) * 100);
+  const boxH = Math.max(0.4, rh * 0.60);
+  const y = ry + (rh - boxH) / 2;
+  const n = milestones.length;
+  // Fixed tip overlap ratio; gapのみで間隔を制御
+  const tipRatio = 0.35;
+  const avail = rw - outerPad * 2;
+  // totalW = n*segW - (n-1)*(tipRatio*segW) + gap*(n-1)
+  const denom = Math.max(0.1, n - tipRatio * (n - 1));
+  const segW = Math.max(0.6, (avail - gap * (n - 1)) / denom);
+  // 小さな見かけの隙間を吸収するため、gapX=0（または極小）のときは微小オーバーラップを入れる
+  const epsilon = (gap <= 0.0001) ? Math.max(0.06, segW * 0.02) : 0; // in
+  const step = segW * (1 - tipRatio) + gap - epsilon;
+  // Precompute layout for all chevrons
+  const items: Array<{ x: number; w: number; baseHex: string; txtColor: string; head: string; tail: string }>=[];
+  for (let i = 0; i < n; i++) {
+    const m: any = milestones[i] || {};
+    const x = rx + outerPad + i * step;
+    const baseHex = helpers.getPaletteColor(i).replace('#','');
+    const rC = parseInt(baseHex.slice(0,2),16), gC = parseInt(baseHex.slice(2,4),16), bC = parseInt(baseHex.slice(4,6),16);
+    const aC = Math.max(0, Math.min(1, chevronAlpha));
+    const blend = (c:number)=> Math.round(aC*c + (1-aC)*255);
+    const effHex = `#${[blend(rC),blend(gC),blend(bC)].map(n=>n.toString(16).padStart(2,'0').toUpperCase()).join('')}`;
+    const txtColor = (helpers && helpers.pickTextColorForBackground) ? helpers.pickTextColorForBackground(effHex) : '#111111';
+    const head = String(m?.label ?? '');
+    const tail = ((): string => {
+      if (m?.detail) return String(m.detail);
+      if (m?.value) return String(m.value);
+      if (m?.date) return String(m.date);
+      return '';
+    })();
+    items.push({ x, w: segW, baseHex, txtColor, head, tail });
+  }
+  // 1st pass: draw all chevrons (bottom layer)
+  for (const it of items) {
+    slide.addShape('chevron', { x: it.x, y, w: it.w, h: boxH, fill: { color: `#${it.baseHex}`, transparency: toTransp(chevronAlpha) }, line: { color: `#${it.baseHex}`, width: 0 } });
+  }
+  // 2nd pass: draw all texts on top
+  for (const it of items) {
+    const headX = it.x + it.w * 0.46;
+    const headW = Math.max(0.2, it.w - (headX - it.x) - 0.12);
+    slide.addText(it.head, { x: headX, y: y + boxH * 0.26 - 0.1, w: headW, h: boxH * 0.36, fontSize: labelFs, bold: true, align: 'left', valign: 'middle', color: it.txtColor, fontFace: 'Noto Sans JP' });
+    if (it.tail) {
+      const tailX = it.x + it.w * 0.38;
+      const tailW = Math.max(0.2, it.w - (tailX - it.x) - 0.12);
+      slide.addText(it.tail, { x: tailX, y: y + boxH * 0.62 - 0.06, w: tailW, h: boxH * 0.28, fontSize: subFs, align: 'left', valign: 'top', color: it.txtColor, fontFace: 'Noto Sans JP' });
+    }
+  }
   return true;
 });
 
 // Pyramid
 register('pyramid', ({ slide, payload, region, templateConfig, helpers }) => {
+  /* pyramid: start */
+  const getCustomGeometryType = (_sl: any): any => {
+    // Prefer canonical key used in gen-xml.ts ('custGeom') per upstream
+    return 'custGeom';
+  };
+  const CUSTOM = getCustomGeometryType(slide);
+  /* pyramid: custom-geometry-type resolved */
+
+  // --- Render pyramid using customGeometry ---
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const steps = Array.isArray(payload?.steps) ? payload.steps : [];
   const st = getVisualStyle(templateConfig, 'pyramid');
   const maxLayers = Number(st.maxLayers);
-  const shrink = Number(st.layerShrinkRatio);
   const labelFs = Number(st.labelFontSize);
-  const labelColor = normalizeHex(st.labelColor);
-  const borderColor = normalizeHex(st.borderColor);
-  if (!Number.isFinite(maxLayers) || !Number.isFinite(shrink) || !Number.isFinite(labelFs) || !labelColor || !borderColor) { try { console.warn('pyramid: missing style values'); } catch {} return false; }
-  const layers = Math.min(maxLayers, steps.length || maxLayers);
+  const labelColorSpec = (st as any)?.labelColor;
+  const borderW = Number(st.borderWidth);
+  if (!Number.isFinite(maxLayers) || !Number.isFinite(labelFs)) { try { console.warn('pyramid: missing style values'); } catch {} return false; }
+
+  // Determine layer count
+  const layers = Math.min(Math.max(2, maxLayers), (steps.length || maxLayers));
+
+  // Compute equilateral triangle that fits the region and is vertically centered
+  const hForSide = (s:number)=> s * Math.sqrt(3) / 2;
+  const sMaxByWidth = rw; // base side cannot exceed width
+  const sMaxByHeight = rh * 2 / Math.sqrt(3);
+  const side = Math.min(sMaxByWidth, sMaxByHeight);
+  const height = hForSide(side);
+  const triX = rx + (rw - side) / 2;
+  const triY = ry + (rh - height) / 2; // vertical center
+  /* geometry computed for pyramid */
+
+  // (Outer border will be drawn AFTER layers using FREEFORM so it sits on top)
+
+  // Draw colored layers as trapezoids sized to equilateral geometry
+  const bandH = height / layers;
+  const fillAlpha = (() => { const a = Number((st as any)?.alpha?.barFill); return Number.isFinite(a) ? Math.max(0, Math.min(1, a)) : 0.35; })();
+  const transparency = Math.round((1 - fillAlpha) * 100);
+  const blendOverWhite = (hex6: string): string => {
+    const rC = parseInt(hex6.slice(0,2),16), gC = parseInt(hex6.slice(2,4),16), bC = parseInt(hex6.slice(4,6),16);
+    const a = fillAlpha; const blend = (c:number)=> Math.round(a*c + (1-a)*255);
+    const toHex2 = (n:number)=> n.toString(16).padStart(2,'0').toUpperCase();
+    return `${toHex2(blend(rC))}${toHex2(blend(gC))}${toHex2(blend(bC))}`;
+  };
   for (let i = 0; i < layers; i++) {
-    const y = ry + i * (rh / layers); const width = rw * (1 - i * shrink);
-    const col = helpers.getPaletteColor(i).replace('#','');
-    slide.addShape('triangle', { x: rx + (rw - width)/2, y, w: width, h: rh / layers - 0.05, fill: { color: col }, line: { color: `#${borderColor}`, width: 0.5 } });
-    slide.addText(String(steps[i]?.label ?? ''), { x: rx, y: y + 0.02, w: rw, h: rh / layers - 0.09, fontSize: labelFs, color: `#${labelColor}`, align: 'center', valign: 'middle', fontFace: 'Noto Sans JP' });
+    const yTop = triY + bandH * i;
+    const yBottom = yTop + bandH;
+    const tTop = (i) / layers; const tBottom = (i + 1) / layers; // 0..1 from top
+    const widthTop = Math.max(0, side * tTop);
+    const widthBottom = Math.max(0.1, side * tBottom);
+    const leftTop = triX + (side - widthTop) / 2;
+    const leftBottom = triX + (side - widthBottom) / 2;
+    const colHex = helpers.getPaletteColor(i).replace('#','');
+    if (i === 0) {
+      // Top layer: triangle — use local bbox and points relative to bbox
+      const raw = [
+        { x: triX + side / 2, y: yTop },
+        { x: leftBottom + widthBottom, y: yBottom },
+        { x: leftBottom, y: yBottom },
+      ];
+      const minX = Math.min(...raw.map(p=>p.x));
+      const minY = Math.min(...raw.map(p=>p.y));
+      const maxX = Math.max(...raw.map(p=>p.x));
+      const maxY = Math.max(...raw.map(p=>p.y));
+      const points = [
+        { x: raw[0].x - minX, y: raw[0].y - minY, moveTo: true },
+        { x: raw[1].x - minX, y: raw[1].y - minY },
+        { x: raw[2].x - minX, y: raw[2].y - minY },
+        { close: true } as any,
+      ];
+      /* pyramid: add top layer */
+      slide.addShape(CUSTOM, { x: minX, y: minY, w: (maxX - minX) || 0.01, h: (maxY - minY) || 0.01, points: points as any, fill: { color: `#${colHex}`, transparency }, line: { color: `#${colHex}`, width: Number.isFinite(borderW) ? borderW : 1 } } as any);
+    } else {
+      // Trapezoid band — local bbox + relative points
+      const raw = [
+        { x: leftTop, y: yTop },
+        { x: leftTop + widthTop, y: yTop },
+        { x: leftBottom + widthBottom, y: yBottom },
+        { x: leftBottom, y: yBottom },
+      ];
+      const minX = Math.min(...raw.map(p=>p.x));
+      const minY = Math.min(...raw.map(p=>p.y));
+      const maxX = Math.max(...raw.map(p=>p.x));
+      const maxY = Math.max(...raw.map(p=>p.y));
+      const points = [
+        { x: raw[0].x - minX, y: raw[0].y - minY, moveTo: true },
+        { x: raw[1].x - minX, y: raw[1].y - minY },
+        { x: raw[2].x - minX, y: raw[2].y - minY },
+        { x: raw[3].x - minX, y: raw[3].y - minY },
+        { close: true } as any,
+      ];
+      /* pyramid: add band */
+      slide.addShape(CUSTOM, { x: minX, y: minY, w: (maxX - minX) || 0.01, h: (maxY - minY) || 0.01, points: points as any, fill: { color: `#${colHex}`, transparency }, line: { color: `#${colHex}`, width: Number.isFinite(borderW) ? borderW : 1 } } as any);
+    }
+    // Label centered in the band (use generous width ~ bottom edge width to avoid wrapping on small top bands)
+    const widthLabel = Math.max(widthTop, widthBottom) * 0.92; // generous width for readability
+    const leftLabel = triX + (side - widthLabel) / 2;
+    const label = String(steps[i]?.label ?? '');
+    const effHex = blendOverWhite(colHex);
+    const autoTxt = helpers.pickTextColorForBackground(`#${effHex}`);
+    const useTplColor = ((): string | undefined => {
+      if (typeof labelColorSpec === 'string' && labelColorSpec.trim()) {
+        const s = labelColorSpec.trim();
+        if (s.toLowerCase() === 'auto') return undefined;
+        const hex = normalizeHex(s);
+        return hex ? `#${hex}` : undefined;
+      }
+      return undefined;
+    })();
+    const finalTxt = useTplColor || autoTxt;
+    slide.addText(label, { x: leftLabel, y: yTop + bandH * 0.22, w: Math.max(0.1, widthLabel), h: bandH * 0.56, fontSize: labelFs, color: finalTxt, align: 'center', valign: 'middle', fontFace: 'Noto Sans JP' });
   }
+  // Draw outer border on TOP using FREEFORM silhouette (transparent fill, opaque border)
+  const outerPts = [
+    { x: triX + side / 2, y: triY },
+    { x: triX + side, y: triY + height },
+    { x: triX, y: triY + height },
+  ];
+  const outerMinX = Math.min(...outerPts.map(p=>p.x));
+  const outerMinY = Math.min(...outerPts.map(p=>p.y));
+  const outerMaxX = Math.max(...outerPts.map(p=>p.x));
+  const outerMaxY = Math.max(...outerPts.map(p=>p.y));
+  // No overall outer border per requirements
+
   return true;
 });
 
 // Map markers
-register('map_markers', ({ slide, payload, region, templateConfig }) => {
+register('map_markers', async ({ slide, payload, region, templateConfig }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const st = getVisualStyle(templateConfig, 'map_markers');
+  const markers: Array<{ label?: string; x?: number; y?: number; lon?: number; lat?: number }> = Array.isArray(payload?.markers) ? payload.markers : [];
+  const apiKey = (process && process.env && process.env.GOOGLE_MAP_API_KEY) ? String(process.env.GOOGLE_MAP_API_KEY) : '';
+  const hasLonLat = markers.some((m: { lon?: number; lat?: number }) => Number.isFinite(Number(m?.lon)) && Number.isFinite(Number(m?.lat)));
+  /* map_markers: entry (verbose log removed) */
+  if (apiKey && hasLonLat) {
+    const pts = markers.map((m: { lon?: number; lat?: number; label?: string }) => ({ lon: Number(m.lon), lat: Number(m.lat), label: String(m.label || '') }));
+    const lonMin = Math.min(...pts.map((p: { lon: number }) => p.lon)), lonMax = Math.max(...pts.map((p: { lon: number }) => p.lon));
+    const latMin = Math.min(...pts.map((p: { lat: number }) => p.lat)), latMax = Math.max(...pts.map((p: { lat: number }) => p.lat));
+    const centerLon = Number.isFinite(Number(payload?.center?.lon)) ? Number(payload.center.lon) : (lonMin + lonMax) / 2;
+    const centerLat = Number.isFinite(Number(payload?.center?.lat)) ? Number(payload.center.lat) : (latMin + latMax) / 2;
+    const pad = Math.max(1.0, Number((st as any)?.zoomPaddingKm) || 1.2);
+    const spanLon = Math.max(0.0001, (lonMax - lonMin) * pad);
+    const spanLat = Math.max(0.0001, (latMax - latMin) * pad);
+    const zoom = (() => {
+      if (Number.isFinite(Number(payload?.zoom))) return Math.max(3, Math.min(18, Number(payload.zoom)));
+      const span = Math.max(spanLon, spanLat);
+      const z = Math.floor(Math.log2(360 / Math.max(span, 0.0001)));
+      return Math.max(3, Math.min(18, z - 1));
+    })();
+    const base = 'https://maps.googleapis.com/maps/api/staticmap';
+    const size = { w: 640, h: 640, scale: 2 };
+    const mtype = (st as any)?.google?.mapType || 'roadmap';
+    const params: string[] = [];
+    params.push(`center=${centerLat.toFixed(6)},${centerLon.toFixed(6)}`);
+    params.push(`zoom=${zoom}`);
+    params.push(`size=${size.w}x${size.h}`);
+    params.push(`scale=${size.scale}`);
+    params.push(`maptype=${encodeURIComponent(mtype)}`);
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    pts.slice(0, 50).forEach((p: { lat: number; lon: number }, i: number) => {
+      const L = letters[i % letters.length];
+      params.push(`markers=color:red|label:${L}|${p.lat.toFixed(6)},${p.lon.toFixed(6)}`);
+    });
+    /* map_markers: request preview (removed) */
+    params.push(`key=${encodeURIComponent(apiKey)}`);
+    const url = `${base}?${params.join('&')}`;
+    try {
+      const httpsMod: any = await import('https');
+      const { buf, status, ctype } = await new Promise((resolve, reject) => {
+        httpsMod.get(url, (res: any) => {
+          const chunks: any[] = [];
+          res.on('data', (d: any) => chunks.push(d));
+          res.on('end', () => resolve({ buf: Buffer.concat(chunks), status: res.statusCode || 0, ctype: String(res.headers['content-type'] || '') }));
+          res.on('error', reject);
+        }).on('error', reject);
+      }) as { buf: Buffer; status: number; ctype: string };
+      const isPng = buf && buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47;
+      const isJpg = buf && buf.length > 2 && buf[0] === 0xFF && buf[1] === 0xD8;
+      if (status >= 400 || !(isPng || isJpg) || !/image\/(png|jpeg)/i.test(ctype)) {
+        try {
+          const preview = buf.toString('utf8', 0, Math.min(200, buf.length));
+          logger.warn({ status, ctype, bytes: buf.length, preview }, 'map_markers: non-image response from Google Static Maps');
+        } catch {}
+        throw new Error('non-image-response');
+      }
+      // Write to temp file and use path (more reliable than base64 data for pptxgen)
+      const { config } = await import('../xibo-agent/config');
+      const pathMod = await import('path');
+      const fsPr = await import('fs/promises');
+      const imgDir = pathMod.join(config.tempDir, 'images');
+      try { await fsPr.mkdir(imgDir, { recursive: true }); } catch {}
+      const ext = isJpg ? '.jpg' : '.png';
+      const filePath = pathMod.join(imgDir, `gmap-${Date.now()}${ext}`);
+      await fsPr.writeFile(filePath, buf);
+      /* map_markers: google map saved (removed) */
+      slide.addImage({ path: filePath, x: rx, y: ry, w: rw, h: rh, sizing: { type: 'cover', w: rw, h: rh } as any });
+      return true;
+    } catch (e) {
+      try { console.warn({ error: e }, 'map_markers: google static map fetch failed; fallback to simple'); } catch {}
+    }
+  }
+  // Fallback simple mode (x/y 0..1 normalized)
   const bg = normalizeHex(st.bgColor); const bgLine = normalizeHex(st.borderColor);
   const dotFill = normalizeHex(st.dotFill); const dotLine = normalizeHex(st.dotLine);
   const dotSize = Number(st.dotSize); const labelFs = Number(st.labelFontSize);
   if (!bg || !bgLine || !dotFill || !dotLine || !Number.isFinite(dotSize) || !Number.isFinite(labelFs)) { try { console.warn('map_markers: missing style values'); } catch {} return false; }
+  /* map_markers: simple renderer (verbose log removed) */
   slide.addShape('rect', { x: rx, y: ry, w: rw, h: rh, fill: { color: `#${bg}` }, line: { color: `#${bgLine}`, width: 1 } });
-  const markers = Array.isArray(payload?.markers) ? payload.markers : [];
-  markers.slice(0, 8).forEach((m: any) => {
-    const px = rx + Math.max(0, Math.min(1, Number(m?.x || 0))) * rw;
-    const py = ry + Math.max(0, Math.min(1, Number(m?.y || 0))) * rh;
+  markers.slice(0, 50).forEach((m: any) => {
+    let px: number; let py: number;
+    if (Number.isFinite(Number(m?.lon)) && Number.isFinite(Number(m?.lat))) {
+      // Rough global projection for fallback
+      const lon = Number(m.lon); const lat = Number(m.lat);
+      px = rx + ((lon + 180) / 360) * rw;
+      py = ry + (1 - (lat + 90) / 180) * rh;
+    } else {
+      px = rx + Math.max(0, Math.min(1, Number(m?.x || 0))) * rw;
+      py = ry + Math.max(0, Math.min(1, Number(m?.y || 0))) * rh;
+    }
     slide.addShape('ellipse', { x: px - (dotSize/2), y: py - (dotSize/2), w: dotSize, h: dotSize, fill: { color: `#${dotFill}` }, line: { color: `#${dotLine}`, width: 0.8 } });
-    slide.addText(String(m?.label ?? ''), { x: px + 0.1, y: py - 0.06, w: 1.6, h: 0.24, fontSize: labelFs, fontFace: 'Noto Sans JP' });
+    if (m?.label) slide.addText(String(m.label), { x: px + 0.1, y: py - 0.06, w: 1.6, h: 0.24, fontSize: labelFs, fontFace: 'Noto Sans JP' });
   });
   return true;
 });

@@ -67,7 +67,7 @@ export const generateChartTool = createTool({
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
     const { chartType, title, labels, data, fileName, returnBuffer, themeColor1, themeColor2, chartsStyle: chartsStyleFromCtx } = context as any;
-    logger.info({ chartType, title }, 'Generating chart image (PNG)...');
+    try { logger.info({ chartType }, 'GenerateChart: start'); } catch {}
     try {
       let chartsStyle: any = chartsStyleFromCtx || {};
 
@@ -237,12 +237,17 @@ export const generateChartTool = createTool({
       } : undefined;
 
       // Draw point labels for scatter at the plotted position
-      const scatterPointLabelPlugin: any = (chartType === 'scatter' && Number.isFinite(Number(chartsStyle?.labelFontSize)) && chartsStyle?.labelColor) ? {
+      const scatterPointLabelPlugin: any = (chartType === 'scatter' && Number.isFinite(Number(chartsStyle?.labelFontSize))) ? {
         id: 'scatter-point-label',
         afterDatasetsDraw: (chart: any) => {
           const { ctx } = chart;
           const lblSize = Number(chartsStyle?.labelFontSize);
-          const lblColor = String(chartsStyle?.labelColor);
+          const lblColor = ((): string => {
+            const raw = String(chartsStyle?.labelColor || 'auto');
+            if (raw && raw.toLowerCase() !== 'auto') return raw;
+            // auto: choose black/white based on background; assume white grid bg for now
+            return '#333333';
+          })();
           const offsetY = Number.isFinite(Number(chartsStyle?.labelOffsetY)) ? Number(chartsStyle?.labelOffsetY) : -12;
           ctx.save();
           ctx.font = `${lblSize}px Noto Sans JP`;
@@ -262,12 +267,16 @@ export const generateChartTool = createTool({
       } : undefined;
 
       // Draw point labels for bubble at the plotted position
-      const bubblePointLabelPlugin: any = (chartType === 'bubble' && Number.isFinite(Number(chartsStyle?.labelFontSize)) && chartsStyle?.labelColor) ? {
+      const bubblePointLabelPlugin: any = (chartType === 'bubble' && Number.isFinite(Number(chartsStyle?.labelFontSize))) ? {
         id: 'bubble-point-label',
         afterDatasetsDraw: (chart: any) => {
           const { ctx } = chart;
           const lblSize = Number(chartsStyle?.labelFontSize);
-          const lblColor = String(chartsStyle?.labelColor);
+          const lblColor = ((): string => {
+            const raw = String(chartsStyle?.labelColor || 'auto');
+            if (raw && raw.toLowerCase() !== 'auto') return raw;
+            return '#333333';
+          })();
           const offsetY = Number.isFinite(Number(chartsStyle?.labelOffsetY)) ? Number(chartsStyle?.labelOffsetY) : -12;
           ctx.save();
           ctx.font = `${lblSize}px Noto Sans JP`;
@@ -355,7 +364,8 @@ export const generateChartTool = createTool({
           if (needRandomVividBars) { const p = makeVividPalette((labels || []).length); Object.assign(baseSty, { backgroundColor: p.fills, borderColor: p.borders }); }
           else if (isCircular) { if (computedBgForCircular) Object.assign(baseSty, { backgroundColor: computedBgForCircular.fills, borderColor: computedBgForCircular.borders }); }
           else { if (computedBgForOthers) Object.assign(baseSty, { backgroundColor: computedBgForOthers.fills, borderColor: computedBgForOthers.borders }); }
-          if (primary) Object.assign(baseSty, { borderColor: alpha(primary, 1) });
+          // Keep per-point border colors if already set; otherwise fallback to primary
+          if (primary && (baseSty as any).borderColor == null) Object.assign(baseSty, { borderColor: alpha(primary, 1) });
           if (Number.isFinite(borderWidth)) Object.assign(baseSty, { borderWidth });
           return [{ label: title, data: pts, ...(baseSty), ...(baseType === 'line' ? {} : {}) }];
         }
@@ -396,12 +406,13 @@ export const generateChartTool = createTool({
             seriesCount = 1;
           }
           const p = buildChartJsPalette(seriesCount, Number.isFinite(alphaOthers) ? alphaOthers : 0.6);
+          const bw = Number.isFinite(borderWidth) ? (borderWidth as number) : 2;
           return seriesArr.map((s, i) => ({
             label: s.label || `Series ${i+1}`,
             data: s.data,
             backgroundColor: p.fills[i % p.fills.length],
             borderColor: p.borders[i % p.borders.length],
-            ...(Number.isFinite(borderWidth) ? { borderWidth } : {}),
+            borderWidth: bw,
             ...(Number.isFinite(Number(chartsStyle?.bar?.borderRadius)) ? { borderRadius: Number(chartsStyle?.bar?.borderRadius) } : {}),
             ...(typeof chartsStyle?.bar?.borderSkipped === 'boolean' ? { borderSkipped: chartsStyle.bar.borderSkipped } : {}),
           }));
@@ -411,8 +422,14 @@ export const generateChartTool = createTool({
         if (needRandomVividBars) { const p = makeVividPalette((labels || []).length); Object.assign(baseSty, { backgroundColor: p.fills, borderColor: p.borders }); }
         else if (isCircular) { if (computedBgForCircular) Object.assign(baseSty, { backgroundColor: computedBgForCircular.fills, borderColor: computedBgForCircular.borders }); }
         else { if (computedBgForOthers) Object.assign(baseSty, { backgroundColor: computedBgForOthers.fills, borderColor: computedBgForOthers.borders }); }
-        if (primary) Object.assign(baseSty, { borderColor: alpha(primary, 1) });
-        if (Number.isFinite(borderWidth)) Object.assign(baseSty, { borderWidth });
+        // Respect computed per-bar border colors; only fallback to primary when not set
+        if (primary && (baseSty as any).borderColor == null) Object.assign(baseSty, { borderColor: alpha(primary, 1) });
+        if (baseType === 'bar') {
+          const bw = Number.isFinite(borderWidth) ? (borderWidth as number) : 2;
+          Object.assign(baseSty, { borderWidth: bw });
+        } else if (Number.isFinite(borderWidth)) {
+          Object.assign(baseSty, { borderWidth });
+        }
         const extraLine: any = (baseType === 'line') ? { ...(Number.isFinite(Number(chartsStyle?.line?.tension)) ? { tension: Number(chartsStyle?.line?.tension) } : {}), fill: (chartType === 'area') || undefined, ...(Number.isFinite(Number(chartsStyle?.line?.pointRadius)) ? { pointRadius: Number(chartsStyle?.line?.pointRadius) } : {}), ...(Number.isFinite(Number(chartsStyle?.line?.pointHoverRadius)) ? { pointHoverRadius: Number(chartsStyle?.line?.pointHoverRadius) } : {}), ...(primary && Number.isFinite(Number(chartsStyle?.line?.fillAlpha)) ? { backgroundColor: alpha(primary, Number(chartsStyle?.line?.fillAlpha)) } : {}) } : {};
         const extraRadar: any = (baseType === 'radar') ? { fill: true, borderWidth: (Number.isFinite(Number(chartsStyle?.borderWidth)) ? Number(chartsStyle?.borderWidth) : 2) } : {};
         return [{ label: title, data: (Array.isArray(data) ? data : []), ...(baseSty), ...(extraLine), ...(extraRadar), ...(baseType === 'bar' ? { ...(Number.isFinite(Number(chartsStyle?.bar?.borderRadius)) ? { borderRadius: Number(chartsStyle?.bar?.borderRadius) } : {}), ...(typeof chartsStyle?.bar?.borderSkipped === 'boolean' ? { borderSkipped: chartsStyle.bar.borderSkipped } : {}) } : {}) }];
@@ -499,7 +516,11 @@ export const generateChartTool = createTool({
 
       if (baseType === 'radar') {
         const pointLabelSize = Number.isFinite(Number(chartsStyle?.labelFontSize)) ? Number(chartsStyle?.labelFontSize) : undefined;
-        const pointLabelColor = chartsStyle?.labelColor ? String(chartsStyle?.labelColor) : '#333333';
+        const pointLabelColor = ((): string => {
+          const raw = String(chartsStyle?.labelColor || 'auto');
+          if (raw && raw.toLowerCase() !== 'auto') return raw;
+          return '#333333';
+        })();
         (chartConfig.options as any).scales = { r: {
           ...(gridColor ? { angleLines: { color: gridColor } } : {}),
           ...(gridColor ? { grid: { color: gridColor } } : {}),
@@ -509,9 +530,14 @@ export const generateChartTool = createTool({
       } else if (baseType === 'polarArea') {
         (chartConfig.options as any).scales = { r: { ...(gridColor ? { grid: { color: gridColor } } : {}), ticks: { font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSize) ? { size: axisFontSize } : {}) } } } } as any;
       } else if (baseType !== 'pie' && baseType !== 'doughnut') {
+        const autoTickColor = ((): string|undefined => {
+          const raw = String(chartsStyle?.labelColor || '');
+          if (raw && raw.toLowerCase() !== 'auto') return raw;
+          return '#333333';
+        })();
         const scales: any = {
-          x: { ...(gridColor ? { grid: { display: false } } : {}), ticks: { font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSizeX) ? { size: axisFontSizeX } : {}) } } },
-          y: { ...(gridColor ? { grid: { color: gridColor } } : {}), ticks: { font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSizeY) ? { size: axisFontSizeY } : {}) } } },
+          x: { ...(gridColor ? { grid: { display: false } } : {}), ticks: { color: autoTickColor, font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSizeX) ? { size: axisFontSizeX } : {}) } } },
+          y: { ...(gridColor ? { grid: { color: gridColor } } : {}), ticks: { color: autoTickColor, font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSizeY) ? { size: axisFontSizeY } : {}) } } },
         };
         if (chartType === 'scatter') {
           const needsLog = (() => {
@@ -553,7 +579,7 @@ export const generateChartTool = createTool({
       if (!hit) cachePut(key, buffer);
 
       if (returnBuffer === true) {
-        logger.info({ bytes: buffer.length }, 'Generated chart PNG in-memory.');
+        try { logger.debug({ bytes: buffer.length }, 'GenerateChart: done (buffer)'); } catch {}
         return { success: true, data: { buffer, bufferSize: buffer.length } } as const;
       }
 
@@ -563,7 +589,7 @@ export const generateChartTool = createTool({
       const imagePath = path.join(chartDir, `${fileName || 'chart'}.png`);
       await fs.mkdir(chartDir, { recursive: true });
       await fs.writeFile(imagePath, buffer, 'binary');
-      logger.info({ imagePath }, 'Generated chart PNG and saved to disk (legacy mode).');
+      try { logger.info({ imagePath }, 'GenerateChart: done'); } catch {}
       return { success: true, data: { imagePath } } as const;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'An unknown error occurred during chart generation.';

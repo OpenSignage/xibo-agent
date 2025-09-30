@@ -670,7 +670,7 @@ const slideSchema = z.object({
   // Optional comparison_cards-specific bullets
   bulletsA: z.array(z.string()).optional().describe('Left column bullets for comparison_cards layout.'),
   bulletsB: z.array(z.string()).optional().describe('Right column bullets for comparison_cards layout.'),
-});
+}).passthrough();
 
 const inputSchema = z.object({
   fileName: z.string().describe('The base name for the output .pptx file (e.g., "presentation").'),
@@ -768,7 +768,7 @@ export const createPowerpointTool = createTool({
     const presenterDir = config.presentationsDir;
     const filePath = path.join(presenterDir, `${fileName}.pptx`);
 
-    logger.info({ filePath, slideCount: slides.length }, 'Creating PowerPoint presentation');
+    try { logger.info({ filePath, slideCount: slides.length }, 'CreatePowerPoint: start'); } catch {}
 
     try {
         // --- Fail-fast template validation (template-driven rendering) ---
@@ -818,14 +818,16 @@ export const createPowerpointTool = createTool({
         let Pptx: any = PptxGenJS;
         let chartsBuild: string | null = null;
         const importCandidates: string[] = [];
-        try {
-          // Prefer CJS build explicitly (most reliable for charts on Node)
-          const cjsPath = require.resolve('pptxgenjs/dist/pptxgen.cjs.js');
-          importCandidates.push(cjsPath);
-        } catch {}
+        // Prefer bundle builds first to enable extended shape types like customGeometry
         importCandidates.push('pptxgenjs/dist/pptxgen.bundle.js');
         importCandidates.push('pptxgenjs/dist/pptxgen.bundle.min.js');
         importCandidates.push('pptxgenjs/dist/pptxgen.es.js');
+        // Fallback to root default import (some builds expose shapes on default)
+        importCandidates.push('pptxgenjs');
+        try {
+          const cjsPath = require.resolve('pptxgenjs/dist/pptxgen.cjs.js');
+          importCandidates.push(cjsPath);
+        } catch {}
         try {
           if (!(Pptx as any).ChartType) {
             for (const spec of importCandidates) {
@@ -958,9 +960,11 @@ export const createPowerpointTool = createTool({
           const policy: 'template'|'prefer_ai'|'ai_overrides'|'disabled' = aiColorPolicy;
           const preferAI = (useMode === 'ai_overrides') || (useMode === 'prefer_ai') || (policy === 'ai_overrides') || (policy === 'prefer_ai');
           const aiOverride = (useMode === 'ai_overrides') || (policy === 'ai_overrides');
-          const baseSeeds: string[] = aiOverride
-            ? [resolvedPrimary, resolvedSecondary]
-            : (preferAI ? [resolvedPrimary, resolvedSecondary, accent] : [primary, secondary, accent]);
+          // If template defines explicit visual palette, use it directly
+          const tplPalette = (templateConfig?.visualStyles?.palette?.colors);
+          const baseSeeds: string[] = (Array.isArray(tplPalette) && tplPalette.length)
+            ? tplPalette as any
+            : (aiOverride ? [resolvedPrimary, resolvedSecondary] : (preferAI ? [resolvedPrimary, resolvedSecondary, accent] : [primary, secondary, accent]));
           // Generate a balanced palette: rotate hues and vary lightness/saturation to avoid same-hue clustering
           const toHsl = (hex: string) => {
             const h = ensureHash(hex).replace('#','');
@@ -1163,7 +1167,7 @@ export const createPowerpointTool = createTool({
                 recipe = { type: 'image', prompt: String((slideObj as any).__data.context_for_visual) };
               }
               if (recipe && typeof recipe === 'object' && recipe.type) {
-                try { logger.info({ layout: layoutKey, area: areaName, recipeType: String(recipe.type) }, 'render:visual:dispatch'); } catch {}
+                try { logger.debug({ layout: layoutKey, area: areaName, recipeType: String(recipe.type) }, 'render:visual:dispatch'); } catch {}
                 // If recipe has a direct URL path, download before render
                 if (recipe.path && typeof recipe.path === 'string') {
                   recipe = { ...recipe, path: await downloadImageIfUrl(String(recipe.path)) };
@@ -1366,9 +1370,9 @@ export const createPowerpointTool = createTool({
               }
               // no-op; rely on fallback warnings when needed
               if (recipe && typeof recipe === 'object') {
-                try { logger.info({ type: String(recipe.type||''), region: { x, y: vy, w, h: vh } }, 'drawInfographic(start)'); } catch {}
+                try { logger.debug({ type: String(recipe.type||''), region: { x, y: vy, w, h: vh } }, 'drawInfographic: start'); } catch {}
                 await drawInfographic(slideObj, String(recipe.type || ''), recipe, { x, y: vy, w, h: vh });
-                try { logger.info('drawInfographic(done)'); } catch {}
+                try { logger.debug('drawInfographic: done'); } catch {}
               } else if ((slideObj as any).__data?.imagePath) {
                 slideObj.addImage({ path: (slideObj as any).__data.imagePath, x, y: vy, w, h: vh, sizing: { type: style?.sizing || 'contain', w, h: vh } as any, shadow: shadowOf(style?.shadow, shadowPreset) });
               } else {
@@ -1391,7 +1395,7 @@ export const createPowerpointTool = createTool({
             const rw = region?.w ?? 8.4;
             const rh = region?.h ?? 2.2;
             // debug dispatch log removed after verification
-            try { logger.info({ type: String(type||''), region: { x: rx, y: ry, w: rw, h: rh } }, 'drawInfographic(entry)'); } catch {}
+            try { logger.debug({ type: String(type||''), region: { x: rx, y: ry, w: rw, h: rh } }, 'drawInfographic(entry)'); } catch {}
                     // Registry-driven rendering first
                     try {
                       const { render: renderFromRegistry } = await import('./infographicRegistry');
@@ -1403,9 +1407,9 @@ export const createPowerpointTool = createTool({
                         templateConfig,
                         helpers: { pickTextColorForBackground, getPaletteColor }
                       });
-                      if (ok) { try { logger.info('drawInfographic(done:registry)'); } catch {} return; }
+                      if (ok) { try { logger.debug('drawInfographic(done:registry)'); } catch {} return; }
                     } catch (e) { /* swallow to allow fallback; errors are visible upstream when needed */ }
-            try { logger.info('drawInfographic(fallback)'); } catch {}
+            try { logger.debug('drawInfographic(fallback)'); } catch {}
             const renderChartImage = async (ct: 'bar'|'pie'|'line', labels: string[], values: number[], titleText?: string): Promise<string | null> => {
               try {
                 const mod = await import('./generateChart');
@@ -1521,7 +1525,7 @@ export const createPowerpointTool = createTool({
                             const chartColors = labels.map((_: string, i: number) => getPaletteColor(i)).map((c: string)=>c.replace('#',''));
                             (targetSlide as any).addChart(doughnutType, data, { x: rx, y: ry, w: rw, h: chartH, showLegend: false, chartColors } as any);
                             chartRendered = true;
-                            try { logger.info('kpi_donut: charts'); } catch {}
+                            try { logger.debug('kpi_donut: charts'); } catch {}
                         }
                     } catch {}
                     if (!chartRendered) {
@@ -1534,7 +1538,7 @@ export const createPowerpointTool = createTool({
                                 targetSlide.addImage({ path: imgPath, x: rx, y: ry, w: rw, h: chartH, sizing: { type: 'contain', w: rw, h: chartH } as any, shadow: shadowOf(resolveVisualShadow('image')) });
                                 try { imagePathsToDelete.add(imgPath); } catch {}
                                 chartRendered = true;
-                                try { logger.info('kpi_donut: image-fallback'); } catch {}
+                                try { logger.debug('kpi_donut: image-fallback'); } catch {}
                             }
                         } catch {}
                     }
@@ -1563,7 +1567,7 @@ export const createPowerpointTool = createTool({
                         const hy = cy - holeH / 2;
                         targetSlide.addShape('ellipse', { x: hx, y: hy, w: holeW, h: holeH, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 } });
                         chartRendered = true;
-                        try { logger.info('kpi_donut: shape-fallback'); } catch {}
+                        try { logger.debug('kpi_donut: shape-fallback'); } catch {}
                     }
                     if (!chartRendered) {
                         targetSlide.addText('CAGR', { x: rx, y: ry, w: rw, h: 0.3, fontSize: 12, bold: true, fontFace: JPN_FONT });
@@ -2017,10 +2021,10 @@ export const createPowerpointTool = createTool({
                 }
                 case 'kpi': {
                     const items = Array.isArray(payload?.items) ? payload.items : [];
-                    try { logger.info({ count: Array.isArray(items)?items.length:0 }, 'render:kpi'); } catch {}
-                    const count = Math.min(4, items.length);
+                    try { logger.debug({ count: Array.isArray(items)?items.length:0 }, 'render:kpi'); } catch {}
+                    const count = Math.min(6, items.length);
                     if (!count) { break; }
-                    // Layout: up to 3 items -> 1列。4件は2x2。
+                    // Layout: 1〜3件は1列、4〜6件は2列×2〜3行でグリッド表示
                     const columns = (count <= 3) ? 1 : 2;
                     const rows = Math.ceil(count / columns);
                     const kpiLayout: any = (templateConfig?.visualStyles?.kpi?.layout) || {};
@@ -2047,9 +2051,16 @@ export const createPowerpointTool = createTool({
                         const col = idx % columns;
                         const x = rx + outerMargin + col * (cardW + gap);
                         const y = ry + outerMargin + row * (cardH + gap);
-                        // Card background color from palette
-                        const boxColor = getPaletteColor(idx).replace('#','');
-                        targetSlide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: boxColor }, line: { color: outlineColor, width: 0.5 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('kpi')) });
+                        // Card color: pastel fill + solid border (bar_chart-like)
+                        const baseHex = getPaletteColor(idx).replace('#','');
+                        const alphaBar = Number(((templateConfig?.visualStyles?.kpi as any)?.alpha?.barFill));
+                        const fallbackAlpha = Number(((templateConfig?.visualStyles?.bar_chart as any)?.alpha?.barFill)) || 0.2;
+                        const fillAlpha = Number.isFinite(alphaBar) ? (alphaBar as number) : fallbackAlpha;
+                        const transparency = Math.round((1 - Math.max(0, Math.min(1, fillAlpha))) * 100);
+                        // White underlay to avoid background mixing
+                        targetSlide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: '#FFFFFF' }, line: { color: '#FFFFFF', width: 0 }, rectRadius: Math.min(cornerRadius, 6) });
+                        // Pastel card
+                        targetSlide.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: `#${baseHex}`, transparency }, line: { color: `#${baseHex}`, width: 2 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('kpi')) });
                         // Icon (optional, top-left)
                         let iconPath: string | null = null;
                         try {
@@ -2121,11 +2132,18 @@ export const createPowerpointTool = createTool({
                           : Math.min(cardH * 0.42, (cardH * 0.22) + 0.09 * (labelLines - 1));
                         const minGap = Number.isFinite(Number(kpiLayout.minGap)) ? Number(kpiLayout.minGap) : 0.08; // slightly larger gap to avoid visual collision
                         const valueH = Math.max((columns === 1 ? cardH * 0.50 : cardH * 0.42), cardH - labelH - innerPadY * 2 - minGap);
-                        const defaultTextColor = pickTextColorForBackground(`#${boxColor}`).toString();
+                        const defaultTextColor = pickTextColorForBackground(`#${baseHex}`).toString();
                         const labelColor = tplLabelColor || defaultTextColor;
                         const valueColor = tplValueColor || defaultTextColor;
-                        targetSlide.addText(labelFit.text, { x: textX, y: y + innerPadY, w: textW, h: labelH, fontSize: labelFit.fontSize, bold: true, color: labelColor, align: 'center', fontFace: JPN_FONT, valign: 'top', paraSpaceAfter: 0 });
-                        targetSlide.addText(valueFit.text, { x: textX, y: y + innerPadY + labelH + minGap, w: textW, h: Math.max(0, valueH - minGap), fontSize: valueFit.fontSize, bold: false, color: valueColor, align: 'center', fontFace: JPN_FONT, valign: 'top', paraSpaceAfter: 0 });
+                        // Contrast-aware text color over effective background (alpha over white)
+                        const toRgb = (hex:string) => ({ r: parseInt(hex.slice(0,2),16), g: parseInt(hex.slice(2,4),16), b: parseInt(hex.slice(4,6),16) });
+                        const rgb = toRgb(baseHex);
+                        const a = Math.max(0, Math.min(1, fillAlpha));
+                        const blend = (c:number) => Math.round(a*c + (1-a)*255);
+                        const effHex = `#${[blend(rgb.r), blend(rgb.g), blend(rgb.b)].map(n=>n.toString(16).padStart(2,'0')).join('')}`;
+                        const textColorForBox = pickTextColorForBackground(effHex);
+                        targetSlide.addText(labelFit.text, { x: textX, y: y + innerPadY, w: textW, h: labelH, fontSize: labelFit.fontSize, bold: true, color: tplLabelColor || textColorForBox, align: 'center', fontFace: JPN_FONT, valign: 'top', paraSpaceAfter: 0 });
+                        targetSlide.addText(valueFit.text, { x: textX, y: y + innerPadY + labelH + minGap, w: textW, h: Math.max(0, valueH - minGap), fontSize: valueFit.fontSize, bold: false, color: tplValueColor || textColorForBox, align: 'center', fontFace: JPN_FONT, valign: 'top', paraSpaceAfter: 0 });
                     }
                     break;
                 }
@@ -2491,7 +2509,7 @@ export const createPowerpointTool = createTool({
                             'Minimal, elegant, high-resolution, professional. No text overlay.'
                         ].filter(Boolean).join(' ');
                         const negativePrompt: string | undefined = String(slide0.titleSlideImageNegativePrompt || tplBgSrc.negativePrompt || '').trim() || undefined;
-                        logger.info({ prompt: composedPrompt, negativePrompt }, 'Title background image: sending prompt to generator');
+                        try { logger.debug({ prompt: composedPrompt, negativePrompt }, 'Title background image: sending prompt to generator'); } catch {}
                         const out = await generateImage({ prompt: composedPrompt, negativePrompt, aspectRatio: '16:9' });
                         if (out.success && out.path) {
                             slide.background = { path: out.path } as any;
@@ -2613,7 +2631,7 @@ export const createPowerpointTool = createTool({
                         const tmplElements = templateConfig?.layouts?.title_slide?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
-                            try { logger.info({ layout: 'title_slide' }, 'Template elements present: skipping code-rendered defaults for title_slide'); } catch {}
+                            try { logger.debug({ layout: 'title_slide' }, 'Template elements present: skipping code-rendered defaults for title_slide'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets };
                             await renderElementsFromTemplate(slide as any, 'title_slide', tmplElements);
                             delete (slide as any).__data;
@@ -2640,7 +2658,7 @@ export const createPowerpointTool = createTool({
                         const tmplElements = templateConfig?.layouts?.section_header?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
-                            try { logger.info({ layout: 'section_header' }, 'Template elements present: skipping code-rendered defaults for section_header'); } catch {}
+                            try { logger.debug({ layout: 'section_header' }, 'Template elements present: skipping code-rendered defaults for section_header'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets };
                             await renderElementsFromTemplate(slide as any, 'section_header', tmplElements);
                             delete (slide as any).__data;
@@ -2661,7 +2679,7 @@ export const createPowerpointTool = createTool({
                         const tmplElements = templateConfig?.layouts?.quote?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
-                            try { logger.info({ layout: 'quote' }, 'Template elements present: skipping code-rendered defaults for quote'); } catch {}
+                            try { logger.debug({ layout: 'quote' }, 'Template elements present: skipping code-rendered defaults for quote'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, special_content: (slideData as any).special_content };
                             await renderElementsFromTemplate(slide as any, 'quote', tmplElements);
                             delete (slide as any).__data;
@@ -2693,7 +2711,7 @@ export const createPowerpointTool = createTool({
                         const tmplElements = templateConfig?.layouts?.content_with_visual?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
-                            try { logger.info({ layout: 'content_with_visual' }, 'Template elements present: skipping code-rendered defaults for content_with_visual'); } catch {}
+                            try { logger.debug({ layout: 'content_with_visual' }, 'Template elements present: skipping code-rendered defaults for content_with_visual'); } catch {}
                             // Decide if visual should go to bottom band instead of right panel
                             // Use unified per-slide recipe (from slide or context)
                             const typeStr = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
@@ -2703,7 +2721,7 @@ export const createPowerpointTool = createTool({
                             // Provide slide data to renderer
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath, context_for_visual: (slideData as any).context_for_visual };
                             await renderElementsFromTemplate(slide as any, 'content_with_visual', elementsToRender);
-                            try { logger.info({ layout: 'content_with_visual', preferBottom, hadVisualEl: Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual') }, 'Template elements rendered for content_with_visual'); } catch {}
+                            try { logger.debug({ layout: 'content_with_visual', preferBottom, hadVisualEl: Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual') }, 'Template elements rendered for content_with_visual'); } catch {}
                             delete (slide as any).__data;
                             // If template doesn't include a visual element or we intentionally skipped it, render either right-panel or bottom-band
                             const templateHadVisualEl = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
@@ -2821,7 +2839,7 @@ export const createPowerpointTool = createTool({
                         const tmplElements = templateConfig?.layouts?.content_with_bottom_visual?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
-                            try { logger.info({ layout: 'content_with_bottom_visual' }, 'Template elements present: skipping code-rendered defaults for content_with_bottom_visual'); } catch {}
+                            try { logger.debug({ layout: 'content_with_bottom_visual' }, 'Template elements present: skipping code-rendered defaults for content_with_bottom_visual'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
                             // Dynamically enlarge visual area based on rendered bullet height
                             const areasTpl: any = templateConfig?.layouts?.content_with_bottom_visual?.areas || {};
@@ -2931,7 +2949,7 @@ export const createPowerpointTool = createTool({
                         const tmplElements = templateConfig?.layouts?.content_with_image?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
-                            try { logger.info({ layout: 'content_with_image' }, 'Template elements present: skipping code-rendered defaults for content_with_image'); } catch {}
+                            try { logger.debug({ layout: 'content_with_image' }, 'Template elements present: skipping code-rendered defaults for content_with_image'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, imagePath: slideData.imagePath, context_for_visual: (slideData as any).context_for_visual };
                             await renderElementsFromTemplate(slide as any, 'content_with_image', tmplElements);
                             delete (slide as any).__data;
@@ -2981,7 +2999,7 @@ export const createPowerpointTool = createTool({
                         const tmplElements = templateConfig?.layouts?.visual_only?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
-                            try { logger.info({ layout: 'visual_only' }, 'Template elements present: skipping code-rendered defaults for visual_only'); } catch {}
+                            try { logger.debug({ layout: 'visual_only' }, 'Template elements present: skipping code-rendered defaults for visual_only'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath, context_for_visual: (slideData as any).context_for_visual };
                             await renderElementsFromTemplate(slide as any, 'visual_only', tmplElements);
                             delete (slide as any).__data;
@@ -3001,7 +3019,7 @@ export const createPowerpointTool = createTool({
                         const tmplElements = templateConfig?.layouts?.visual_hero_split?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
-                            try { logger.info({ layout: 'visual_hero_split' }, 'Rendering from template elements'); } catch {}
+                            try { logger.debug({ layout: 'visual_hero_split' }, 'Rendering from template elements'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, imagePath: slideData.imagePath, context_for_visual: (slideData as any).context_for_visual };
                             await renderElementsFromTemplate(slide as any, 'visual_hero_split', tmplElements);
                             delete (slide as any).__data;
@@ -3012,68 +3030,161 @@ export const createPowerpointTool = createTool({
                     break;
                 case 'comparison_cards':
                     {
-                        const tmplElements = templateConfig?.layouts?.comparison_cards?.elements;
-                        if (Array.isArray(tmplElements) && tmplElements.length) {
-                            __templateHasElementsForLayout = true;
-                            try { logger.info({ layout: 'comparison_cards' }, 'Rendering from template elements'); } catch {}
-                            // Build bulletsA/B with fallbacks: if missing, split common bullets array into two halves
-                            const rawA: any = (slideData as any).bulletsA;
-                            const rawB: any = (slideData as any).bulletsB;
-                            const common: any = (slideData as any).bullets;
-                            let aList: string[] | undefined = Array.isArray(rawA) ? rawA.map((s:any)=>String(s||'')) : undefined;
-                            let bList: string[] | undefined = Array.isArray(rawB) ? rawB.map((s:any)=>String(s||'')) : undefined;
-                            if ((!aList || aList.length === 0 || !bList || bList.length === 0) && Array.isArray(common) && common.length) {
-                              const mid = Math.ceil(common.length / 2);
-                              const left = common.slice(0, mid).map((s:any)=>String(s||''));
-                              const right = common.slice(mid).map((s:any)=>String(s||''));
-                              if (!aList || aList.length === 0) aList = left;
-                              if (!bList || bList.length === 0) bList = right.length ? right : left; // if odd, mirror left
-                              try { logger.warn({ fallbackFromCommon: true, commonLen: common.length, aLen: aList.length, bLen: bList.length }, 'comparison_cards: bullets fallback applied'); } catch {}
+                        // Collect cards dynamically: cards[] or bulletsA/B/C... or split bullets
+                        const collectCards = (): Array<{ title?: string; bullets: string[] }> => {
+                          const out: Array<{ title?: string; bullets: string[] }> = [];
+                          const seen = new Set<string>();
+                          const addUnique = (bullets: string[], title?: string) => {
+                            const key = JSON.stringify(bullets);
+                            if (!bullets.length || seen.has(key)) return;
+                            seen.add(key);
+                            out.push({ title, bullets });
+                          };
+                          // cards[] 形式
+                          const cardsIn: any = (slideData as any).cards;
+                          if (Array.isArray(cardsIn)) {
+                            for (const c of cardsIn) {
+                              if (c && Array.isArray(c.bullets)) addUnique(c.bullets.map((s:any)=>String(s||'')), (typeof c.title==='string')?c.title:undefined);
                             }
-                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, bulletsA: aList, bulletsB: bList } as any;
-                            try { logger.info({ hasA: Array.isArray(aList), hasB: Array.isArray(bList), aLen: Array.isArray(aList)?aList.length:0, bLen: Array.isArray(bList)?bList.length:0 }, 'comparison_cards: __data bullets presence'); } catch {}
-                            await renderElementsFromTemplate(slide as any, 'comparison_cards', tmplElements);
-                            // Manual fallback draw if template bullets did not render but data exists
-                            try {
-                              const flags = (slide as any).__renderedFlags || {};
-                              const aList = (slide as any).__data?.bulletsA as string[] | undefined;
-                              const bList = (slide as any).__data?.bulletsB as string[] | undefined;
-                              const needA = Array.isArray(aList) && aList.length > 0 && !flags['comparison_cards_bulletsA'];
-                              const needB = Array.isArray(bList) && bList.length > 0 && !flags['comparison_cards_bulletsB'];
-                              const areas = (templateConfig?.layouts?.comparison_cards?.areas) || {};
-                              const reg = templateConfig?.geometry?.regionDefs || {};
-                              const getBox = (areaName: string) => {
-                                const a: any = areas[areaName] || {};
-                                const ref = typeof a?.ref === 'string' ? a.ref : '';
-                                const refSize: any = ref && reg[ref] ? reg[ref] : {};
-                                const w = Number(a?.w) || Number(refSize?.w) || 3.8;
-                                const h = Number(a?.h) || Number(refSize?.h) || 2.4;
-                                const x = Number(a?.x) || 0.8;
-                                const y = Number(a?.y) || 1.6;
-                                return { x, y, w, h };
-                              };
-                              const titleReserve = 0.6;
-                              if (needA) {
-                                const box = getBox('cardA');
-                                const y = box.y + titleReserve;
-                                const h = Math.max(0.2, box.h - titleReserve);
-                                const txt = aList.join('\n');
-                                slide.addText(txt, { x: box.x + 0.2, y, w: box.w - 0.4, h, fontSize: 16, fontFace: JPN_FONT, bullet: { type: 'bullet' }, color: '333333', valign: 'top' });
-                                logger.warn({ manual:true, len:aList.length, box:{x:box.x,y,h,w:box.w} }, 'comparison_cards: manual render bulletsA');
+                          }
+                          // bullets* キー（bulletsA/B/C..., bullets1/2/3...）を抽出（共通bulletsは除外）
+                          try {
+                            for (const k of Object.keys(slideData || {})) {
+                              if (k.toLowerCase() === 'bullets') continue;
+                              if (/^bullets([a-z]|\d+)$/i.test(k)) {
+                                const v: any = (slideData as any)[k];
+                                if (Array.isArray(v) && v.length) addUnique(v.map((s:any)=>String(s||'')));
                               }
-                              if (needB) {
-                                const box = getBox('cardB');
-                                const y = box.y + titleReserve;
-                                const h = Math.max(0.2, box.h - titleReserve);
-                                const txt = bList.join('\n');
-                                slide.addText(txt, { x: box.x + 0.2, y, w: box.w - 0.4, h, fontSize: 16, fontFace: JPN_FONT, bullet: { type: 'bullet' }, color: '333333', valign: 'top' });
-                                logger.warn({ manual:true, len:bList.length, box:{x:box.x,y,h,w:box.w} }, 'comparison_cards: manual render bulletsB');
-                              }
-                            } catch {}
+                            }
+                          } catch {}
+                          // 何も集まらなければ bullets を2分割
+                          if (!out.length && Array.isArray((slideData as any).bullets) && (slideData as any).bullets.length) {
+                            const common = (slideData as any).bullets.map((s:any)=>String(s||''));
+                            const mid = Math.ceil(common.length/2);
+                            addUnique(common.slice(0, mid));
+                            addUnique(common.slice(mid));
+                          }
+                          return out;
+                        };
+                        const cards = collectCards();
+                        const cardsCount = cards.length;
+                        try {
+                          const detail = cards.map((c, i) => ({ i, items: c.bullets.length, sample: c.bullets[0] || '' }));
+                          const hasBulletsC = !!(slideData as any)?.bulletsC;
+                          logger.debug({ cardsCount, keys: Object.keys(slideData || {}), hasBulletsC, detail }, 'comparison_cards: collected');
+                        } catch {}
+                        // Always use dynamic renderer (N cards)
+                        try { logger.debug({ cardsCount }, 'comparison_cards: dynamic render'); } catch {}
+                        // Draw template-provided title bar/text to keep decoration consistent
+                        try {
+                          const tmplEls = templateConfig?.layouts?.comparison_cards?.elements;
+                          if (Array.isArray(tmplEls) && tmplEls.length) {
+                            __templateHasElementsForLayout = true;
+                            (slide as any).__data = { title: slideData.title };
+                            await renderElementsFromTemplate(slide as any, 'comparison_cards', tmplEls);
                             delete (slide as any).__data;
-                            break;
+                          }
+                        } catch {}
+                        const reg = templateConfig?.geometry?.regionDefs || {};
+                        const grid = templateConfig?.geometry?.grid || {};
+                        const cardRef: any = reg['card'] || { w: 3.8, h: 2.8 };
+                        let cardW = Number(cardRef.w) || 3.8;
+                        const cardH = Number(cardRef.h) || 2.8;
+                        let gapX = Number(grid.gutter) || 0.36;
+                        const gapY = 0.4;
+                        const columns = ((): number => {
+                          if (cardsCount <= 3) return cardsCount;
+                          if (cardsCount === 4) return 2;
+                          return 3;
+                        })();
+                        const rows = Math.ceil(cardsCount / columns);
+                        // Container (use cardsGrid if available)
+                        const cg: any = (templateConfig?.layouts?.comparison_cards?.areas?.cardsGrid) || {};
+                        const reservedBottomIn = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
+                        const titleBarH = Number(templateConfig?.geometry?.regionDefs?.titleBar?.h) || 0.6;
+                        const suggestedTop = contentTopY + titleBarH + 0.2;
+                        const baseX = Number.isFinite(Number(cg.x)) ? Number(cg.x) : marginX;
+                        const baseY = Number.isFinite(Number(cg.y)) ? Number(cg.y) : (contentTopY + 1.0);
+                        // Prefer上方向: タイトル下の推奨位置とテンプレ指定の小さい方（より上）を採用
+                        const yTop = Math.min(baseY, suggestedTop);
+                        const yBottom = pageH - reservedBottomIn;
+                        const baseW = Number.isFinite(Number(cg.w)) ? Number(cg.w) : contentW;
+                        const baseH = Number.isFinite(Number(cg.h)) ? Number(cg.h) : (pageH - yTop - 0.6);
+                        const maxH = Math.max(0.2, yBottom - yTop);
+                        const container = {
+                          x: baseX,
+                          y: yTop,
+                          w: baseW,
+                          h: Math.min(baseH, maxH)
+                        };
+                        // Fit to container (width & height). Scale down proportionally if overflow.
+                        const totalW0 = columns * cardW + (columns - 1) * gapX;
+                        if (totalW0 > container.w) {
+                          const sW = Math.max(0.5, container.w / totalW0);
+                          cardW *= sW; gapX *= sW;
                         }
-                        // No explicit code fallback; rely on template
+                        const totalH0 = rows * cardH + (rows - 1) * gapY;
+                        let cardHScaled = cardH; let gapYScaled = gapY;
+                        if (totalH0 > container.h) {
+                          const sH = Math.max(0.5, container.h / totalH0);
+                          cardHScaled = cardH * sH; gapYScaled = gapY * sH;
+                        }
+                        const gridW = columns * cardW + (columns - 1) * gapX;
+                        const gridH = rows * cardHScaled + (rows - 1) * gapYScaled;
+                        const xStart = container.x + Math.max(0, (container.w - gridW) / 2);
+                        const yStart = container.y + Math.max(0, (container.h - gridH) / 2);
+                        try { logger.debug({ columns, rows, container, cardW, cardH: cardHScaled, gapX, gapY: gapYScaled }, 'comparison_cards: grid metrics'); } catch {}
+                        for (let i = 0; i < cardsCount; i++) {
+                          const r = Math.floor(i / columns);
+                          const c = i % columns;
+                          const x = xStart + c * (cardW + gapX);
+                          const y = yStart + r * (cardHScaled + gapYScaled);
+                          const baseHex = getPaletteColor(i).replace('#','');
+                          // underlay
+                          slide.addShape('rect', { x, y, w: cardW, h: cardHScaled, fill: { color: '#FFFFFF' }, line: { color: '#FFFFFF', width: 0 }, rectRadius: Math.min(cornerRadius, 6), shadow: shadowOf(resolveVisualShadow('kpi')) });
+                          // pastel fill
+                          const barAlpha = Number(((templateConfig?.visualStyles?.kpi as any)?.alpha?.barFill));
+                          const fallbackAlpha = Number(((templateConfig?.visualStyles?.bar_chart as any)?.alpha?.barFill)) || 0.2;
+                          const fillAlpha = Number.isFinite(barAlpha) ? (barAlpha as number) : fallbackAlpha;
+                          const transparency = Math.round((1 - Math.max(0, Math.min(1, fillAlpha))) * 100);
+                          slide.addShape('rect', { x, y, w: cardW, h: cardHScaled, fill: { color: `#${baseHex}`, transparency }, line: { color: `#${baseHex}`, width: 2 }, rectRadius: Math.min(cornerRadius, 6) });
+                          // text
+                          const titleReserve = 0.0; // no explicit header
+                          const textX = x + 0.2; const textW = cardW - 0.4;
+                          const textY = y + titleReserve + 0.15; const textH = Math.max(0.2, cardHScaled - titleReserve - 0.2);
+                          const bulletsText = (cards[i].bullets || []).map((s:string)=>s.replace(/\n[ \t　]*/g,' ').trim()).join('\n');
+                          // Contrast-aware text color
+                          const toRgb = (hex:string) => ({ r: parseInt(hex.slice(0,2),16), g: parseInt(hex.slice(2,4),16), b: parseInt(hex.slice(4,6),16) });
+                          const rgb = toRgb(baseHex);
+                          const a = Math.max(0, Math.min(1, fillAlpha));
+                          const blend = (cc:number) => Math.round(a*cc + (1-a)*255);
+                          const effHex = `#${[blend(rgb.r), blend(rgb.g), blend(rgb.b)].map(n=>n.toString(16).padStart(2,'0')).join('')}`;
+                          const textColor = pickTextColorForBackground(effHex);
+                          slide.addText(bulletsText, { x: textX, y: textY, w: textW, h: textH, fontSize: 16, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT, valign: 'top', color: textColor, paraSpaceAfter: 10, autoFit: true });
+                          // badge: A/B/C/D... at bottom-right
+                          try {
+                            const badgeCfg: any = (templateConfig?.visualStyles?.comparison_cards) || {};
+                            const bf = Number(badgeCfg.badgeFontSize) || 24;
+                            const bColorRaw = (typeof badgeCfg.badgeColor === 'string') ? String(badgeCfg.badgeColor) : 'auto';
+                            const bPadX = Number(badgeCfg.badgePadX) || 0.10;
+                            const bPadY = Number(badgeCfg.badgePadY) || 0.10;
+                            const bBg = typeof badgeCfg.badgeBg === 'string' ? String(badgeCfg.badgeBg) : 'transparent';
+                            const badge = String.fromCharCode('A'.charCodeAt(0) + i);
+                            const badgeW = 0.6, badgeH = 0.5;
+                            const bx = x + cardW - bPadX - badgeW; // right-most
+                            const by = y + cardHScaled - bPadY - badgeH; // bottom-most
+                            if (bBg && bBg !== 'transparent') {
+                              slide.addShape('rect', { x: bx, y: by, w: badgeW, h: badgeH, fill: buildFill(bBg), line: { color: 'FFFFFF', width: 0 } });
+                            }
+                            // auto color against effective background
+                            const badgeTextColor = ((): string => {
+                              if (bColorRaw && bColorRaw.toLowerCase() !== 'auto') return normalizeColorToPptxHex(bColorRaw) || 'FFFFFF';
+                              return textColor; // use same contrast color as main text for simplicity
+                            })();
+                            slide.addText(badge, { x: bx, y: by, w: badgeW, h: badgeH, fontSize: bf, bold: true, color: badgeTextColor, align: 'right', valign: 'bottom', fontFace: JPN_FONT });
+                          } catch {}
+                        }
+                        break;
                     }
                     break;
                 case 'checklist_top_bullets_bottom':
@@ -3081,7 +3192,7 @@ export const createPowerpointTool = createTool({
                         const tmplElements = templateConfig?.layouts?.checklist_top_bullets_bottom?.elements;
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
-                            try { logger.info({ layout: 'checklist_top_bullets_bottom' }, 'Rendering from template elements'); } catch {}
+                            try { logger.debug({ layout: 'checklist_top_bullets_bottom' }, 'Rendering from template elements'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere };
                             await renderElementsFromTemplate(slide as any, 'checklist_top_bullets_bottom', tmplElements);
                             delete (slide as any).__data;
@@ -3106,7 +3217,7 @@ export const createPowerpointTool = createTool({
                             const targetElems = templateConfig?.layouts?.[targetLayout]?.elements;
                             if (Array.isArray(targetElems) && targetElems.length) {
                                 __templateHasElementsForLayout = true;
-                                try { logger.info({ from: 'content_only', to: targetLayout }, 'Redirecting rendering to target layout to avoid overlap.'); } catch {}
+                                try { logger.debug({ from: 'content_only', to: targetLayout }, 'Redirecting rendering to target layout to avoid overlap.'); } catch {}
                                 (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere };
                                 await renderElementsFromTemplate(slide as any, targetLayout, targetElems);
                                 const hasVisualEl = Array.isArray(targetElems) && targetElems.some((e: any) => String(e?.type) === 'visual');
@@ -3117,7 +3228,7 @@ export const createPowerpointTool = createTool({
                         }
                         if (hasTemplate) {
                             __templateHasElementsForLayout = true;
-                            try { logger.info({ layout: 'content_only' }, 'Template elements present: skipping code-rendered defaults for content_only'); } catch {}
+                            try { logger.debug({ layout: 'content_only' }, 'Template elements present: skipping code-rendered defaults for content_only'); } catch {}
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
                             await renderElementsFromTemplate(slide as any, 'content_only', tmplElements);
                             // Mark visual presence to prevent fallback duplication
@@ -3290,7 +3401,7 @@ export const createPowerpointTool = createTool({
                 try { logger.warn({ error: e }, 'Failed to render page number'); } catch {}
             }
         }
-        logger.info({ appliedLogoCount, appliedCopyrightCount }, 'Applied branding to slides.');
+        try { logger.info({ appliedLogoCount, appliedCopyrightCount }, 'CreatePowerPoint: branding applied'); } catch {}
         
         // Charts diagnostics page has been removed per requirements.
 
