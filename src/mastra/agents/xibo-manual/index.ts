@@ -31,7 +31,7 @@ import { fastembed } from '@mastra/fastembed';
 export const xiboManualAgent = new Agent({
   name: 'Xibo Manual Agent',
   instructions: xiboManualInstructions,
-  model: google('gemini-1.5-pro-latest'),
+  model: google('gemini-2.0-flash-exp'),
   tools: getTools(),
   memory: new Memory({
     options: {
