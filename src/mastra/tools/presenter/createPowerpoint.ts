@@ -6,8 +6,18 @@
  * the Search AI Company, either version 3 of the License, or
  * any later version.
  *
- * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * You should have received a copy of the Elastic License 2.0 (ELv2).
  * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Module: createPowerpoint
+ * Summary:
+ *   Template-first presentation generator. Renders slides based on default.json
+ *   and optional per-slide `visual_recipe` with registry-based fallbacks.
+ * Notes:
+ *   - Keep layout decisions centralized; avoid duplicating visual rendering.
+ *   - Respect branding areas (reservedBottom) to prevent overlap.
  */
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -26,6 +36,10 @@ const JPN_FONT = 'Noto Sans JP';
 
 // Define a master slide layout for a consistent look and feel
 
+/**
+ * Lighten a hex color by adding `amount` to each RGB channel (clamped to 255).
+ * Accepts '#RRGGBB' or 'RRGGBB' and returns '#RRGGBB'.
+ */
 function lightenHex(hex: string, amount: number): string {
   const h = (hex || '#E6F7FF').replace('#', '');
   const r = Math.min(255, Math.round(parseInt(h.slice(0,2) || 'E6', 16) + amount));
@@ -63,6 +77,9 @@ function resolveTitleBarColorFromTemplate(templateConfig: any, layoutKey: string
 }
 
 // Compute readable text color (black or white) based on background luminance
+/**
+ * Pick readable text color ('000000' or 'FFFFFF') based on background luminance.
+ */
 function pickTextColorForBackground(hex: string): '000000' | 'FFFFFF' {
   const h = (hex || '').replace('#', '');
   const r = parseInt(h.slice(0, 2) || '00', 16) / 255;
@@ -75,6 +92,10 @@ function pickTextColorForBackground(hex: string): '000000' | 'FFFFFF' {
 }
 
 // Accept #RRGGBB | #RRGGBBAA | rgba(r,g,b,a) and return 6-digit hex (no '#')
+/**
+ * Normalize common CSS-like color formats to 6-digit uppercase hex (without '#').
+ * Supports '#RRGGBB', '#RRGGBBAA', 'rgba(r,g,b,a)'. Returns undefined if invalid.
+ */
 function relaxedToHex6(input?: string): string | undefined {
   if (!input) return undefined;
   const s = String(input).trim();
@@ -96,6 +117,10 @@ function relaxedToHex6(input?: string): string | undefined {
 }
 
 // Download remote image to temp and return local path
+/**
+ * Download an image if the input is a URL; otherwise return the original path.
+ * Saves to `public/temp/images` and returns the local file path.
+ */
 async function downloadImageIfUrl(maybeUrl: string): Promise<string> {
   try {
     if (!/^https?:\/\//i.test(maybeUrl)) return maybeUrl;
@@ -134,6 +159,7 @@ async function downloadImageIfUrl(maybeUrl: string): Promise<string> {
 }
 
 // Normalize common CSS color formats to PPTX hex without '#'
+/** Normalize CSS color inputs to PPTX hex (without '#'). */
 function normalizeColorToPptxHex(input?: string): string | undefined {
   if (!input) return undefined;
   const s = String(input).trim();
@@ -171,6 +197,7 @@ function normalizeColorToPptxHex(input?: string): string | undefined {
 }
 
 // Parse color string (#RRGGBB | #RRGGBBAA | rgba()) and return hex (no '#') and alpha 0..1
+/** Parse color with alpha, returning { hex, alpha } suitable for pptxgen. */
 function parseColorWithAlpha(input?: string): { hex: string; alpha: number } | undefined {
   if (!input) return undefined;
   const s = String(input).trim();
@@ -201,6 +228,7 @@ function parseColorWithAlpha(input?: string): { hex: string; alpha: number } | u
 }
 
 // Build pptxgen fill from color string, supporting alpha via transparency (0-100)
+/** Build a pptxgen fill object from input color or object (passthrough). */
 function buildFill(input?: any): any {
   if (!input) return undefined;
   if (typeof input === 'object') return input;
@@ -214,6 +242,7 @@ function buildFill(input?: any): any {
 /**
  * Wraps text at word or punctuation boundaries up to a max character length per line.
  * Works for both spaced (EN) and unspaced (JA) texts by using breakable characters.
+ * Returns a string with newline breaks.
  */
 function wrapTextAtWordBoundaries(text: string, maxCharsPerLine: number): string {
   // Collapse hard newlines to spaces to avoid mid-word breaks introduced upstream
@@ -273,6 +302,10 @@ const colonMemo = new Map<string, string>();
 const bufferToDataUrlMemo = new WeakMap<Buffer, string>();
 
 // Wrap with memo
+/**
+ * Memoized wrapper for word-wrapping by character width.
+ * Uses a cache key of `${maxCharsPerLine}|${text}` to avoid repeated wrapping work.
+ */
 function wrapWithMemo(text: string, maxCharsPerLine: number): string {
   const key = `${maxCharsPerLine}|${text}`;
   const hit = wrapMemo.get(key);
@@ -292,8 +325,8 @@ function bufferToDataUrl(buf: Buffer): string {
 }
 
 /**
- * Formats a single bullet that may contain a title and content separated by '：' or ':'.
- * The content is wrapped and subsequent lines are indented to align after the colon.
+ * Format a single bullet that may contain a title and content separated by '：' or ':'.
+ * Content part is wrapped and subsequent lines are indented to align after the colon.
  */
 function formatColonSeparatedBullet(bullet: string, maxContentLineChars: number, indentCols: number = 4): string {
   // Remove unintended line breaks and leading full-width spaces after newlines
@@ -333,15 +366,12 @@ function formatColonSeparatedBullet(bullet: string, maxContentLineChars: number,
   return [first, ...rest].join('\n');
 }
 
-/**
- * Formats an array of bullets using colon-separated alignment.
- */
+/** Format an array of bullets using colon-separated alignment. */
 function formatBulletsForColonSeparation(bullets: string[], maxContentLineChars: number, indentCols: number = 4): string {
   return bullets.map(b => formatColonSeparatedBullet(b, maxContentLineChars, indentCols)).join('\n');
 }
 
-/**
- * Merge consecutive bullets that are continuations within Japanese quotes.
+/** Merge consecutive bullets that are continuations within Japanese quotes.
  * Example: ["「AAA。", "BBB。」"] -> ["「AAA。BBB。」"]
  */
 function mergeQuotedContinuations(items: string[]): string[] {
@@ -419,6 +449,7 @@ function toBoldRunsFromMarkdown(text: string): Array<{ text: string; options?: {
 }
 
 // Read image dimensions (PNG/JPEG minimal). Returns undefined on failure.
+/** Read image dimensions using minimal header parsing (PNG/JPEG). */
 async function readImageDimensions(filePath: string): Promise<{ width: number; height: number } | undefined> {
   try {
     const buf = await fs.readFile(filePath);
@@ -479,7 +510,6 @@ function prepareBulletsForTemplate(bullets: string[], subIndentCols: number = 10
   }
   return out;
 }
-
 /**
  * Formats quote text into 2-4 short lines by removing surrounding quotes,
  * collapsing spaces/newlines, and splitting at Japanese punctuation while
@@ -580,8 +610,8 @@ function fitBulletsToLines(
 }
 
 /**
- * Fits a block of text to target number of lines by adjusting wrap width
- * proportional to font size, then reducing font size as needed.
+ * Fit a block of text to a target number of lines by adjusting wrap width and font size.
+ * Returns formatted text (with newlines), the chosen font size, and wrap width (chars).
  */
 function fitTextToLines(
   text: string,
@@ -892,6 +922,11 @@ export const createPowerpointTool = createTool({
           const angle = Number.isFinite(obj.angle) ? Number(obj.angle) : 45;
           return { type, color, opacity, blur, offset, angle } as any;
         };
+        /**
+         * Resolve a shadow preset or custom object to pptxgen-compatible shadow config.
+         * Accepts preset keys in template tokens (e.g., 'soft'|'strong' or a named token)
+         * or an inline object. Returns undefined for 'none'.
+         */
         const shadowOf = (value: any, defaultPreset: 'none'|'soft'|'strong' = 'soft'): any => {
           if (value === 'none') return undefined;
           if (typeof value === 'string') {
@@ -918,6 +953,10 @@ export const createPowerpointTool = createTool({
         };
 
         // Resolve themed color tokens used by templates for table styling
+        /**
+         * Resolve template token or CSS-like color string into 6-digit hex (no '#').
+         * Prefers tokens in `templateConfig.tokens`, falls back to `relaxedToHex6` parsing.
+         */
         const resolveThemedColorToken = (val?: string): string | undefined => {
           if (!val) return undefined;
           const s = String(val).trim();
@@ -941,7 +980,6 @@ export const createPowerpointTool = createTool({
           if (parsed) return parsed.hex;
           return toHex(s);
         };
-
         // --- Visual categorical palette (for richer color variety) ---
         const ensureHash = (c: string): string => (c && c.startsWith('#')) ? c : (c ? `#${c}` : '#000000');
         const paletteColors: string[] = (() => {
@@ -1016,6 +1054,10 @@ export const createPowerpointTool = createTool({
           }
           return out;
         })();
+        /**
+         * Get a palette color string by index according to template rules.
+         * Distribution can be 'cycle' | 'shufflePerVisual' | 'shufflePerSlide'.
+         */
         const getPaletteColor = (index: number): string => {
           if (!Array.isArray(paletteColors) || paletteColors.length === 0) return secondary;
           const strategy: any = (templateConfig?.rules?.paletteStrategy) || {};
@@ -1386,14 +1428,71 @@ export const createPowerpointTool = createTool({
         // bullets area style from template
         const bulletsBg = typeof templateConfig?.areaStyles?.bullets?.bg === 'string' ? templateConfig.areaStyles.bullets.bg : undefined;
         const bulletsShadowValue: any = templateConfig?.areaStyles?.bullets?.shadow;
-
         // Draw infographic primitives on the given slide
         const ChartType: any = (pres as any).ChartType;
+                /**
+                 * Draw a single infographic onto a slide. This is the central dispatcher that first
+                 * tries the registry-based renderer (`infographicRegistry`) and, if unavailable,
+                 * falls back to code-driven implementations in this file (legacy). All coordinates
+                 * are inches within the current slide.
+                 *
+                 * @param targetSlide  pptxgenjs slide object to draw on
+                 * @param type         infographic type (e.g., 'gantt', 'timeline', 'process', ...)
+                 * @param payload      recipe/payload object for the renderer (shape depends on type)
+                 * @param region       optional drawing region { x, y, w, h } in inches
+                 */
                 async function drawInfographic(targetSlide: any, type: string, payload: any, region?: { x: number; y: number; w: number; h: number }) {
             const rx = region?.x ?? 0.8;
             const ry = region?.y ?? 3.6;
             const rw = region?.w ?? 8.4;
             const rh = region?.h ?? 2.2;
+                    // Shared helper for label column width across progress/gantt
+                    /**
+                     * Compute label column width (inches) for a set of labels.
+                     * Measures text via node-canvas when available; falls back to heuristic.
+                     * Caps are enforced by min/max ratio and absolute min width.
+                     */
+                    const computeLabelColumnWidth = (labels: string[], fontPt: number, containerW: number, opts?: { minRatio?: number; maxRatio?: number; fudge?: number; pad?: number; minIn?: number; fontFace?: string; dpi?: number }) => {
+                        const fudge = Number(opts?.fudge) || 1.00;
+                        const pad = Number(opts?.pad) || 0.04;
+                        const minRatio = Number(opts?.minRatio) || 0;
+                        const maxRatio = Number(opts?.maxRatio) || 0.25;
+                        const minIn = Number(opts?.minIn) || 0.12;
+                        const fontFace = String(opts?.fontFace || JPN_FONT);
+                        const dpi = Number(opts?.dpi) || 96;
+                        let maxW = 0;
+                        let measured = false;
+                        try {
+                            const { createCanvas } = require('canvas');
+                            const ctx = createCanvas(10, 10).getContext('2d');
+                            ctx.font = `${fontPt}px ${fontFace}`;
+                            for (const s of (labels || [])) {
+                                const m = ctx.measureText(String(s || ''));
+                                const wIn = (Number(m?.width) || 0) / dpi;
+                                if (wIn > maxW) maxW = wIn;
+                            }
+                            measured = true;
+                        } catch {}
+                        if (!measured) {
+                            const heightIn = Math.max(0, fontPt) / 72;
+                            const widthHalf = heightIn * 0.35;
+                            const widthFull = heightIn * 0.60;
+                            const widthSpace = heightIn * 0.20;
+                            for (const s of (labels || [])) {
+                                let w = 0;
+                                for (const ch of String(s||'')) {
+                                    const code = ch.codePointAt(0) || 0;
+                                    const isHalf = (code <= 0x007F) || (code >= 0xFF61 && code <= 0xFF9F);
+                                    if (ch === ' ') w += widthSpace; else w += isHalf ? widthHalf : widthFull;
+                                }
+                                if (w > maxW) maxW = w;
+                            }
+                        }
+                        const proposed = maxW * fudge + pad;
+                        const floorByRatio = (minRatio > 0) ? Math.max(minIn, containerW * minRatio) : minIn;
+                        const capByRatio = Math.max(minIn, containerW * maxRatio);
+                        return Math.min(Math.max(floorByRatio, proposed), capByRatio);
+                    };
             // debug dispatch log removed after verification
             try { logger.debug({ type: String(type||''), region: { x: rx, y: ry, w: rw, h: rh } }, 'drawInfographic(entry)'); } catch {}
                     // Registry-driven rendering first
@@ -1619,14 +1718,42 @@ export const createPowerpointTool = createTool({
                     const valFs = Number(valCfg.fontSize) || 12;
                     const valAlignRight = String(valCfg.align||'right').startsWith('r');
                     const valOffset = Number.isFinite(Number(valCfg.offset)) ? Number(valCfg.offset) : 0.04;
-                    const barAreaX = rx + rw * 0.40;
-                    const barAreaW = rw * 0.55;
-                    const labelW = rw * 0.35;
+                    // Compute label width dynamically with caps similar to registry
+                    /**
+                     * Compute label column width (inches) for progress labels using heuristic caps.
+                     */
+                    const computeLabelColumnWidth = (labels: string[], fontPt: number, containerW: number, opts?: { minRatio?: number; maxRatio?: number; fudge?: number; pad?: number; minIn?: number }) => {
+                        const fudge = Number(opts?.fudge) || 1.08;
+                        const pad = Number(opts?.pad) || 0.14;
+                        const minRatio = Number(opts?.minRatio) || 0.25;
+                        const maxRatio = Number(opts?.maxRatio) || 0.42;
+                        const minIn = Number(opts?.minIn) || 0.36;
+                        const heightIn = Math.max(0, fontPt) / 72;
+                        const avgHalf = heightIn * 0.5;
+                        const avgFull = heightIn * 0.9;
+                        let maxW = 0;
+                        for (const s of (labels || [])) {
+                            let w = 0;
+                            for (const ch of String(s||'')) {
+                                const code = ch.codePointAt(0) || 0;
+                                const isHalf = (code <= 0x007F) || (code >= 0xFF61 && code <= 0xFF9F);
+                                if (ch === ' ') w += avgHalf * 0.6; else w += isHalf ? avgHalf : avgFull;
+                            }
+                            maxW = Math.max(maxW, w);
+                        }
+                        const proposed = maxW * fudge + pad + Math.max(0.1, Number(labelGap)||0.08);
+                        const floorByRatio = Math.max(minIn, containerW * minRatio);
+                        const capByRatio = Math.max(minIn, containerW * maxRatio);
+                        return Math.min(Math.max(floorByRatio, proposed), capByRatio);
+                    };
+                    const labelW = computeLabelColumnWidth(items.map((it:any)=>String(it?.label??'')), labelFs, rw, { minRatio: 0, maxRatio: 0.38, fudge: 1.06, pad: 0.14, minIn: 0.30 });
+                    const barAreaX = rx + labelW;
+                    const barAreaW = Math.max(0.6, rw - labelW);
                     const barH = Math.min(barHeightMax, rh / Math.max(1, items.length) - 0.1);
                     items.slice(0, 8).forEach((it: any, i: number) => {
                         const y = ry + i * (barH + 0.12);
                         // label (right aligned by default)
-                        targetSlide.addText(String(it?.label ?? ''), { x: rx, y, w: labelW - labelGap, h: barH, fontSize: labelFs, fontFace: JPN_FONT, align: labelAlign, valign: 'middle' });
+                        targetSlide.addText(String(it?.label ?? ''), { x: rx, y, w: labelW - labelGap, h: barH, fontSize: labelFs, fontFace: JPN_FONT, align: labelAlign, valign: 'middle', fit: 'resize', wrap: false });
                         // bar background
                         targetSlide.addShape('rect', { x: barAreaX, y, w: barAreaW, h: barH, fill: { color: barBg }, line: { color: barBgLine, width: 0.5 } });
                         const v = Math.max(0, Math.min(100, Number(it?.value ?? 0)));
@@ -1720,19 +1847,46 @@ export const createPowerpointTool = createTool({
                         }
 
                         // Bars + per-task start/end date labels
-                        const barMaxX = barX0 + rw * 0.65;
+                        // Dynamically compute left label width based on text length and font size
+                        const estWidthIn = (text: string, fontPt: number): number => {
+                            const heightIn = Math.max(0, fontPt) / 72;
+                            const avgHalf = heightIn * 0.5;
+                            const avgFull = heightIn * 0.9;
+                            let wIn = 0;
+                            for (const ch of text) {
+                                const code = ch.codePointAt(0) || 0;
+                                const isHalf = (code <= 0x007F) || (code >= 0xFF61 && code <= 0xFF9F);
+                                if (ch === ' ') wIn += avgHalf * 0.6; else wIn += isHalf ? avgHalf : avgFull;
+                            }
+                            const base = wIn + 0.14; // side padding
+                            const buffer = 1.15; // 15% extra width to reduce wrapping
+                            return base * buffer;
+                        };
+                        const labelFontPt = 10;
+                        // Gantt uses a slightly tighter cap than progress to prioritize timeline area
+                        const leftLabelW = computeLabelColumnWidth(valid.map(v=>String(v.label||'')), labelFontPt, rw, { minRatio: 0, maxRatio: 0.34, fudge: 1.06, pad: 0.12, minIn: 0.30 });
+                        const gapLeftToBar = 0.06;
+                        const rightPad = Math.max(0.3, rw * 0.07);
+                        const dynBarX0 = rx + leftLabelW + gapLeftToBar;
+                        const dynBarAvailW = Math.max(0.2, rw - (leftLabelW + gapLeftToBar) - rightPad);
+                        const barMaxX = dynBarX0 + dynBarAvailW;
                         valid.forEach((t, i) => {
                             const y = ry + i * (barH + 0.12);
                             // Task label on the left
-                            targetSlide.addText(String(t.label), { x: rx, y, w: rw * 0.25, h: barH, fontSize: 10, fontFace: JPN_FONT, align: 'right', valign: 'middle' });
+                            targetSlide.addText(String(t.label), { x: rx, y, w: leftLabelW, h: barH, fontSize: labelFontPt, fontFace: JPN_FONT, align: 'right', valign: 'middle', fit: 'resize', wrap: false });
                             // Bar geometry
-                            const w = Math.max(0.05, scale(t.end!) - scale(t.start!));
-                            const x = barX0 + scale(t.start!);
-                            const barColor = getPaletteColor(i).replace('#','');
-                            targetSlide.addShape('rect', { x, y, w, h: barH, fill: { color: barColor }, line: { color: barColor, width: 0.5 } });
+                            const w = Math.max(0.05, (dynBarAvailW) * ((t.end!.getTime() - t.start!.getTime()) / spanMs));
+                            const x = dynBarX0 + (dynBarAvailW) * ((t.start!.getTime() - minStart.getTime()) / spanMs);
+                            // Bar colors: use template if specified, else fall back to palette color
+                            const ganttStyleLocalBar: any = (templateConfig?.visualStyles?.gantt) || {};
+                            const rawBar = String(ganttStyleLocalBar.barColor || '').trim().toLowerCase();
+                            const autoBar = !rawBar || rawBar === 'auto';
+                            const barHex = autoBar ? getPaletteColor(i).replace('#','') : (normalizeColorToPptxHex(ganttStyleLocalBar.barColor) || getPaletteColor(i).replace('#',''));
+                            const lineHex = normalizeColorToPptxHex(ganttStyleLocalBar.barLineColor) || barHex;
+                            targetSlide.addShape('rect', { x, y, w, h: barH, fill: { color: barHex }, line: { color: lineHex, width: 0.5 } });
                             // Per-phase start date label (above the bar)
-                            const ganttStyleLocal: any = (templateConfig?.visualStyles?.gantt) || {};
-                            const dateFs = Number.isFinite(Number(ganttStyleLocal.labelFontSize)) ? Math.max(6, Number(ganttStyleLocal.labelFontSize)) : 12;
+                            const ganttStyleLocalDate: any = (templateConfig?.visualStyles?.gantt) || {};
+                            const dateFs = Number.isFinite(Number(ganttStyleLocalDate.labelFontSize)) ? Math.max(6, Number(ganttStyleLocalDate.labelFontSize)) : 12;
                             const dateH = 0.2;
                             // Place label slightly above the bar without clamping to region top
                             const dateY = y - 0.18;
@@ -1740,11 +1894,11 @@ export const createPowerpointTool = createTool({
                             // Start label: align x with bar start, place above the bar (left-aligned)
                             const startBoxW = 1.6; // enough for YYYY-MM-DD
                             const startX = x;
-                            targetSlide.addText(startStr, { x: startX, y: dateY, w: startBoxW, h: dateH, fontSize: dateFs, fontFace: JPN_FONT, color: '666666', align: 'left', valign: 'bottom' });
+                            targetSlide.addText(startStr, { x: startX, y: dateY, w: startBoxW, h: dateH, fontSize: dateFs, fontFace: JPN_FONT, color: '666666', align: 'left', valign: 'bottom', fit: 'resize', wrap: false });
                             // Duration text inside bar (centered)
                             const durationDays = Math.max(1, Math.round((t.end!.getTime() - t.start!.getTime()) / dayMs));
                             const durText = `${durationDays}日`;
-                            const textColor = pickTextColorForBackground(`#${barColor}`).toString();
+                            const textColor = pickTextColorForBackground(`#${barHex}`).toString();
                             targetSlide.addText(durText, { x, y, w, h: barH, fontSize: 10, fontFace: JPN_FONT, color: textColor, align: 'center', valign: 'middle' });
                         });
                     } else {
@@ -1788,7 +1942,7 @@ export const createPowerpointTool = createTool({
                     }
                     // Axis labels (left)
                     for (let r = 0; r < rows; r++) {
-                        targetSlide.addText(String(yLabels[r] ?? ''), { x: rx + 0.05, y: gridY + r * cellH + (cellH - 0.3)/2, w: padLeft - 0.1, h: 0.3, fontSize: 12, align: 'right', fontFace: JPN_FONT });
+                        targetSlide.addText(String(yLabels[r] ?? ''), { x: rx + 0.05, y: gridY + r * cellH + (cellH - 0.3)/2, w: padLeft - 0.1, h: 0.3, fontSize: 12, align: 'right', fontFace: JPN_FONT, fit: 'resize', wrap: false });
                     }
                     // Color helper: blend white -> primary by t
                     const blend = (t: number) => {
@@ -1841,7 +1995,7 @@ export const createPowerpointTool = createTool({
                         const layerBg = i % 2 ? secondary : primary;
                         targetSlide.addShape('triangle', { x: rx + (rw - width)/2, y, w: width, h: rh / layers - 0.05, fill: { color: layerBg }, line: { color: '#FFFFFF', width: 0.5 } });
                         const pyrTextColor = pickTextColorForBackground(layerBg).toString();
-                        targetSlide.addText(String(steps[i]?.label ?? ''), { x: rx, y: y + 0.02, w: rw, h: rh / layers - 0.09, fontSize: 11, color: pyrTextColor, align: 'center', valign: 'middle', fontFace: JPN_FONT });
+                        targetSlide.addText(String(steps[i]?.label ?? ''), { x: rx, y: y + 0.02, w: rw, h: rh / layers - 0.09, fontSize: 11, color: pyrTextColor, align: 'center', valign: 'middle', fontFace: JPN_FONT, fit: 'resize', wrap: false });
                     }
                     break;
                 }
@@ -2254,7 +2408,7 @@ export const createPowerpointTool = createTool({
                         const y = startY + (i * (height / layers));
                         const __layer = getPaletteColor(i).replace('#','');
                         targetSlide.addShape('trapezoid', { x: startX + (topW - tW)/2, y, w: tW, h: height / layers - 0.04, fill: { color: __layer }, line: { color: outlineColor, width: 0.5 }, shadow: shadowOf(resolveVisualShadow('funnel')) } as any);
-                        targetSlide.addText(String(steps[i]?.label ?? ''), { x: startX + 0.15, y: y + 0.04, w: topW - 0.3, h: (height / layers) - 0.12, fontSize: 12, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: JPN_FONT });
+                        targetSlide.addText(String(steps[i]?.label ?? ''), { x: startX + 0.15, y: y + 0.04, w: topW - 0.3, h: (height / layers) - 0.12, fontSize: 12, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: JPN_FONT, fit: 'resize', wrap: false });
                     }
                     break;
                 }
@@ -2284,6 +2438,7 @@ export const createPowerpointTool = createTool({
                     break;
                 }
                 case 'roadmap': {
+                    try { logger.info('roadmap: start'); } catch {}
                     const milestones = Array.isArray(payload?.milestones) ? payload.milestones : [];
                     // no-op debug removed
                     // Add horizontal padding to avoid labels overflowing slide edges
@@ -2308,6 +2463,7 @@ export const createPowerpointTool = createTool({
                             targetSlide.addText(String(m.date), { x: dateX, y: startY + 0.56, w: dateW, h: 0.25, fontSize: 9, align: 'center', color: '666666', fontFace: JPN_FONT });
                         }
                     });
+                    try { logger.info('roadmap: done'); } catch {}
                     break;
                 }
                 case 'comparison': {
@@ -2461,7 +2617,7 @@ export const createPowerpointTool = createTool({
                             
                             const __dot2 = getPaletteColor(i).replace('#','');
                             targetSlide.addShape('ellipse', { x: cx - 0.08, y: startY - 0.08, w: 0.16, h: 0.16, fill: { color: __dot2 }, line: { color: outlineColor, width: 0.8 } });
-                        targetSlide.addText(String(s?.label ?? `Step ${i+1}`), { x: cx - 0.9, y: startY + 0.18, w: 1.8, h: 0.32, fontSize: 11, align: 'center', fontFace: JPN_FONT });
+                        targetSlide.addText(String(s?.label ?? `Step ${i+1}`), { x: cx - 0.9, y: startY + 0.18, w: 1.8, h: 0.32, fontSize: 11, align: 'center', fontFace: JPN_FONT, fit: 'resize', wrap: false });
                     });
                     } catch (e) {
                         targetSlide.addText('Timeline', { x: rx, y: ry, w: rw, h: 0.3, fontSize: 12, bold: true, fontFace: JPN_FONT });
@@ -2609,6 +2765,10 @@ export const createPowerpointTool = createTool({
             }
             const layoutKey = layout as string;
             const layoutAreas = (templateConfig?.layouts?.[layoutKey]?.areas) || null;
+            /**
+             * Resolve area rectangle by name from template layouts; falls back to provided defaults.
+             * Units are inches. Used for `content_with_visual`/`content_with_bottom_visual` flows.
+             */
             const resolveArea = (areaName: string, defaultX: number, defaultY: number, defaultW: number, defaultH: number) => {
                 if (!layoutAreas || !layoutAreas[areaName]) return { x: defaultX, y: defaultY, w: defaultW, h: defaultH };
                 const a = layoutAreas[areaName] as any;
@@ -2620,7 +2780,6 @@ export const createPowerpointTool = createTool({
                 return { x: Number.isFinite(x) ? x : defaultX, y: Number.isFinite(y) ? y : defaultY, w, h };
             };
             const titleBarAreaStyle = (templateConfig?.areaStyles?.titleBar || {}) as any;
-
             // Track template usage for this layout to decide on global fallbacks later
             let __templateHasElementsForLayout = false;
             let __templateHasVisualElForLayout = false;
@@ -2717,7 +2876,16 @@ export const createPowerpointTool = createTool({
                             const typeStr = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
                             const preferBottom = shouldPlaceVisualBottom(typeStr, perSlideRecipeHere);
                             // Render template elements; when preferBottom is true, skip template visual element
-                            const elementsToRender = preferBottom ? (tmplElements.filter((e: any) => String(e?.type) !== 'visual')) : tmplElements;
+                            // When we prefer bottom placement, skip both the template visual and template bullets,
+                            // we will render bullets ourselves at full width later.
+                            const elementsToRender = preferBottom
+                              ? (tmplElements.filter((e: any) => {
+                                  const t = String(e?.type || '');
+                                  const isVisual = t === 'visual';
+                                  const isTemplateBullets = t === 'text' && (String(e?.contentRef || '').toLowerCase() === 'bullets');
+                                  return !(isVisual || isTemplateBullets);
+                                }))
+                              : tmplElements;
                             // Provide slide data to renderer
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath, context_for_visual: (slideData as any).context_for_visual };
                             await renderElementsFromTemplate(slide as any, 'content_with_visual', elementsToRender);
@@ -2762,6 +2930,12 @@ export const createPowerpointTool = createTool({
                                         slide.addImage({ path: slideData.imagePath, x: va.x, y: va.y, w: va.w, h: va.h, sizing: { type: 'contain', w: va.w, h: va.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
                                         visualRendered = true;
                                     }
+                            // Ensure bullets are drawn full width (some templates skip bullets when bottoming out)
+                            const bulletsArr2 = Array.isArray(slideData.bullets) ? slideData.bullets.map((b:any)=>String(b||'').trim()).filter(Boolean) : [];
+                            if (bulletsArr2.length) {
+                                const bulletsText2 = bulletsArr2.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
+                                slide.addText(bulletsText2, { x: marginX, y: contentTopY + 0.5, w: contentW, h: Math.max(2.5, twoColTextH - 0.5), fontSize: 18, bullet: { type: 'bullet' }, fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                            }
                                 } else {
                                     const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.6, twoColVisualW, 3.4);
                                     logger.warn({ layout: 'content_with_visual', area: vArea, recipeType: (slideData as any)?.visual_recipe?.type || null }, 'Template elements missing visual. Falling back to code-rendered visual region');
@@ -2788,7 +2962,12 @@ export const createPowerpointTool = createTool({
                         slide.addText(toBoldRunsFromMarkdown(fitted.text) as any, { x: tArea.x, y: tArea.y, w: tArea.w, h: tArea.h, fontSize: fitted.fontSize, bold: true, fontFace: headFont, color: textColor, shadow: shadowOf(titleTextShadowValue, shadowPreset) });
                     }
                     {
-                        const bArea = resolveArea('bullets', twoColTextX, contentTopY + 0.5, twoColTextW, Math.max(2.5, twoColTextH - 0.5));
+                        // If bottom placement is preferred, render bullets in full content width
+                        const typeStr = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
+                        const preferBottomLocal = shouldPlaceVisualBottom(typeStr, perSlideRecipeHere);
+                        const bX = preferBottomLocal ? marginX : twoColTextX;
+                        const bW = preferBottomLocal ? contentW : twoColTextW;
+                        const bArea = resolveArea('bullets', bX, contentTopY + 0.5, bW, Math.max(2.5, twoColTextH - 0.5));
                     const cleanedBulletsCv = (slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim());
                     const bulletTextCv = cleanedBulletsCv.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
                         slide.addText(bulletTextCv, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: 18, bullet: { type: 'bullet' }, fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
@@ -2798,8 +2977,8 @@ export const createPowerpointTool = createTool({
                         const typeStr = String(perSlideRecipeHere.type || '');
                         const willBottom = shouldPlaceVisualBottom(typeStr, perSlideRecipeHere);
                         if (willBottom) {
-                            // Compute bullets actual bottom and expand visual area to available height
-                            const bAreaTmp = resolveArea('bullets', twoColTextX, contentTopY + 0.5, twoColTextW, Math.max(2.5, twoColTextH - 0.5));
+                            // Compute bullets actual bottom using full-width bullets area
+                            const bAreaTmp = resolveArea('bullets', marginX, contentTopY + 0.5, contentW, Math.max(2.5, twoColTextH - 0.5));
                             const estimateBulletsHeightInches = (items: string[], widthIn: number, fontPt: number, paraAfterPtLocal: number): number => {
                                 if (!items || !items.length) return 0;
                                 const charWidthIn = fontPt / 144;
@@ -3318,7 +3497,8 @@ export const createPowerpointTool = createTool({
                 if (crCfg && typeof crCfg === 'object') {
                     const show = (crCfg.enabled === true || crCfg.show === true);
                     const skipOnTitle = !!crCfg?.skipOnTitleSlide;
-                    if (show && !(skipOnTitle && index === 0)) {
+                    // If companyName is empty after resolution, suppress copyright entirely
+                    if (show && companyName && !(skipOnTitle && index === 0)) {
                         const fmt: string = typeof crCfg.format === 'string' && crCfg.format.trim() ? crCfg.format.trim() : '<companyName>';
                         const text = formatText(fmt);
                         const area = (crCfg.area || {}) as any;
@@ -3518,7 +3698,6 @@ export const createPowerpointTool = createTool({
                 logger.warn({ error: unlinkError, imagePath }, 'Could not delete temporary image.');
             }
         }
-
         // Best-effort: sweep leftover files under temp image/chart directories
         const sweepDirs = [chartsDir, imagesDir, publicChartsDir, publicImagesDir].filter(Boolean) as string[];
         for (const d of sweepDirs) {

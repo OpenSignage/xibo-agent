@@ -1,5 +1,13 @@
 /*
  * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the Elastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
  */
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -10,6 +18,9 @@ import { config } from '../xibo-agent/config';
 import { summarizeAndAnalyzeTool } from '../market-research/summarizeAndAnalyze';
 import { parseJsonStrings } from '../xibo-agent/utility/jsonParser';
 
+/**
+ * Input schema for AI template generator.
+ */
 const inputSchema = z.object({
   fileName: z.string().optional().describe('New template filename (default: aiGenerated.json)'),
   stylePreset: z.enum(['minimal','brutalist','editorial','neo_brutalism','glassmorphism','material','corporate_modern']).optional().describe('High-level style direction for the template'),
@@ -18,6 +29,9 @@ const inputSchema = z.object({
 const successSchema = z.object({ success: z.literal(true), data: z.object({ filePath: z.string() }) });
 const errorSchema = z.object({ success: z.literal(false), message: z.string() });
 
+/**
+ * Generate a new template JSON via AI, referencing default.json/README.md as guidance.
+ */
 export const generateTemplateAiTool = createTool({
   id: 'generate-template-ai',
   description: 'Generate a new presentation template JSON via AI using default.json and README.md as guidance.',

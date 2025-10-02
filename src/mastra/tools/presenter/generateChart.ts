@@ -1,6 +1,20 @@
 /*
  * Copyright (C) 2025 Open Source Digital Signage Initiative.
- * (restored stable implementation)
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the Elastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Module: generateChart
+ * Summary:
+ *   Chart.js-based server-side PNG generator used by pptx slides. Provides a
+ *   unified, template-aware rendering for bar/line/pie etc.
  */
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -14,6 +28,9 @@ const chartTypeSchema = z.enum([
   'radar', 'polarArea', 'scatter', 'bubble',
   'horizontalBar', 'stackedBar', 'area'
 ]);
+/**
+ * Input contract for chart image generation.
+ */
 const inputSchema = z.object({
   chartType: chartTypeSchema,
   title: z.string(),
@@ -60,6 +77,9 @@ const cachePut = (k: ChartKey, buf: Buffer) => {
   }
 };
 
+/**
+ * Tool to render a chart as PNG (server-side ChartJS) and return the image path.
+ */
 export const generateChartTool = createTool({
   id: 'generate-chart',
   description: 'Generates a chart image (bar, pie, or line) as PNG. Supports on-memory buffer return.',

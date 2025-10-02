@@ -1,5 +1,13 @@
 /*
  * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the Elastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
  */
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -13,6 +21,12 @@ import { googleTextToSpeechTool } from '../audio/googleTextToSpeech';
 import { getSpeechConfigByGender } from './speachConfig';
 const execFileAsync = promisify(execFile);
 
+/**
+ * Input schema for narration WAV generation.
+ * - fileName: Target PPTX file name (without directory)
+ * - gender: Voice gender (default female)
+ * - interSlidePrompt: Phrase inserted between slides
+ */
 const inputSchema = z.object({
   fileName: z.string().describe('File name under persistent_data/generated/presentations (without directory), e.g., presentation.pptx'),
   gender: z.enum(['male','female']).optional().describe('Voice gender (default: female)'),
@@ -22,6 +36,9 @@ const inputSchema = z.object({
 const successSchema = z.object({ success: z.literal(true), data: z.object({ filePath: z.string() }) });
 const errorSchema = z.object({ success: z.literal(false), message: z.string() });
 
+/**
+ * Create WAV narration from slide bullets using Google TTS, then mux later.
+ */
 export const createNarrationWavTool = createTool({
   id: 'create-narration-wav',
   description: 'Generate a single WAV narration (Google TTS) from all slide notes in a PPTX under generated/presentations (by file name). Output .wav is written to the same directory.',

@@ -12,7 +12,7 @@
 
 /**
  * @module market-research/index
- * @description Barrel file for exporting all market-research-related tools.
+ * @description Barrel exports for market research tools.
  */
 export { webSearchTool } from "./webSearch";
 export { contentScrapeTool } from "./contentScrape";

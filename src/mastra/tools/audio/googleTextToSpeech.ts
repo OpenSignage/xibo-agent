@@ -6,7 +6,7 @@
  * the Search AI Company, either version 3 of the License, or
  * any later version.
  *
- * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * You should have received a copy of the Elastic License 2.0 (ELv2).
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 import { createTool } from '@mastra/core/tools';
@@ -22,9 +22,16 @@ import fs from 'fs/promises';
  */
 
 // In-memory pronunciation dictionary cache (by absolute path)
+/** Cache of compiled pronunciation dictionary regex entries by absolute path. */
 const dictCache = new Map<string, { entries: Array<[RegExp, string]> }>();
 
 // Normalization helpers shared across calls
+/**
+ * Normalize a Japanese string for robust matching (NFKC, punctuation unification).
+ * - Converts half-width to full-width where applicable (NFKC)
+ * - Unifies prolonged sound marks and middle dots
+ * - Collapses full-width/duplicate spaces
+ */
 const normalizeForMatching = (s: string) => {
   // NFKC covers most width variants (e.g., half-width Katakana → full-width)
   let n = s.normalize('NFKC');
@@ -36,13 +43,17 @@ const normalizeForMatching = (s: string) => {
   n = n.replace(/\u3000/g, ' ').replace(/\s{2,}/g, ' ');
   return n;
 };
+/** Escape string for use in RegExp constructor. */
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/** Success payload schema for audio result (file or buffer). */
 const successSchema = z.union([
 	z.object({ filePath: z.string() }),
 	z.object({ buffer: z.any(), bufferSize: z.number() }),
 ]);
+/** Standard error envelope according to tools-coding rules. */
 const errorSchema = z.object({ success: z.literal(false), message: z.string(), error: z.any().optional() });
+/** Standard success envelope according to tools-coding rules. */
 const successWrap = z.object({ success: z.literal(true), data: successSchema });
 
 export const googleTextToSpeechTool = createTool({
@@ -62,7 +73,12 @@ export const googleTextToSpeechTool = createTool({
 		ssmlGender: z.enum(['MALE','FEMALE','NEUTRAL']).optional().describe('Preferred voice gender when name is not specified.'),
 	}),
 	outputSchema: z.union([successWrap, errorSchema]),
-	execute: async ({ context }) => {
+  /**
+   * Execute Google TTS request.
+   * - Applies optional pronunciation dictionary before synthesis
+   * - Uses API key (env GOOGLE_TTS_API_KEY) and returns file path or Buffer
+   */
+  execute: async ({ context }) => {
 		const { text, voiceName, languageCode = 'ja-JP', speakingRate = 1.0, pitch = 0.0, format = 'mp3', fileNameBase, outDir, pronunciationDictPath, returnBuffer, ssmlGender } = context as any;
 		const apiKey = process.env.GOOGLE_TTS_API_KEY;
 		if (!apiKey) {
