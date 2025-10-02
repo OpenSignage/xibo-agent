@@ -35,15 +35,16 @@ export const xiboManualAgent = new Agent({
   tools: getTools(),
   memory: new Memory({
     options: {
-      // Retain the last 20 messages for context.
-      lastMessages: 20,
+      // Retain the last 40 messages for context.
+      lastMessages: 40,
       // Use semantic search to recall relevant past conversations.
       semanticRecall: {
-        topK: 2,
+        topK: 3,
         messageRange: {
           before: 2,
           after: 2
-        }
+        },
+        scope: 'resource',
       },
       // Automatically generate titles for conversation threads.
       threads: {

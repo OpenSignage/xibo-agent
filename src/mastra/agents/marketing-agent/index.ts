@@ -52,14 +52,15 @@ export const marketingAgent = new Agent({
   },
   memory: new Memory({
     options: {
-      // Retain the last 20 messages for context.
-      lastMessages: 20,
+      // Retain the last 40 messages for context.
+      lastMessages: 40,
       semanticRecall: {
         topK: 2,
         messageRange: {
           before: 2,
           after: 2
-        }
+        },
+        scope: 'resource',
       },
       threads: {
         generateTitle: true
