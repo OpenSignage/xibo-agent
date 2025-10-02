@@ -1,6 +1,16 @@
 /*
- * Lightweight image generator for PowerPoint rendering (no history, temp-only)
+ * Copyright (C) 2025 Open Source Digital Signage Initiative.
+ *
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the Elastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
  */
+
+// Lightweight image generator for PowerPoint rendering (no history, temp-only)
 import { GoogleGenAI, Modality } from '@google/genai';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
@@ -42,6 +52,15 @@ async function cropToAspect(buffer: Buffer, target: Aspect): Promise<Buffer> {
   }
 }
 
+/**
+ * Generate an image using Google Generative AI and save it under temp images.
+ * The result is optionally center-cropped to the requested aspect ratio.
+ *
+ * @param params.prompt          Prompt for the image model.
+ * @param params.aspectRatio     Target aspect ratio for slide placement.
+ * @param params.negativePrompt  Optional negative prompt to exclude elements.
+ * @returns `{ success, path, width, height, message }` (path on success)
+ */
 export async function generateImage(params: {
   prompt: string;
   aspectRatio: Aspect;

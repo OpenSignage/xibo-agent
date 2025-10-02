@@ -48,6 +48,7 @@ export const webSearchTool = createTool({
     maxResults: z.number().optional().default(20).describe('Maximum number of search results to return (default: 20)'),
   }),
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
+  /** Perform Brave Search with pagination, retry, and deduplication. */
   execute: async ({ context }) => {
     const { query, maxResults = 20 } = context;
     const apiKey = process.env.BRAVE_API_KEY;
@@ -99,7 +100,7 @@ export const webSearchTool = createTool({
         // Handle invalid request parameters
         if (response.status === 422) {
           const errorDetails = await response.text().catch(() => 'Could not read error details.');
-          logger.error('Invalid request (422)', { query, offset, errorDetails });
+          logger.error({ query, offset, errorDetails }, 'Invalid request (422)');
           return {
             success: false,
             message: 'Invalid request parameters',
@@ -214,7 +215,7 @@ export const webSearchTool = createTool({
 
       if (!validatedData.success) {
         const message = "Validation error occurred";
-        logger.error(message, { error: validatedData.error.format() });
+        logger.error({ error: validatedData.error.format() }, message);
         return {
           success: false,
           message: message,
@@ -228,7 +229,7 @@ export const webSearchTool = createTool({
 
     } catch (error) {
       const message = error instanceof Error ? error.message : "An unknown error occurred during web search.";
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return { 
         success: false, 
         message,

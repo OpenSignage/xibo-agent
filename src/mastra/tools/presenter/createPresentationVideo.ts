@@ -6,7 +6,7 @@
  * the Search AI Company, either version 3 of the License, or
  * any later version.
  *
- * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * You should have received a copy of the Elastic License 2.0 (ELv2).
  * see <https://www.elastic.co/licensing/elastic-license>.
  */
 
@@ -25,8 +25,11 @@ import { generateImage } from './generateImage';
 const execFileAsync = promisify(execFile);
 
 /**
- * Tool to generate video from PowerPoint files
- * Combines PNG images and WAV audio to create video
+ * Tool to generate MP4 video from a PPTX:
+ *  - Converts slides to PNG
+ *  - Generates narration WAV (or reuses configured audio)
+ *  - Composes opening/closing images
+ *  - Muxes video and audio via FFmpeg
  */
 export const createPresentationVideoTool = createTool({
   id: 'create-presentation-video',
@@ -154,18 +157,21 @@ export const createPresentationVideoTool = createTool({
 
         // Add opening content with duration based on opening audio
         const actualOpeningDuration = openingAudioDuration > 0 ? openingAudioDuration : 5.0;
-        imageListContent += `file '${openingContent.path.replace(/'/g, "'\\''")}'\nduration ${actualOpeningDuration}\n`;
+        imageListContent += `file '${openingContent.path.replace(/'/g, "'\\''")}'\n` +
+                            `duration ${actualOpeningDuration}\n`;
 
         // Add main slides as images
         pngFiles.forEach((pngFile, index) => {
           const narrationDuration = slideDurations[index] || 1.0;
           const totalDuration = narrationDuration + 2.0 + 1.0;
-          imageListContent += `file '${pngFile.replace(/'/g, "'\\''")}'\nduration ${totalDuration}\n`;
+          imageListContent += `file '${pngFile.replace(/'/g, "'\\''")}'\n` +
+                              `duration ${totalDuration}\n`;
         });
 
         // Add closing content with duration based on closing audio
         const actualClosingDuration = closingAudioDuration > 0 ? closingAudioDuration : 5.0;
-        imageListContent += `file '${closingContent.path.replace(/'/g, "'\\''")}'\nduration ${actualClosingDuration}\n`;
+        imageListContent += `file '${closingContent.path.replace(/'/g, "'\\''")}'\n` +
+                            `duration ${actualClosingDuration}\n`;
 
         await fs.writeFile(imageListPath, imageListContent, 'utf-8');
         
@@ -245,6 +251,12 @@ export const createPresentationVideoTool = createTool({
 
 /**
  * Generate PNG images from PPTX file
+ * - Uses LibreOffice to convert PPTX to PDF
+ * - Uses pdftoppm to convert PDF pages to PNG
+ * @param pptxPath Input PPTX path
+ * @param outputDir Output directory for PNGs
+ * @param videoQuality 'high'|'medium'|'low' (controls DPI)
+ * @returns Sorted PNG paths
  */
 async function generatePngFromPptx(pptxPath: string, outputDir: string, videoQuality: string): Promise<string[]> {
   const tempDir = path.join(outputDir, 'temp_pptx_to_png');
@@ -325,6 +337,13 @@ async function generatePngFromPptx(pptxPath: string, outputDir: string, videoQua
 
 /**
  * Generate WAV audio from PPTX file
+ * - Extracts speaker notes from PPTX (XML)
+ * - Synthesizes per-slide narration WAV with Google TTS
+ * - Concatenates intro silence + narration + outro silence per slide
+ * @param pptxPath Input PPTX path
+ * @param outputDir Output directory
+ * @param gender Voice gender
+ * @returns WAV path and narration-only durations per slide
  */
 async function generateWavFromPptx(pptxPath: string, outputDir: string, gender: 'male' | 'female'): Promise<{ wavPath: string, slideDurations: number[] }> {
   const baseName = path.basename(pptxPath, '.pptx');
@@ -491,7 +510,7 @@ async function generateWavFromPptx(pptxPath: string, outputDir: string, gender: 
     const listBody = segPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
     await fs.writeFile(listPath, listBody, 'utf-8');
     
-        logger.info({ segmentCount: segPaths.length }, '🔗 Concatenating audio segments');
+    logger.info({ segmentCount: segPaths.length }, '🔗 Concatenating audio segments');
     
     // Verify all segment files exist before concatenation
     for (const segPath of segPaths) {
@@ -520,7 +539,6 @@ async function generateWavFromPptx(pptxPath: string, outputDir: string, gender: 
   }
 }
 
-
 /**
  * Generate opening and closing content (images only)
  * This function generates AI images for opening and closing sequences
@@ -547,7 +565,6 @@ async function generateOpeningAndClosingContent(
     closingContent
   };
 }
-
 
 /**
  * Generate opening image
@@ -668,8 +685,6 @@ async function createFinalAudio(openingPath: string, mainPath: string, closingPa
     outputPath
   ]);
 }
-
-
 
 /**
  * Get audio file duration helper function

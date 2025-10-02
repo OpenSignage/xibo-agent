@@ -44,6 +44,7 @@ export const pdfScrapeTool = createTool({
     url: z.string().url().describe('The URL of the PDF file to scrape.'),
   }),
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
+  /** Hybrid PDF text extraction: pdf-ts first, then Tesseract OCR fallback. */
   execute: async ({ context }) => {
     const { url } = context;
     logger.info({ url }, `Attempting to scrape PDF content with hybrid approach...`);

@@ -6,8 +6,13 @@
  * the Search AI Company, either version 3 of the License, or
  * any later version.
  *
- * You should have received a copy of the GElastic License 2.0 (ELv2).
+ * You should have received a copy of the Elastic License 2.0 (ELv2).
  * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+/**
+ * Presenter tools index
+ * Exports a set of tools used for generating presentation assets
+ * (charts, PPTX documents, images, narration audio, and videos).
  */
 export { generateChartTool } from './generateChart';
 export { createPowerpointTool } from './createPowerpoint';

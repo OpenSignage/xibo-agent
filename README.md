@@ -2,6 +2,15 @@
 
 Xibo-CMSのためのエージェントツールです。
 
+## 変更点ハイライト（presenter 関連）
+
+- 動的ラベル幅: `progress`/`gantt` の左側ラベルはテキスト長から自動算出。テンプレートで上限/下限や係数を調整可能
+- テキスト自動フィット: 各ビジュアルのラベル表示に `fit: "resize"` と必要に応じて `wrap: false` を使用
+- ガントの色: `barColor`/`barLineColor` に `'auto'` を指定するとテンプレのパレットから自動着色
+- 自動レイアウト切替時の bullets: `roadmap`/`timeline` が bottom 配置に切り替わる場合でも bullets は全幅で表示
+
+---
+
 ## 環境設定
 
 ### APIキーの設定
@@ -247,12 +256,12 @@ APP_ROOT=/path/to/your/project
 - waterfall: `baselineRatio`, `grid`, `gridColor`, `gridWidth`, `gridLevels`, `positiveColor`, `negativeColor`
 - venn2: `aFillColor`, `aFillAlpha`, `aLineColor`, `bFillColor`, `bFillAlpha`, `bLineColor`, `showOverlapPercent`, `overlapFontSize`
 - heatmap: `baseColor`, `borderColor`, `padLeft`, `padTop`, `labelFontSize`
-- progress: `labelAlign`, `labelFontSize`, `labelGap`, `bar.heightMax`, `bar.bg`, `bar.bgLine`, `value.show`, `value.suffix`, `value.fontSize`, `value.align`, `value.offset`, `fillColor`
-- gantt: `labelFontSize`, `gridColor`, `gridWidth`, `minBarWidth`, `barColor`, `barLineColor`, `dateLabelFontSize`, `dateLabelColor`, `dateLabelOffsetY`, `dateLabelWidth`, `dateLabelHeight`
+- progress: `labelAlign`, `labelFontSize`, `labelGap`, `bar.heightMax`, `bar.bg`, `bar.bgLine`, `value.show`, `value.suffix`, `value.fontSize`, `value.align`, `value.offset`, `fillColor`, `labelMaxRatio`, `labelMinRatio`, `labelFudge`, `labelMinIn`
+- gantt: `labelFontSize`, `gridColor`, `gridWidth`, `minBarWidth`, `barColor`, `barLineColor`, `dateLabelFontSize`, `dateLabelColor`, `dateLabelOffsetY`, `dateLabelWidth`, `dateLabelHeight`, `labelMaxRatio`, `labelMinRatio`, `labelFudge`, `labelMinIn`
 - checklist: `gapY`, `markSize`, `baseRowHeight`, `markLineColor`, `markFillColor`, `textColor`
 - matrix: `frameLineColor`, `axisLineColor`, `axisFontSize`, `pointFill`, `pointLine`, `pointSize`, `labelFontSize`
 - comparison: `labelColor`, `labelFontSize`, `valueColor`, `valueFontSize`, `layoutPolicy.gapX`, `layoutPolicy.padX`, `layoutPolicy.padY`
-- callouts: `boxBgColor`, `boxLineColor`, `labelFontSize`, `valueFontSize`, `labelColor`, `valueColor`, `icon.enabled`, `icon.size`, `icon.padding`
+- callouts: `boxBgColor`, `boxLineColor`, `labelFontSize`, `valueFontSize`, `labelColor`, `valueColor`, `icon.enabled`, `icon.size`, `icon.padding`, `cornerRadius`, `borderWidth`, `accentHeightRatio`, `accentAlpha`
 - kpi: `labelFontSize`, `valueFontSize`, `layout.gap1Col`, `layout.gap2Col`, `layout.outerMargin1Col`, `layout.outerMargin2Col`, `layout.innerPadX`
 - kpi_grid: `labelFontSize`, `valueFontSize`, `borderWidth`, `borderColor`, `gap`
 - tables: `headerFill`, `headerColor`, `rowFillA`, `rowFillB`
@@ -292,6 +301,61 @@ APP_ROOT=/path/to/your/project
 
 サンプル:
 - `persistent_data/presentations/recipes/sample-recipe.json` の「ガント予定（日付付き）」スライド。
+
+バー色・枠線色（更新）:
+- `barColor`: `'#RRGGBB'` または `'auto'` を指定できます。`'auto'`（未指定含む）の場合、テンプレートのパレットレパートリーをガントの各行に順番適用します。
+- `barLineColor`: `'#RRGGBB'` または `'auto'`。`'auto'`（未指定含む）の場合、塗り色と同色になります。
+
+例:
+```json
+{
+  "visualStyles": {
+    "gantt": {
+      "barColor": "auto",
+      "barLineColor": "auto"
+    }
+  }
+}
+```
+
+### progress/gantt ラベル幅制御（追補）
+
+`visualStyles.progress` と `visualStyles.gantt` では、左側ラベルの横幅をテキスト長に基づき自動算出します。以下の追加キーでテンプレートから調整できます（いずれも任意）。
+
+| キー | 型 | 既定値 | 適用先 | 説明 |
+|---|---|---|---|---|
+| labelMinRatio | number(0-1) | 0 | progress/gantt | ラベル幅の下限を領域幅比で指定（0の場合は比率下限を適用しない） |
+| labelMaxRatio | number(0-1) | 0.25 | progress/gantt | ラベル幅の上限（領域幅に対する比率） |
+| labelFudge | number(>0) | 1.00 | progress/gantt | 文字列の実測幅に掛ける微小係数（安全マージン） |
+| labelMinIn | number(in) | 0.12 | progress/gantt | ラベル幅の絶対最小（インチ） |
+
+実装上の挙動（更新）:
+- 可能な環境ではフォント実測（`canvas.measureText`）によりラベル幅を取得し、`labelFudge` と少量のパディングを加味してボックス幅を決定します。
+- `labelMinRatio` が 0 の場合は比率下限を用いず、`labelMinIn` のみを下限とします。
+- 上限は `labelMaxRatio` でクリップされます。
+
+テンプレ例:
+```json
+{
+  "visualStyles": {
+    "progress": { "labelMaxRatio": 0.30, "labelMinIn": 0.14 },
+    "gantt":    { "labelMaxRatio": 0.28, "labelFudge": 1.02 }
+  }
+}
+```
+
+### テキストボックスのフィット指定（テンプレ/コード共通）
+
+- ラベル等のテキストは、右寄せのままボックス自体を縮めるため `fit: "resize"` を使用します。必要に応じて `wrap: false`（折り返し禁止）を併用してください。
+- PptxGenJS の `fit` オプション仕様は公式ドキュメントを参照してください。
+  - 参考: https://gitbrent.github.io/PptxGenJS/docs/api-text.html
+
+### 自動レイアウト切替時の bullets 全幅表示
+
+- `roadmap`/`timeline` が `content_with_visual` から `content_with_bottom_visual` に自動切替される場合でも、bullets 領域は `marginX` から `contentW` までの全幅で描画されます。
+- bullets が非表示になる問題は修正済みで、bottom 配置フローでは常に bullets を明示的に描画します。
+
+（以下、既存の各タイプ詳細やチャート仕様はそのまま維持）
 
 ### ブレットチャート（bullet）のスタイル指定
 

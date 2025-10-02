@@ -1,7 +1,24 @@
 /*
  * Copyright (C) 2025 Open Source Digital Signage Initiative.
  *
- * Elastic License 2.0 (ELv2)
+ * You can redistribute it and/or modify
+ * it under the terms of the Elastic License 2.0 (ELv2) as published by
+ * the Search AI Company, either version 3 of the License, or
+ * any later version.
+ *
+ * You should have received a copy of the Elastic License 2.0 (ELv2).
+ * see <https://www.elastic.co/licensing/elastic-license>.
+ */
+
+/**
+ * Module: infographicRegistry
+ * Summary:
+ *   Central registry of code-driven infographic renderers (gantt, timeline, heatmap, etc.).
+ *   Each renderer reads visual styles from the template (`visualStyles.*`) and draws directly
+ *   to the pptxgenjs slide.
+ * Notes:
+ *   - Keep renderers stateless; derive everything from `payload`, `region`, and `templateConfig`.
+ *   - Favor small helper functions and clear variable names for maintainability.
  */
 
 import { getVisualStyle, asNumber, asBoolean, asAlign, normalizeHex, asString } from './styleResolver';
@@ -23,10 +40,19 @@ export type Renderer = (args: {
 
 const registry: Record<string, Renderer> = Object.create(null);
 
+/**
+ * Register a renderer function for a given infographic `type`.
+ * Renderers should be pure (derive everything from args) and return `true`
+ * when they handled drawing, or `false` when they prefer fallback.
+ */
 export function register(type: string, renderer: Renderer) {
   registry[type] = renderer;
 }
 
+/**
+ * Dispatch drawing to a previously registered renderer.
+ * @returns true if a renderer exists and handled the request; false otherwise.
+ */
 export async function render(args: Parameters<Renderer>[0]): Promise<boolean> {
   const r = registry[args.type];
   try { logger.debug({ type: args.type }, 'infographicRegistry.render dispatch'); } catch {}
@@ -60,6 +86,54 @@ function computeDynamicPadLeft(labels: string[], basePadIn: number, fontPt: numb
     return Math.min(raw, cap);
   }
   return raw;
+}
+
+// 共通: ラベル列の左カラム幅（in）を算出
+function computeLabelColumnWidth(labels: string[], fontPt: number, containerW: number, opts?: { minRatio?: number; maxRatio?: number; fudge?: number; pad?: number; minIn?: number; fontFace?: string; dpi?: number }): number {
+  const fudge = Number(opts?.fudge) || 1.00;         // 余裕最小限
+  const pad = Number(opts?.pad) || 0.04;             // サイドパディング極小
+  const minRatio = Number(opts?.minRatio) || 0;      // 0 なら比率下限を適用しない
+  const maxRatio = Number(opts?.maxRatio) || 0.25;   // 上限比率（狭め）
+  const minIn = Number(opts?.minIn) || 0.12;         // 絶対最小（さらにタイト）
+  const fontFace = String(opts?.fontFace || 'Noto Sans JP');
+  const dpi = Number(opts?.dpi) || 96;
+  let maxW = 0;
+  // Try high-precision width via node-canvas when available
+  let measured = false;
+  try {
+    // Dynamic require per project guideline
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createCanvas } = require('canvas');
+    const ctx = createCanvas(10, 10).getContext('2d');
+    ctx.font = `${fontPt}px ${fontFace}`;
+    for (const s of (labels || [])) {
+      const m = ctx.measureText(String(s || ''));
+      const wIn = (Number(m?.width) || 0) / dpi;
+      if (wIn > maxW) maxW = wIn;
+    }
+    measured = true;
+  } catch {}
+  if (!measured) {
+    // Fallback heuristic tuned for JP: full-width≈0.60em, half-width≈0.35em, space≈0.20em
+    const heightIn = Math.max(0, fontPt) / 72;
+    const widthHalf = heightIn * 0.35;
+    const widthFull = heightIn * 0.60;
+    const widthSpace = heightIn * 0.20;
+    for (const s of (labels || [])) {
+      let w = 0;
+      for (const ch of String(s || '')) {
+        const code = ch.codePointAt(0) || 0;
+        // Basic half-width detection
+        const isHalf = (code <= 0x007F) || (code >= 0xFF61 && code <= 0xFF9F);
+        if (ch === ' ') w += widthSpace; else w += isHalf ? widthHalf : widthFull;
+      }
+      if (w > maxW) maxW = w;
+    }
+  }
+  const proposed = maxW * fudge + pad;
+  const floorByRatio = (minRatio > 0) ? Math.max(minIn, containerW * minRatio) : minIn;
+  const capByRatio = Math.max(minIn, containerW * maxRatio);
+  return Math.min(Math.max(floorByRatio, proposed), capByRatio);
 }
 
 // 共通: プログレス等のラベル領域幅を算出
@@ -138,7 +212,7 @@ register('bullet', ({ slide, payload, region, templateConfig, helpers }) => {
   const barAreaW = Math.max(0.6, rw - labelW);
   items.slice(0, 5).forEach((it: any, i: number) => {
     const y = ry + i * (rowH + 0.12);
-    slide.addText(String(it?.label ?? ''), { x: rx + 0.1, y, w: labelW - 0.1, h: rowH, fontSize: labelFs as number, fontFace: 'Noto Sans JP', align: labelAlign, valign: 'middle' });
+    slide.addText(String(it?.label ?? ''), { x: rx + 0.1, y, w: labelW - 0.1, h: rowH, fontSize: labelFs as number, fontFace: 'Noto Sans JP', align: labelAlign, valign: 'middle', fit: 'resize', wrap: false });
     const baseX = barAreaX;
     // Background bar only if style provided
     const barBg = normalizeHex(style.barBgColor);
@@ -160,15 +234,15 @@ register('bullet', ({ slide, payload, region, templateConfig, helpers }) => {
     const valueLabel = `${val}`; const targetLabel = `${tgt}`;
     const textColor = (valueTextColorOverride || helpers.pickTextColorForBackground(`#${barHex}`));
     if (valW > (valueBoxW as number)) {
-      slide.addText(valueLabel, { x: baseX + Math.max(0, valW - (valueBoxW as number)), y, w: valueBoxW as number, h: rowH, fontSize: valueFs as number, fontFace: 'Noto Sans JP', color: textColor, align: 'right', valign: 'middle' });
+      slide.addText(valueLabel, { x: baseX + Math.max(0, valW - (valueBoxW as number)), y, w: valueBoxW as number, h: rowH, fontSize: valueFs as number, fontFace: 'Noto Sans JP', color: textColor, align: 'right', valign: 'middle', fit: 'resize', wrap: false });
     } else {
-      slide.addText(valueLabel, { x: baseX + valW + (valueOutsidePad as number), y, w: valueBoxW as number, h: rowH, fontSize: valueFs as number, fontFace: 'Noto Sans JP', color: '#333333', align: 'left', valign: 'middle' });
+      slide.addText(valueLabel, { x: baseX + valW + (valueOutsidePad as number), y, w: valueBoxW as number, h: rowH, fontSize: valueFs as number, fontFace: 'Noto Sans JP', color: '#333333', align: 'left', valign: 'middle', fit: 'resize', wrap: false });
     }
     // Target text INSIDE bar area near the right side of target marker
     const tgtTextW = Math.max(0.36, valueBoxW as number);
     // Place inside bar near the right side of target marker, left-aligned
     const tgtTextX = Math.min(baseX + barAreaW - tgtTextW, Math.max(baseX + 0.04, tgtX + 0.04));
-    slide.addText(targetLabel, { x: tgtTextX, y, w: tgtTextW, h: rowH, fontSize: targetFs as number, fontFace: 'Noto Sans JP', color: '#333333', align: 'left', valign: 'middle' });
+    slide.addText(targetLabel, { x: tgtTextX, y, w: tgtTextW, h: rowH, fontSize: targetFs as number, fontFace: 'Noto Sans JP', color: '#333333', align: 'left', valign: 'middle', fit: 'resize', wrap: false });
   });
   return true;
 });
@@ -346,6 +420,11 @@ register('venn2', ({ slide, payload, region, templateConfig, helpers }) => {
 });
 
 // Heatmap
+/**
+ * Heatmap renderer
+ * Payload: { type: 'heatmap', x: string[], y: string[], z: number[][] }
+ * Styles (visualStyles.heatmap): baseColor, negativeColor, borderColor, padLeft, padTop, labelFontSize
+ */
 register('heatmap', ({ slide, payload, region, templateConfig }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const xLabels: string[] = Array.isArray(payload?.x) ? payload.x : [];
@@ -395,7 +474,7 @@ register('heatmap', ({ slide, payload, region, templateConfig }) => {
     slide.addText(String(xLabels[c] ?? ''), { x: gridX + c * cellW, y: ry + 0.05, w: cellW, h: 0.35, fontSize: labelFs, align: 'center', fontFace: 'Noto Sans JP' });
   }
   for (let r = 0; r < rows; r++) {
-    slide.addText(String(yLabels[r] ?? ''), { x: rx + 0.05, y: gridY + r * cellH + (cellH - 0.3)/2, w: Math.max(0.2, dynamicPadLeft - 0.1), h: 0.3, fontSize: labelFs, align: 'right', fontFace: 'Noto Sans JP', autoFit: true });
+    slide.addText(String(yLabels[r] ?? ''), { x: rx + 0.05, y: gridY + r * cellH + (cellH - 0.3)/2, w: Math.max(0.2, dynamicPadLeft - 0.1), h: 0.3, fontSize: labelFs, align: 'right', fontFace: 'Noto Sans JP', fit: 'resize', wrap: false });
   }
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -416,31 +495,40 @@ register('heatmap', ({ slide, payload, region, templateConfig }) => {
 });
 
 // Progress bars list
+/**
+ * Progress (horizontal bars) renderer
+ * Payload: { type: 'progress', items: Array<{ label: string; value: number; target?: number }> }
+ * Styles (visualStyles.progress): labelFontSize, labelGap, bar.{heightMax,bg,bgLine,showTrack}, value.{show,suffix,fontSize,align,offset}
+ */
 register('progress', ({ slide, payload, region, templateConfig }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = Math.max(0.2, region.h - 0.05);
   const items = Array.isArray(payload?.items) ? payload.items : [];
   const style = getVisualStyle(templateConfig, 'progress');
   const labelAlign = asAlign(style.labelAlign, 'right');
-  const labelFs = Number(style.labelFontSize);
-  const labelGap = Number(style.labelGap);
+  const labelFs = Number.isFinite(Number(style.labelFontSize)) ? Number(style.labelFontSize) : 14;
+  const labelGap = Number.isFinite(Number(style.labelGap)) ? Number(style.labelGap) : 0.08;
   const barCfg: any = style.bar || {};
-  const barHMax = Number(barCfg.heightMax);
-  const barBg = normalizeHex(barCfg.bg);
-  const barBgLine = normalizeHex(barCfg.bgLine);
-  const showTrack = (barCfg.showTrack === true);
+  const barHMax = Number.isFinite(Number(barCfg.heightMax)) ? Number(barCfg.heightMax) : 0.4;
+  const barBg = normalizeHex(barCfg.bg) || 'EAEAEA';
+  const barBgLine = normalizeHex(barCfg.bgLine) || 'DDDDDD';
+  const showTrack = (barCfg.showTrack !== false);
   const valCfg: any = style.value || {};
-  const showVal = (valCfg.show === true);
+  const showVal = (valCfg.show !== false);
   const valSuffix = typeof valCfg.suffix === 'string' ? valCfg.suffix : '%';
-  const valFs = Number(valCfg.fontSize);
+  const valFs = Number.isFinite(Number(valCfg.fontSize)) ? Number(valCfg.fontSize) : 12;
   const valAlignRight = asAlign(valCfg.align, 'right') === 'right';
-  const valOffset = Number(valCfg.offset);
-  if (![labelFs, labelGap, barHMax, valFs, valOffset].every(Number.isFinite) || !barBg || !barBgLine || !Number.isFinite(barHMax)) {
-    try { console.warn('progress: missing style values in template'); } catch {}
-    return false;
-  }
-  // Dynamically estimate label width based on the longest label（共通ヘルパー使用）
-  const estLabelW = computeLabelAreaWidth(items.map((it:any)=>String(it?.label??'')), labelFs, labelGap as number, rw, { min: 0.8, maxRatio: 0.62, fudge: 1.25 });
-  const labelW = estLabelW;
+  const valOffset = Number.isFinite(Number(valCfg.offset)) ? Number(valCfg.offset) : 0.04;
+  // 共通ヘルパーで左ラベル幅を決定（テンプレ値で上書き可）
+  const minRatioProg = Number.isFinite(Number((style as any).labelMinRatio)) ? Number((style as any).labelMinRatio) : 0.12;
+  const maxRatioProg = Number.isFinite(Number((style as any).labelMaxRatio)) ? Number((style as any).labelMaxRatio) : 0.38;
+  const fudgeProg = Number.isFinite(Number((style as any).labelFudge)) ? Number((style as any).labelFudge) : 1.06;
+  const minInProg = Number.isFinite(Number((style as any).labelMinIn)) ? Number((style as any).labelMinIn) : 0.30;
+  const labelW = computeLabelColumnWidth(
+    items.map((it:any)=>String(it?.label??'')),
+    labelFs as number,
+    rw,
+    { minRatio: Math.max(0, minRatioProg), maxRatio: maxRatioProg, fudge: fudgeProg, pad: Math.max(0.1, Number(labelGap)||0.08), minIn: minInProg }
+  );
   const barAreaX = rx + labelW;
   const barAreaW = Math.max(0.6, rw - labelW);
   const rows = Math.max(1, Math.min(8, items.length));
@@ -470,7 +558,7 @@ register('progress', ({ slide, payload, region, templateConfig }) => {
   }
   items.slice(0, 8).forEach((it: any, i: number) => {
     const y = ry + i * (barH + 0.12);
-    slide.addText(String(it?.label ?? ''), { x: rx, y, w: Math.max(0.2, labelW - (labelGap as number)), h: barH, fontSize: labelFs as number, fontFace: 'Noto Sans JP', align: labelAlign, valign: 'middle', autoFit: true, paraSpaceAfter: 0 });
+    slide.addText(String(it?.label ?? ''), { x: rx, y, w: Math.max(0.2, labelW - (labelGap as number)), h: barH, fontSize: labelFs as number, fontFace: 'Noto Sans JP', align: labelAlign, valign: 'middle', fit: 'resize', wrap: false, paraSpaceAfter: 0 });
     // Full track (optional)
     if (showTrack) {
       slide.addShape('rect', { x: barAreaX, y, w: barAreaW, h: barH, fill: { color: `#${barBg}` }, line: { color: `#${barBgLine}`, width: 0.5 } });
@@ -559,8 +647,14 @@ register('progress', ({ slide, payload, region, templateConfig }) => {
   return true;
 });
 
+/**
+ * Gantt (lightweight) renderer
+ * Payload: { type: 'gantt', tasks: Array<{ label: string; start: string; end?: string; duration?: number }> }
+ * Styles (visualStyles.gantt): labelFontSize, gridColor, gridWidth, minBarWidth,
+ *   barColor|'auto', barLineColor|'auto', dateLabel{FontSize,Color,OffsetY,Width,Height}
+ */
 // Gantt (lightweight)
-register('gantt', ({ slide, payload, region, templateConfig }) => {
+register('gantt', ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
   const visible = tasks.slice(0, 10);
@@ -580,13 +674,22 @@ register('gantt', ({ slide, payload, region, templateConfig }) => {
   const minStart = new Date(Math.min(...valid.map(v => v.start!.getTime())));
   const maxEnd = new Date(Math.max(...valid.map(v => v.end!.getTime())));
   const spanMs = Math.max(1, maxEnd.getTime() - minStart.getTime());
-  const scale = (d: Date) => (rw * 0.65) * ((d.getTime() - minStart.getTime()) / spanMs);
-  const barX0 = rx + rw * 0.28;
+  // Estimate label width (in) from text length and font size, then derive bar area dynamically
   const st = getVisualStyle(templateConfig, 'gantt');
-  const labelFs = Number(st.labelFontSize);
-  const gridColor = normalizeHex(st.gridColor);
-  const gridWidth = Number(st.gridWidth);
-  if (!Number.isFinite(labelFs) || !gridColor || !Number.isFinite(gridWidth)) { try { console.warn('gantt: missing style values in template'); } catch {} return false; }
+  const labelFs = Number.isFinite(Number(st.labelFontSize)) ? Number(st.labelFontSize) : 12;
+  const gridColor = normalizeHex(st.gridColor) || '9AA3AF';
+  const gridWidth = Number.isFinite(Number(st.gridWidth)) ? Number(st.gridWidth) : 1.2;
+  // ガントにも同じ共通ロジックを適用
+  const minRatioG = Number.isFinite(Number((st as any).labelMinRatio)) ? Number((st as any).labelMinRatio) : 0.08;
+  const maxRatioG = Number.isFinite(Number((st as any).labelMaxRatio)) ? Number((st as any).labelMaxRatio) : 0.34;
+  const fudgeG = Number.isFinite(Number((st as any).labelFudge)) ? Number((st as any).labelFudge) : 1.06;
+  const minInG = Number.isFinite(Number((st as any).labelMinIn)) ? Number((st as any).labelMinIn) : 0.36;
+  const leftLabelW = computeLabelColumnWidth(valid.map(v=>String(v.label||'')), labelFs as number, rw, { minRatio: Math.max(0, minRatioG), maxRatio: maxRatioG, fudge: fudgeG, pad: 0.12, minIn: minInG });
+  const gapLeftToBar = 0.06;
+  const rightPad = Math.max(0.3, rw * 0.07);
+  const barX0 = rx + leftLabelW + gapLeftToBar;
+  const barAvailW = Math.max(0.2, rw - (leftLabelW + gapLeftToBar) - rightPad);
+  const scale = (d: Date) => barAvailW * ((d.getTime() - minStart.getTime()) / spanMs);
   const dayMs = 24*60*60*1000; const spanDays = spanMs/dayMs;
   const unit: 'month'|'week'|'day'|'hour' = spanDays >= 60 ? 'month' : spanDays >= 14 ? 'week' : spanDays >= 2 ? 'day' : 'hour';
   const lines: Date[] = [];
@@ -603,28 +706,36 @@ register('gantt', ({ slide, payload, region, templateConfig }) => {
     const s = new Date(minStart); s.setMinutes(0,0,0); for (let d=new Date(s); d<=maxEnd; d.setHours(d.getHours()+1)) lines.push(clamp(new Date(d)));
   }
   for (const d of lines) { const gx = barX0 + scale(d); slide.addShape('line',{x:gx,y:ry,w:0,h:rh,line:{color:`#${gridColor}`,width:gridWidth}}); }
-  const barMaxX = barX0 + rw * 0.65;
+  const barMaxX = barX0 + barAvailW;
   valid.forEach((t, i) => {
     const y = ry + i*(rowH + 0.12);
-    slide.addText(String(t.label), { x: rx, y, w: rw*0.25, h: rowH, fontSize: labelFs as number, fontFace: 'Noto Sans JP', align: 'right', valign: 'middle' });
+    slide.addText(String(t.label), { x: rx, y, w: leftLabelW, h: rowH, fontSize: labelFs as number, fontFace: 'Noto Sans JP', align: 'right', valign: 'middle', fit: 'resize', wrap: false });
     const w = Math.max(Number(st.minBarWidth), scale(t.end!) - scale(t.start!));
     const x = barX0 + scale(t.start!);
-    const barColor = normalizeHex(st.barColor);
-    const barLine = normalizeHex(st.barLineColor);
-    if (!barColor || !barLine) { try { console.warn('gantt: missing bar colors'); } catch {} return false; }
-    slide.addShape('rect', { x, y, w, h: rowH, fill: { color: `#${barColor}` }, line: { color: `#${barLine}`, width: 0.5 } });
+    // Bar colors: allow 'auto' to use palette; if line color missing, reuse fill color
+    const rawBarColor: string = String((st as any).barColor ?? '').trim().toLowerCase();
+    const useAuto = !rawBarColor || rawBarColor === 'auto';
+    const paletteHex = (helpers && typeof helpers.getPaletteColor === 'function') ? String(helpers.getPaletteColor(i)).replace('#','') : undefined;
+    const fillHex = useAuto ? (paletteHex || 'E6E6E6') : (normalizeHex((st as any).barColor) || 'E6E6E6');
+    const lineHex = normalizeHex((st as any).barLineColor) || fillHex;
+    slide.addShape('rect', { x, y, w, h: rowH, fill: { color: `#${fillHex}` }, line: { color: `#${lineHex}`, width: 0.5 } });
     // Start date above bar
     const startStr = t.start!.toISOString().slice(0,10);
     const dateFs = Number(st.dateLabelFontSize);
     const dateColor = normalizeHex(st.dateLabelColor);
     if (Number.isFinite(dateFs) && dateColor) {
-      slide.addText(startStr, { x, y: y - Number(st.dateLabelOffsetY || 0.18), w: Number(st.dateLabelWidth || 1.6), h: Number(st.dateLabelHeight || 0.2), fontSize: dateFs, fontFace: 'Noto Sans JP', color: `#${dateColor}`, align: 'left', valign: 'bottom' });
+      slide.addText(startStr, { x, y: y - Number(st.dateLabelOffsetY || 0.18), w: Number(st.dateLabelWidth || 1.6), h: Number(st.dateLabelHeight || 0.2), fontSize: dateFs, fontFace: 'Noto Sans JP', color: `#${dateColor}`, align: 'left', valign: 'bottom', fit: 'resize', wrap: false });
     }
   });
   return true;
 });
 
 // Checklist
+/**
+ * Checklist renderer
+ * Payload: { type: 'checklist', items: Array<{ label: string }> }
+ * Styles (visualStyles.checklist): gapY, markSize, markAspect, markLineColor, markFillColor, baseRowHeight, textColor
+ */
 register('checklist', ({ slide, payload, region, templateConfig }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const items = Array.isArray(payload?.items) ? payload.items : [];
@@ -679,6 +790,11 @@ register('checklist', ({ slide, payload, region, templateConfig }) => {
 });
 
 // Matrix (2x2)
+/**
+ * Matrix (2x2) renderer
+ * Payload: { type: 'matrix', axes: { xLabels: [string,string], yLabels: [string,string] } }
+ * Styles (visualStyles.matrix): frameLineColor, axisLineColor, axisFontSize, point{Fill,Line,Size}, labelFontSize
+ */
 register('matrix', ({ slide, payload, region, templateConfig }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const xL = payload?.axes?.xLabels || [];
@@ -866,6 +982,12 @@ register('area_chart', async ({ slide, payload, region, templateConfig }) => {
 });
 
 // Comparison (two boxes)
+/**
+ * Comparison (two boxes) renderer
+ * Payload: { type: 'comparison', a: { label: string, value: string }, b: { label: string, value: string } }
+ * Styles (visualStyles.comparison): labelColor, valueColor, leftFill, rightFill, alpha.barFill,
+ *   labelHeight, labelFontSize, valueFontSize, layoutPolicy.{gapX,padX,padY}
+ */
 register('comparison', ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const a = payload?.a || {}, b = payload?.b || {};
@@ -944,6 +1066,12 @@ register('comparison', ({ slide, payload, region, templateConfig, helpers }) => 
 });
 
 // Callouts (4 boxes)
+/**
+ * Callouts (4 boxes) renderer
+ * Payload: { type: 'callouts', items: Array<{ label: string, value?: string }> }
+ * Styles (visualStyles.callouts): boxBgColor, boxLineColor, labelFontSize, valueFontSize,
+ *   labelColor, valueColor, cornerRadius, borderWidth, accentHeightRatio, accentAlpha
+ */
 register('callouts', async ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const items = Array.isArray(payload?.items) ? payload.items : [];
@@ -1060,6 +1188,11 @@ register('callouts', async ({ slide, payload, region, templateConfig, helpers })
 });
 
 // KPI cards (1〜4件)
+/**
+ * KPI cards (1〜4件) renderer
+ * Payload: { type: 'kpi', items: Array<{ label: string; value: string; trend?: 'up'|'down' }> }
+ * Styles (visualStyles.kpi): cardFill, cardLine, labelFontSize, valueFontSize, gapX, gapY, cornerRadius
+ */
 register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const items = Array.isArray(payload?.items) ? payload.items : [];
@@ -1155,6 +1288,11 @@ register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
 });
 
 // KPI donut（画像生成で代替）
+/**
+ * KPI donut renderer (image-based)
+ * Payload: { type: 'kpi_donut', items: Array<{ label: string; value: number }> }
+ * Styles (visualStyles.kpi_donut): ring{Thickness,Gap,Bg}, labelFontSize, valueFontSize
+ */
 register('kpi_donut', async ({ slide, payload, region, templateConfig }) => {
   const items = Array.isArray(payload?.items) ? payload.items : [];
   const labels = items.map((it:any)=>String(it?.label ?? ''));
@@ -1187,6 +1325,17 @@ register('kpi_donut', async ({ slide, payload, region, templateConfig }) => {
 });
 
 // Funnel
+/**
+ * Funnel renderer
+ * Payload:
+ *   {
+ *     type: 'funnel',
+ *     steps: Array<{ label: string; value: number }>
+ *   }
+ * Styles (visualStyles.funnel):
+ *   - labelFontSize, valueFontSize, baseColor, gradient{MinRatio,MaxRatio,Gamma},
+ *     alpha.barFill, borderColor, borderWidth
+ */
 register('funnel', ({ slide, payload, region, templateConfig, helpers }) => {
   // Draw proportional funnel based on steps[].value, with Y-axis labels on the left and value centered in each band
   const rx = region.x, ry = region.y, rw = region.w, rh = Math.max(0.2, region.h - 0.05);
@@ -1256,16 +1405,24 @@ register('funnel', ({ slide, payload, region, templateConfig, helpers }) => {
     const col = blendToward(baseHex, topBlendHex, 1 - ratio);
     const txt = helpers.pickTextColorForBackground(col);
     // band trapezoid (centered), flipped vertically so top is wider than bottom
-    slide.addShape('trapezoid', { x, y, w, h: segH, fill: { color: col, transparency: toTransp(fillAlpha) }, line: { color: `#${col}`, width: 2 }, flipV: true } as any);
+    // Border color/width: allow template override; default to subtle (0.5in) and same hue as fill
+    const lineCol = normalizeHex((st as any)?.borderColor) || col;
+    const lineW = Number.isFinite(Number((st as any)?.borderWidth)) ? Number((st as any)?.borderWidth) : 0.5;
+    slide.addShape('trapezoid', { x, y, w, h: segH, fill: { color: col, transparency: toTransp(fillAlpha) }, line: { color: `#${lineCol}`, width: lineW }, flipV: true } as any);
     // value centered (larger) - auto contrast (black/white)
-    slide.addText(String(v), { x, y, w, h: segH, fontSize: valueFs, fontFace: 'Noto Sans JP', align: 'center', valign: 'middle', color: `#${txt}` });
-    // y-axis label at left（autoFitで折返し回避） - force black and larger
-    slide.addText(String(it?.label ?? ''), { x: rx, y, w: Math.max(0.2, labelW - 0.1), h: segH, fontSize: labelFs, fontFace: 'Noto Sans JP', align: 'right', valign: 'middle', autoFit: true, color: '#000000' });
+    slide.addText(String(v), { x, y, w, h: segH, fontSize: valueFs, fontFace: 'Noto Sans JP', align: 'center', valign: 'middle', color: `#${txt}`, fit: 'resize', wrap: false });
+    // y-axis label at left（fitで折返し回避） - force black and larger
+    slide.addText(String(it?.label ?? ''), { x: rx, y, w: Math.max(0.2, labelW - 0.1), h: segH, fontSize: labelFs, fontFace: 'Noto Sans JP', align: 'right', valign: 'middle', fit: 'resize', wrap: false, color: '#000000' });
   }
   return true;
 });
 
 // Timeline
+/**
+ * Timeline renderer
+ * Payload: { type: 'timeline', steps: Array<{ label: string; date?: string }> }
+ * Styles (visualStyles.timeline): axisLineColor, axisLineWidth, pointFill, pointLine, pointSize, labelFontSize, labelColor
+ */
 register('timeline', ({ slide, payload, region, templateConfig }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const steps = Array.isArray(payload?.steps) ? payload.steps : [];
@@ -1282,8 +1439,10 @@ register('timeline', ({ slide, payload, region, templateConfig }) => {
     return false;
   }
   slide.addShape('line', { x: rx, y: ry + rh/2, w: rw, h: 0, line: { color: `#${axisLineColor}`, width: axisLineWidth } });
+  const nSteps = Math.max(1, steps.length);
+  const seg = rw / nSteps;
   steps.slice(0, 6).forEach((s: any, i: number) => {
-    const cx = rx + (i * (rw / Math.max(1, steps.length - 1)));
+    const cx = rx + i * seg + seg / 2;
     slide.addShape('ellipse', { x: cx - (pointSize/2), y: ry + rh/2 - (pointSize/2), w: pointSize, h: pointSize, fill: { color: `#${pointFill}` }, line: { color: `#${pointLine}`, width: 0.8 } });
     const finalColor = ((): string => {
       if (typeof labelColorSpec === 'string' && labelColorSpec.trim().toLowerCase() !== 'auto') {
@@ -1292,12 +1451,17 @@ register('timeline', ({ slide, payload, region, templateConfig }) => {
       }
       return '#111111';
     })();
-    slide.addText(String(s?.label ?? ''), { x: Math.max(rx, cx - 0.9), y: ry + rh/2 + 0.18, w: Math.min(1.8, rw), h: 0.32, fontSize: labelFs, align: 'center', fontFace: 'Noto Sans JP', color: finalColor });
+    slide.addText(String(s?.label ?? ''), { x: Math.max(rx, cx - 0.9), y: ry + rh/2 + 0.18, w: Math.min(1.8, rw), h: 0.32, fontSize: labelFs, align: 'center', fontFace: 'Noto Sans JP', color: finalColor, fit: 'resize', wrap: false });
   });
   return true;
 });
 
 // Process
+/**
+ * Process renderer (horizontal stages)
+ * Payload: { type: 'process', steps: Array<{ label: string }> }
+ * Styles (visualStyles.process): box{Fill,Line,Radius}, connector{LineColor,LineWidth}, labelFontSize
+ */
 register('process', ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const steps = Array.isArray(payload?.steps) ? payload.steps : [];
@@ -1331,7 +1495,13 @@ register('process', ({ slide, payload, region, templateConfig, helpers }) => {
 });
 
 // Roadmap
+/**
+ * Roadmap renderer
+ * Payload: { type: 'roadmap', phases: Array<{ label: string; items?: string[] }> }
+ * Styles (visualStyles.roadmap): lane{Fill,Line}, milestone{Fill,Line,Radius}, labelFontSize, itemFontSize
+ */
 register('roadmap', ({ slide, payload, region, templateConfig, helpers }) => {
+  try { logger.info('roadmap: start'); } catch {}
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const milestones = (Array.isArray(payload?.milestones) ? payload.milestones : []).slice(0, 8);
   if (!milestones.length) return true;
@@ -1389,10 +1559,16 @@ register('roadmap', ({ slide, payload, region, templateConfig, helpers }) => {
       slide.addText(it.tail, { x: tailX, y: y + boxH * 0.62 - 0.06, w: tailW, h: boxH * 0.28, fontSize: subFs, align: 'left', valign: 'top', color: it.txtColor, fontFace: 'Noto Sans JP' });
     }
   }
+  try { logger.info('roadmap: done'); } catch {}
   return true;
 });
 
 // Pyramid
+/**
+ * Pyramid renderer
+ * Payload: { type: 'pyramid', steps: Array<{ label: string; value: number }> }
+ * Styles (visualStyles.pyramid): baseColor, gradient{MinRatio,MaxRatio,Gamma}, labelFontSize, valueFontSize
+ */
 register('pyramid', ({ slide, payload, region, templateConfig, helpers }) => {
   /* pyramid: start */
   const getCustomGeometryType = (_sl: any): any => {
@@ -1503,7 +1679,7 @@ register('pyramid', ({ slide, payload, region, templateConfig, helpers }) => {
       return undefined;
     })();
     const finalTxt = useTplColor || autoTxt;
-    slide.addText(label, { x: leftLabel, y: yTop + bandH * 0.22, w: Math.max(0.1, widthLabel), h: bandH * 0.56, fontSize: labelFs, color: finalTxt, align: 'center', valign: 'middle', fontFace: 'Noto Sans JP' });
+    slide.addText(label, { x: leftLabel, y: yTop + bandH * 0.22, w: Math.max(0.1, widthLabel), h: bandH * 0.56, fontSize: labelFs, color: finalTxt, align: 'center', valign: 'middle', fontFace: 'Noto Sans JP', fit: 'resize', wrap: false });
   }
   // Draw outer border on TOP using FREEFORM silhouette (transparent fill, opaque border)
   const outerPts = [
@@ -1521,13 +1697,18 @@ register('pyramid', ({ slide, payload, region, templateConfig, helpers }) => {
 });
 
 // Map markers
+/**
+ * Map markers renderer
+ * Payload: { type: 'map_markers', markers: Array<{ label: string; lat: number; lng: number }> }
+ * Styles (visualStyles.map_markers): pin{Fill,Line,Size}, labelFontSize, mapProvider
+ */
 register('map_markers', async ({ slide, payload, region, templateConfig }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const st = getVisualStyle(templateConfig, 'map_markers');
   const markers: Array<{ label?: string; x?: number; y?: number; lon?: number; lat?: number }> = Array.isArray(payload?.markers) ? payload.markers : [];
   const apiKey = (process && process.env && process.env.GOOGLE_MAP_API_KEY) ? String(process.env.GOOGLE_MAP_API_KEY) : '';
   const hasLonLat = markers.some((m: { lon?: number; lat?: number }) => Number.isFinite(Number(m?.lon)) && Number.isFinite(Number(m?.lat)));
-  /* map_markers: entry (verbose log removed) */
+  try { logger.info('map_markers: start'); } catch {}
   if (apiKey && hasLonLat) {
     const pts = markers.map((m: { lon?: number; lat?: number; label?: string }) => ({ lon: Number(m.lon), lat: Number(m.lat), label: String(m.label || '') }));
     const lonMin = Math.min(...pts.map((p: { lon: number }) => p.lon)), lonMax = Math.max(...pts.map((p: { lon: number }) => p.lon));
@@ -1616,10 +1797,16 @@ register('map_markers', async ({ slide, payload, region, templateConfig }) => {
     slide.addShape('ellipse', { x: px - (dotSize/2), y: py - (dotSize/2), w: dotSize, h: dotSize, fill: { color: `#${dotFill}` }, line: { color: `#${dotLine}`, width: 0.8 } });
     if (m?.label) slide.addText(String(m.label), { x: px + 0.1, y: py - 0.06, w: 1.6, h: 0.24, fontSize: labelFs, fontFace: 'Noto Sans JP' });
   });
+  try { logger.info('map_markers: done'); } catch {}
   return true;
 });
 
 // KPI grid (2x2 up to 4 items)
+/**
+ * KPI grid (2x2) renderer
+ * Payload: { type: 'kpi_grid', items: Array<{ label: string; value: string }> }
+ * Styles (visualStyles.kpi_grid): cell{Fill,Line}, gapX, gapY, labelFontSize, valueFontSize, cornerRadius
+ */
 register('kpi_grid', ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const items = Array.isArray(payload?.items) ? payload.items : [];
@@ -1645,6 +1832,11 @@ register('kpi_grid', ({ slide, payload, region, templateConfig, helpers }) => {
 });
 
 // Simple image
+/**
+ * Image renderer
+ * Payload: { type: 'image', url: string, fit?: 'cover'|'contain'|'stretch' }
+ * Styles (visualStyles.image): borderColor, borderWidth, cornerRadius, bgColor
+ */
 register('image', async ({ slide, payload, region, templateConfig }) => {
   const st = getVisualStyle(templateConfig, 'image');
   const sizingType = typeof st.sizing === 'string' ? st.sizing : undefined;
@@ -1692,6 +1884,11 @@ register('image', async ({ slide, payload, region, templateConfig }) => {
 });
 
 // Simple table (headers + rows)
+/**
+ * Table renderer
+ * Payload: { type: 'table', headers?: string[], rows: string[][] }
+ * Styles (visualStyles.table): header{Fill,Line,FontSize,Color}, cell{Fill,Line,FontSize,Color}, zebraFill
+ */
 register('table', ({ slide, payload, region, templateConfig }) => {
   const headers: string[] | undefined = Array.isArray(payload?.headers) ? payload.headers.map((s:any)=>String(s||'')) : undefined;
   const rows2d: string[][] = Array.isArray(payload?.rows) ? payload.rows.map((r:any)=>Array.isArray(r)?r.map((s:any)=>String(s||'')):[String(r||'')]) : [];

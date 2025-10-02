@@ -46,6 +46,7 @@ export const summarizeAndAnalyzeTool = createTool({
     topP: z.number().optional().default(0.9).describe('Controls diversity via nucleus sampling (0.0-1.0, default: 0.9). Lower values make responses more focused.'),
   }),
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
+  /** Call Gemini API once with basic retry on quota/429. */
   execute: async ({ context }) => {
     const { text, objective, temperature = 0.7, topP = 0.9 } = context;
     const apiKey = process.env.GEMINI_API_KEY;

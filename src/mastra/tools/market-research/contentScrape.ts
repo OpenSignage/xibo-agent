@@ -19,6 +19,9 @@ import { TextDecoder } from 'util';
 
 // Create a custom https agent with a more permissive cipher suite
 // to handle potential TLS handshake issues with older servers.
+/** WARNING: Uses rejectUnauthorized:false for compatibility scraping.
+ * Do not enable in production environments with sensitive data.
+ */
 const httpsAgent = new https.Agent({
   ciphers: [
     'TLS_AES_256_GCM_SHA384',
@@ -53,7 +56,7 @@ const httpsAgent = new https.Agent({
 
 /**
  * @module contentScrapeTool
- * @description A tool to scrape the main textual content from a given URL.
+ * @description Fetch a URL and extract main textual content, removing boilerplate.
  */
 const outputSchema = z.object({
   url: z.string().url(),
@@ -81,6 +84,7 @@ export const contentScrapeTool = createTool({
     url: z.string().url().describe('The URL of the web page to scrape.'),
   }),
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
+  /** Download page and extract text using cheerio. */
   execute: async ({ context }) => {
     const { url } = context;
     logger.info({ url }, `Attempting to scrape content...`);
