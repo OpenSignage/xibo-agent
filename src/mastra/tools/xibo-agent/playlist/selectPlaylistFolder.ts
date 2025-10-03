@@ -79,7 +79,7 @@ export const selectPlaylistFolder = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("selectPlaylistFolder: API error response", { status: response.status, error: parsedError });
+        logger.error({ status: response.status, error: parsedError }, "selectPlaylistFolder: API error response");
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
       
@@ -90,12 +90,12 @@ export const selectPlaylistFolder = createTool({
     } catch (error) {
       // Handle Zod validation errors.
       if (error instanceof z.ZodError) {
-        logger.error("selectPlaylistFolder: Validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "selectPlaylistFolder: Validation error");
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
       // Handle any other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("selectPlaylistFolder: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "selectPlaylistFolder: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

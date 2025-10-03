@@ -87,7 +87,7 @@ export const deleteUploadFiles = createTool({
         }
       } catch (error: any) {
         const message = `Failed to read upload directory: ${error.message}`;
-        logger.error(message, { error });
+        logger.error({ error }, message);
         return { success: false, message, error };
       }
     }
@@ -112,7 +112,7 @@ export const deleteUploadFiles = createTool({
         }
       } catch (error: any) {
         failed.push({ path: file, error: error.message });
-        logger.error(`Failed to delete file '${fullPath}': ${error.message}`, { error });
+        logger.error({ error }, `Failed to delete file '${fullPath}': ${error.message}`);
       }
     }
 

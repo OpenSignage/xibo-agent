@@ -63,7 +63,7 @@ export const deleteScheduleRecurrence = createTool({
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => response.statusText);
-                logger.error('deleteScheduleRecurrence: HTTP error', { eventId, status: response.status, error: errorData });
+                logger.error({ eventId, status: response.status, error: errorData }, 'deleteScheduleRecurrence: HTTP error');
                 return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
             }
 
@@ -71,7 +71,7 @@ export const deleteScheduleRecurrence = createTool({
             return { success: true, message: `Recurrence for event ${eventId} deleted successfully.` };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "Unknown error";
-            logger.error('deleteScheduleRecurrence: Unexpected error', { eventId, error: errorMessage });
+            logger.error({ eventId, error: errorMessage }, 'deleteScheduleRecurrence: Unexpected error');
             return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
         }
     },

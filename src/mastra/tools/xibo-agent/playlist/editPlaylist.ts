@@ -128,11 +128,11 @@ export const editPlaylist = createTool({
           }
       });
 
-      logger.debug("editPlaylist: Request details", {
+      logger.debug({
         url,
         method: 'PUT',
         body: formData.toString()
-      });
+      }, "editPlaylist: Request details");
 
       // Make the API call to the Xibo CMS to edit the playlist.
       const response = await fetch(url, {
@@ -153,10 +153,10 @@ export const editPlaylist = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("editPlaylist: API error response", {
+        logger.error({
           status: response.status,
           error: parsedError
-        });
+        }, "editPlaylist: API error response");
         return {
           success: false,
           message: `HTTP error! status: ${response.status}`,
@@ -176,7 +176,7 @@ export const editPlaylist = createTool({
     } catch (error) {
       // Handle Zod validation errors specifically.
       if (error instanceof z.ZodError) {
-        logger.error("editPlaylist: Validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "editPlaylist: Validation error");
         return {
           success: false,
           message: "Validation error occurred",
@@ -185,7 +185,7 @@ export const editPlaylist = createTool({
       }
       // Handle any other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("editPlaylist: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "editPlaylist: An unexpected error occurred");
       return {
         success: false,
         message: errorMessage

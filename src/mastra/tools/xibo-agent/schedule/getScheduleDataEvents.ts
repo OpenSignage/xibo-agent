@@ -64,7 +64,7 @@ export const getScheduleDataEvents = createTool({
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => response.statusText);
-                logger.error('getScheduleDataEvents: HTTP error', { status: response.status, error: errorData });
+                logger.error({ status: response.status, error: errorData }, 'getScheduleDataEvents: HTTP error');
                 return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
             }
 
@@ -72,14 +72,14 @@ export const getScheduleDataEvents = createTool({
             const parsedData = responseDataSchema.safeParse(data);
 
             if (!parsedData.success) {
-                logger.error('getScheduleDataEvents: Zod validation failed', { error: parsedData.error });
+                logger.error({ error: parsedData.error }, 'getScheduleDataEvents: Zod validation failed');
                 return { success: false, message: 'Validation failed for the received schedule data.', error: parsedData.error.format() };
             }
 
             return { success: true, data: parsedData.data };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "Unknown error";
-            logger.error('getScheduleDataEvents: Unexpected error', { dataSetId, error: errorMessage });
+            logger.error({ dataSetId, error: errorMessage }, 'getScheduleDataEvents: Unexpected error');
             return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
         }
     },

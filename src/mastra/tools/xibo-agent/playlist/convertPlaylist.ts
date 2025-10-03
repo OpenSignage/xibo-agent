@@ -76,7 +76,7 @@ export const convertPlaylist = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("convertPlaylist: API error response", { status: response.status, error: parsedError });
+        logger.error({ status: response.status, error: parsedError }, "convertPlaylist: API error response");
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
       
@@ -86,11 +86,11 @@ export const convertPlaylist = createTool({
       return { success: true, data: validatedData };
     } catch (error) {
       if (error instanceof z.ZodError) {
-        logger.error("convertPlaylist: Validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "convertPlaylist: Validation error");
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("convertPlaylist: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "convertPlaylist: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

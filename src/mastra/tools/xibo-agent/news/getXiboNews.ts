@@ -91,13 +91,13 @@ export const getXiboNews = createTool({
       response = await fetch(rssUrl);
     } catch (error: any) {
       const message = `Network error while fetching RSS feed: ${error.message}`;
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return { success: false, message, error };
     }
     
     if (!response.ok) {
         const message = `Failed to fetch RSS feed. Status: ${response.status} ${response.statusText}`;
-        logger.error(message, { status: response.status });
+        logger.error({ status: response.status }, message);
         return { success: false, message, error: { statusCode: response.status } };
     }
     
@@ -110,7 +110,7 @@ export const getXiboNews = createTool({
 
         if (!validationResult.success) {
             const message = "RSS feed validation failed.";
-            logger.error(message, { error: validationResult.error.issues, data: parsedXml });
+            logger.error({ error: validationResult.error.issues, data: parsedXml }, message);
             return {
                 success: false,
                 message,
@@ -134,7 +134,7 @@ export const getXiboNews = createTool({
         };
     } catch (error: any) {
       const message = `Error parsing or processing RSS feed: ${error.message}`;
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return { success: false, message, error };
     }
   },

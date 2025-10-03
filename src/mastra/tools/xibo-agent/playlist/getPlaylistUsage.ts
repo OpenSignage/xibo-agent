@@ -74,7 +74,7 @@ export const getPlaylistUsage = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("getPlaylistUsage: API error response", { status: response.status, error: parsedError });
+        logger.error({ status: response.status, error: parsedError }, "getPlaylistUsage: API error response");
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
@@ -98,18 +98,18 @@ export const getPlaylistUsage = createTool({
         // If parsing fails, it's not a JSON string.
         // It could be a message like "Specified playlist has no usage".
         // In this case, we return an empty array and the message.
-        logger.info(`getPlaylistUsage: 'data' field was not a valid JSON array. Content: "${usageString}"`);
+        logger.info({}, `getPlaylistUsage: 'data' field was not a valid JSON array. Content: "${usageString}"`);
         return { success: true, data: [], message: usageString };
       }
     } catch (error) {
       // Handle any Zod validation errors from the initial parsing or JSON parsing.
       if (error instanceof z.ZodError) {
-        logger.error("getPlaylistUsage: Validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "getPlaylistUsage: Validation error");
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
       // Handle other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("getPlaylistUsage: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "getPlaylistUsage: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

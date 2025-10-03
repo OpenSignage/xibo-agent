@@ -63,7 +63,7 @@ export const getScheduleDisplayGroupIdEvents = createTool({
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => response.statusText);
-                logger.error('getScheduleDisplayGroupIdEvents: HTTP error', { status: response.status, error: errorData });
+                logger.error({ status: response.status, error: errorData }, 'getScheduleDisplayGroupIdEvents: HTTP error');
                 return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
             }
 
@@ -71,14 +71,14 @@ export const getScheduleDisplayGroupIdEvents = createTool({
             const parsedData = responseDataSchema.safeParse(data);
 
             if (!parsedData.success) {
-                logger.error('getScheduleDisplayGroupIdEvents: Zod validation failed', { error: parsedData.error });
+                logger.error({ error: parsedData.error }, 'getScheduleDisplayGroupIdEvents: Zod validation failed');
                 return { success: false, message: 'Validation failed for the received schedule data.', error: parsedData.error.format() };
             }
 
             return { success: true, data: parsedData.data };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "Unknown error";
-            logger.error('getScheduleDisplayGroupIdEvents: Unexpected error', { displayGroupId, error: errorMessage });
+            logger.error({ displayGroupId, error: errorMessage }, 'getScheduleDisplayGroupIdEvents: Unexpected error');
             return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
         }
     },

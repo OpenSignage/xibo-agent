@@ -112,11 +112,11 @@ export const addLayout = createTool({
       };
     }
 
-    logger.info(`Creating new layout "${context.name}"`, {
+    logger.info({
       templateId: context.layoutId,
       resolutionId: context.resolutionId,
       folderId: context.folderId,
-    });
+    }, `Creating new layout "${context.name}"`);
 
     const headers = await getAuthHeaders();
 
@@ -141,11 +141,11 @@ export const addLayout = createTool({
       const responseText = await response.text();
       const decodedText = decodeErrorMessage(responseText);
       const errorMessage = `Failed to create layout. API responded with status ${response.status}.`;
-      logger.error(errorMessage, {
+      logger.error({
         status: response.status,
         name: context.name,
         response: decodedText,
-      });
+      }, errorMessage);
 
       return {
         success: false,
@@ -161,24 +161,21 @@ export const addLayout = createTool({
 
     try {
       const validatedData = layoutResponseSchema.parse(data);
-      logger.info(
-        `Layout created successfully with ID: ${validatedData.layoutId}`,
-        {
-          layoutId: validatedData.layoutId,
-          name: validatedData.layout,
-        }
-      );
+      logger.info({
+        layoutId: validatedData.layoutId,
+        name: validatedData.layout,
+      }, `Layout created successfully with ID: ${validatedData.layoutId}`);
       return validatedData;
     } catch (validationError) {
       const errorMessage =
         "Response data validation failed after creating layout.";
-      logger.error(errorMessage, {
+      logger.error({
         error:
           validationError instanceof Error
             ? validationError.message
             : "Unknown validation error",
         responseData: data,
-      });
+      }, errorMessage);
       return {
         success: false,
         message: errorMessage,

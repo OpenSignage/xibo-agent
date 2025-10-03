@@ -54,10 +54,7 @@ export const saveWidgetElements = createTool({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => response.text());
-        logger.error(`saveWidgetElements: HTTP error occurred: ${response.status}`, {
-            status: response.status,
-            error: errorData,
-        });
+        logger.error({ status: response.status, error: errorData }, `saveWidgetElements: HTTP error occurred: ${response.status}`);
         return {
             success: false,
             message: `HTTP error! status: ${response.status}`,
@@ -69,7 +66,7 @@ export const saveWidgetElements = createTool({
       return { success: true, message: "Widget elements saved successfully." };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("saveWidgetElements: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "saveWidgetElements: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

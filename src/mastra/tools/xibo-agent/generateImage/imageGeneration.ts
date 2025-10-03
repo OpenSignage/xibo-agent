@@ -156,7 +156,7 @@ export const generateImage = createTool({
       // Generate image using Gemini API
       logger.info('Calling Gemini API for image generation...');
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash-preview-image-generation',
+        model: 'gemini-2.5-flash-image',
         contents: enhancedPrompt,
         config: {
           responseModalities: [Modality.TEXT, Modality.IMAGE],
@@ -172,7 +172,7 @@ export const generateImage = createTool({
       let fullPath = '';
 
       if (!response.candidates?.[0]?.content?.parts) {
-        logger.error('Invalid response structure from Gemini API', { response });
+        logger.error({ response }, 'Invalid response structure from Gemini API');
         throw new Error('Invalid response from Gemini API');
       }
 
@@ -187,9 +187,7 @@ export const generateImage = createTool({
           logger.info('Found image data in response');
           const imageData = part.inlineData.data;
           if (typeof imageData !== 'string') {
-            logger.error('Invalid image data format', {
-              type: typeof imageData,
-            });
+            logger.error({ type: typeof imageData }, 'Invalid image data format');
             throw new Error('Invalid image data format');
           }
 
@@ -272,19 +270,14 @@ export const generateImage = createTool({
       }
       return { success: true, data: { imagePath: fullPath, imageUrl, prompt: enhancedPrompt, width, height, textResponse } };
     } catch (error) {
-      logger.error(
-        `generateImage: An error occurred: ${
-          error instanceof Error ? error.message : 'Unknown error'
-        }`,
-        {
-          error,
-          generatorId,
-          context: {
-            prompt: context.prompt,
-            aspectRatio: context.aspectRatio,
-          },
+      logger.error({
+        error,
+        generatorId,
+        context: {
+          prompt: context.prompt,
+          aspectRatio: context.aspectRatio,
         },
-      );
+      }, `generateImage: An error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Unknown error',

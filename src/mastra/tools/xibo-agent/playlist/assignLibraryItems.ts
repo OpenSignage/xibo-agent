@@ -91,7 +91,7 @@ export const assignLibraryItems = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("assignLibraryItems: API error response", { status: response.status, error: parsedError });
+        logger.error({ status: response.status, error: parsedError }, "assignLibraryItems: API error response");
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
@@ -104,12 +104,12 @@ export const assignLibraryItems = createTool({
     } catch (error) {
       // Handle Zod validation errors specifically.
       if (error instanceof z.ZodError) {
-        logger.error("assignLibraryItems: Validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "assignLibraryItems: Validation error");
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
       // Catch and handle any other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("assignLibraryItems: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "assignLibraryItems: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

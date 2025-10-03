@@ -90,7 +90,7 @@ export const orderWidgets = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("orderWidgets: API error response", { status: response.status, error: parsedError });
+        logger.error({ status: response.status, error: parsedError }, "orderWidgets: API error response");
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
@@ -101,11 +101,11 @@ export const orderWidgets = createTool({
 
     } catch (error) {
       if (error instanceof z.ZodError) {
-        logger.error("orderWidgets: Validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "orderWidgets: Validation error");
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("orderWidgets: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "orderWidgets: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

@@ -163,7 +163,7 @@ export const copyPlaylist = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("copyPlaylist: API error response", { status: response.status, error: parsedError });
+        logger.error({ status: response.status, error: parsedError }, "copyPlaylist: API error response");
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
@@ -176,12 +176,12 @@ export const copyPlaylist = createTool({
     } catch (error) {
       // Handle Zod validation errors specifically.
       if (error instanceof z.ZodError) {
-        logger.error("copyPlaylist: Validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "copyPlaylist: Validation error");
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
       // Handle any other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("copyPlaylist: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "copyPlaylist: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

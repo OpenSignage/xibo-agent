@@ -127,7 +127,7 @@ export const addPlaylist = createTool({
           }
       });
 
-      logger.debug(`addPlaylist: Sending request to ${url}`, { params: params.toString() });
+      logger.debug({ params: params.toString() }, `addPlaylist: Sending request to ${url}`);
 
       // Send the POST request to create the playlist
       const response = await fetch(url, {
@@ -148,10 +148,10 @@ export const addPlaylist = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("addPlaylist: API error response", {
+        logger.error({
             status: response.status,
             error: parsedError
-        });
+        }, "addPlaylist: API error response");
         return {
           success: false,
           message: `HTTP error! status: ${response.status}`,
@@ -171,10 +171,10 @@ export const addPlaylist = createTool({
         };
       } catch (validationError) {
         // Handle cases where the API response does not match the expected schema
-        logger.error('addPlaylist: Response validation failed', { 
+        logger.error({ 
           error: validationError, 
           data 
-        });
+        }, 'addPlaylist: Response validation failed');
         return { 
           success: false, 
           message: 'Response validation failed', 
@@ -184,7 +184,7 @@ export const addPlaylist = createTool({
     } catch (error) {
       // Catch-all for input validation errors or other unexpected issues
       if (error instanceof z.ZodError) {
-        logger.error("addPlaylist: Validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "addPlaylist: Validation error");
         return {
           success: false,
           message: "Validation error occurred",
@@ -192,7 +192,7 @@ export const addPlaylist = createTool({
         };
       }
       const errorMessage = error instanceof Error ? error.message : 'Unknown error in addPlaylist';
-      logger.error('Error in addPlaylist', { error: errorMessage });
+      logger.error({ error: errorMessage }, 'Error in addPlaylist');
       return {
         success: false,
         message: errorMessage

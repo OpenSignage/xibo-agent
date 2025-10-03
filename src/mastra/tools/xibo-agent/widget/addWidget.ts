@@ -60,10 +60,7 @@ export const addWidget = createTool({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => response.text());
-        logger.error(`addWidget: HTTP error occurred: ${response.status}`, {
-            status: response.status,
-            error: errorData,
-        });
+        logger.error({ status: response.status, error: errorData }, `addWidget: HTTP error occurred: ${response.status}`);
         return {
             success: false,
             message: `HTTP error! status: ${response.status}`,
@@ -86,7 +83,7 @@ export const addWidget = createTool({
       return { success: true, location, widgetId };
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-        logger.error("addWidget: An unexpected error occurred", { error: errorMessage });
+        logger.error({ error: errorMessage }, "addWidget: An unexpected error occurred");
         return { success: false, message: errorMessage };
     }
   },

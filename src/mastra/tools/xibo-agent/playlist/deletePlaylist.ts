@@ -70,7 +70,7 @@ export const deletePlaylist = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("deletePlaylist: API error response", { status: response.status, error: parsedError });
+        logger.error({ status: response.status, error: parsedError }, "deletePlaylist: API error response");
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
@@ -80,7 +80,7 @@ export const deletePlaylist = createTool({
     } catch (error) {
       // Catch and handle any unexpected errors during the execution.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("deletePlaylist: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "deletePlaylist: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

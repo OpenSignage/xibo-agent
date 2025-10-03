@@ -107,7 +107,7 @@ export const getUploadFiles = createTool({
       };
     } catch (error: any) {
       const message = `Failed to read or stat files in upload directory: ${error.message}`;
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return {
         success: false,
         message,

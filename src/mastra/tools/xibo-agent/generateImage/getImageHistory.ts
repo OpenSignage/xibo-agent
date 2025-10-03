@@ -83,7 +83,7 @@ export const getImageHistory = createTool({
       };
 
     } catch (error) {
-      logger.error(`getImageHistory: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`, { error });
+      logger.error({ error }, `getImageHistory: An error occurred: ${error instanceof Error ? error.message : "Unknown error"}`);
       return {
         success: false,
         data: {

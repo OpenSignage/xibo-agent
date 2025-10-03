@@ -63,7 +63,7 @@ export const deleteSchedule = createTool({
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => response.statusText);
-                logger.error('deleteSchedule: HTTP error', { eventId, status: response.status, error: errorData });
+                logger.error({ eventId, status: response.status, error: errorData }, 'deleteSchedule: HTTP error');
                 return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
             }
             
@@ -71,7 +71,7 @@ export const deleteSchedule = createTool({
             return { success: true, message: `Schedule event ${eventId} deleted successfully.` };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "Unknown error";
-            logger.error('deleteSchedule: Unexpected error', { eventId, error: errorMessage });
+            logger.error({ eventId, error: errorMessage }, 'deleteSchedule: Unexpected error');
             return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
         }
     },

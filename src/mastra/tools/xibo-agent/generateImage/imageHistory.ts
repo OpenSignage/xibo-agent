@@ -84,7 +84,7 @@ function loadHistory(): History {
       return history;
     }
   } catch (error) {
-    logger.error('Failed to load history file:', { error: error instanceof Error ? error.message : String(error) });
+    logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Failed to load history file');
   }
   return {};
 }
@@ -101,7 +101,7 @@ function saveHistory(history: History): void {
     }
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
   } catch (error) {
-    logger.error('Failed to save history file:', { error: error instanceof Error ? error.message : String(error) });
+    logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Failed to save history file');
   }
 }
 
@@ -125,7 +125,7 @@ export function startNewGeneration(generatorId: string): string {
           logger.debug(`Deleted old image file: ${imagePath}`);
         }
       } catch (error) {
-        logger.error(`Failed to delete image file: ${imagePath}`, { error: error instanceof Error ? error.message : String(error) });
+        logger.error({ error: error instanceof Error ? error.message : String(error) }, `Failed to delete image file: ${imagePath}`);
       }
     });
   } else {
@@ -208,7 +208,7 @@ export function endGeneration(generatorId: string, isSuccess: boolean = false): 
           logger.debug(`Deleted old image file: ${imagePath}`);
         }
       } catch (error) {
-        logger.error(`Failed to delete image file: ${imagePath}`, { error: error instanceof Error ? error.message : String(error) });
+        logger.error({ error: error instanceof Error ? error.message : String(error) }, `Failed to delete image file: ${imagePath}`);
       }
     });
   }

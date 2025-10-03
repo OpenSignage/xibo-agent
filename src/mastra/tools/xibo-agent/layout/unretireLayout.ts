@@ -63,7 +63,7 @@ export const unretireLayout = createTool({
     z.infer<typeof successSchema> | z.infer<typeof errorSchema>
   > => {
     // Log the start of layout unretirement process
-    logger.info(`Unretiring layout with ID: ${context.layoutId}`);
+    logger.info({}, `Unretiring layout with ID: ${context.layoutId}`);
 
     // Validate CMS URL configuration
     if (!config.cmsUrl) {
@@ -75,7 +75,7 @@ export const unretireLayout = createTool({
     // Prepare API request
     const headers = await getAuthHeaders();
     const url = `${config.cmsUrl}/api/layout/unretire/${context.layoutId}`;
-    logger.debug(`Sending PUT request to ${url}`);
+    logger.debug({}, `Sending PUT request to ${url}`);
 
     // Send unretirement request to CMS
     const response = await fetch(url, {
@@ -85,7 +85,7 @@ export const unretireLayout = createTool({
 
     // Handle 204 No Content for successful unretirement
     if (response.status === 204) {
-      logger.info(`Layout ID ${context.layoutId} unretired successfully`);
+      logger.info({}, `Layout ID ${context.layoutId} unretired successfully`);
       return { success: true, message: "Layout unretired successfully" };
     }
 
@@ -94,11 +94,11 @@ export const unretireLayout = createTool({
       const responseText = await response.text();
       const decodedText = decodeErrorMessage(responseText);
       const errorMessage = `Failed to unretire layout. API responded with status ${response.status}.`;
-      logger.error(errorMessage, {
+      logger.error({
         status: response.status,
         layoutId: context.layoutId,
         response: decodedText,
-      });
+      }, errorMessage);
 
       return {
         success: false,
@@ -111,7 +111,7 @@ export const unretireLayout = createTool({
     }
 
     // Handle successful responses that are not 204
-    logger.info(`Layout ID ${context.layoutId} unretired successfully with status ${response.status}`);
+    logger.info({}, `Layout ID ${context.layoutId} unretired successfully with status ${response.status}`);
     return { success: true, message: "Layout unretired successfully" };
   },
 }); 
