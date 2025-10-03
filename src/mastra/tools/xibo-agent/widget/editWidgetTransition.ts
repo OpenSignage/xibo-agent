@@ -59,10 +59,7 @@ export const editWidgetTransition = createTool({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => response.text());
-        logger.error(`editWidgetTransition: HTTP error occurred: ${response.status}`, {
-            status: response.status,
-            error: errorData,
-        });
+        logger.error({ status: response.status, error: errorData }, `editWidgetTransition: HTTP error occurred: ${response.status}`);
         return {
             success: false,
             message: `HTTP error! status: ${response.status}`,
@@ -74,7 +71,7 @@ export const editWidgetTransition = createTool({
       return { success: true, message: "Widget transition edited successfully." };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("editWidgetTransition: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "editWidgetTransition: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

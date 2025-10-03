@@ -261,7 +261,7 @@ export const getPlaylists = createTool({
   execute: async ({ context }) => {
     try {
       const logContext = { ...context };
-      logger.info(`Retrieving playlists with filters`, logContext);
+      logger.info(logContext, `Retrieving playlists with filters`);
       
       if (!config.cmsUrl) {
         logger.error("getPlaylists: CMS URL is not configured");
@@ -281,7 +281,7 @@ export const getPlaylists = createTool({
           const paramValue = Array.isArray(value) ? value.join(',') : String(value);
           queryParams.append(key, paramValue);
           if (key === 'embed') {
-            logger.debug(`Using embed parameter: ${paramValue}`);
+            logger.debug({}, `Using embed parameter: ${paramValue}`);
           }
         }
       });
@@ -291,7 +291,7 @@ export const getPlaylists = createTool({
         url = `${url}?${queryParams.toString()}`;
       }
       
-      logger.debug(`Requesting playlists from: ${url}`);
+      logger.debug({}, `Requesting playlists from: ${url}`);
       
       const response = await fetch(url, { headers });
       
@@ -303,7 +303,7 @@ export const getPlaylists = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("getPlaylists: API error response", { status: response.status, error: parsedError });
+        logger.error({ status: response.status, error: parsedError }, "getPlaylists: API error response");
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
@@ -329,11 +329,11 @@ export const getPlaylists = createTool({
         const validatedData = z.array(playlistSchema).parse(parsedData);
         return { success: true, data: validatedData };
       } catch (validationError) {
-        logger.warn(`Playlist data validation failed`, {
+        logger.warn({
           error: validationError,
           dataSize: Array.isArray(parsedData) ? parsedData.length : 'unknown',
           dataPreview: Array.isArray(parsedData) && parsedData.length > 0 ? { playlistId: parsedData[0].playlistId } : 'No data'
-        });
+        }, `Playlist data validation failed`);
         return {
           success: false,
           message: "Playlist data validation failed",
@@ -343,11 +343,11 @@ export const getPlaylists = createTool({
     } catch (error) {
       // Catch-all for unexpected errors during execution
       if (error instanceof z.ZodError) {
-        logger.error("getPlaylists: Input validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "getPlaylists: Input validation error");
         return { success: false, message: "Input validation error occurred", errorData: error.issues };
       }
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`Error in getPlaylists: ${errorMessage}`, { error });
+      logger.error({ error }, `Error in getPlaylists: ${errorMessage}`);
       return { success: false, message: errorMessage };
     }
   },

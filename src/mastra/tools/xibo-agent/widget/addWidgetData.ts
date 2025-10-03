@@ -55,7 +55,7 @@ export const addWidgetData = createTool({
             formData.append(`data[${key}]`, jsonData[key]);
         }
       } catch(e) {
-          logger.error("addWidgetData: Invalid JSON provided for data field.", { error: e });
+          logger.error({ error: e }, "addWidgetData: Invalid JSON provided for data field.");
           return { success: false, message: "Invalid JSON provided for data field."};
       }
       
@@ -69,10 +69,7 @@ export const addWidgetData = createTool({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => response.text());
-        logger.error(`addWidgetData: HTTP error occurred: ${response.status}`, {
-            status: response.status,
-            error: errorData,
-        });
+        logger.error({ status: response.status, error: errorData }, `addWidgetData: HTTP error occurred: ${response.status}`);
         return {
             success: false,
             message: `HTTP error! status: ${response.status}`,
@@ -89,7 +86,7 @@ export const addWidgetData = createTool({
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("addWidgetData: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "addWidgetData: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

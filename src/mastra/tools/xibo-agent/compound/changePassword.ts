@@ -43,16 +43,16 @@ export const changePassword = createTool({
     // Basic validation to ensure passwords match before making any API calls.
     if (newPassword !== retypeNewPassword) {
       const errorMessage = "Passwords do not match.";
-      logger.error(errorMessage);
+      logger.error({}, errorMessage);
       // We return a structured error response that matches the potential output of editUser.
       return { success: false as const, message: errorMessage };
     }
 
-    logger.info(`Starting password change process for user ID: ${userId}`);
+    logger.info({}, `Starting password change process for user ID: ${userId}`);
 
     try {
       // Step 1: Get the current user data using the `getUser` tool.
-      logger.info(`Fetching current data for user ID: ${userId}`);
+      logger.info({}, `Fetching current data for user ID: ${userId}`);
       const userResponse = await getUser.execute({
         context: { userId, treeView: false },
         runtimeContext,
@@ -63,7 +63,7 @@ export const changePassword = createTool({
         // Updated error message handling to check for existence of 'message'
         const reason = 'message' in userResponse ? userResponse.message : 'Unknown error';
         const errorMessage = `Failed to get user data for ID ${userId}. Reason: ${reason}`;
-        logger.error(errorMessage, { response: userResponse });
+        logger.error({ response: userResponse }, errorMessage);
         return { success: false as const, message: errorMessage, errorData: userResponse };
       }
       
@@ -72,14 +72,14 @@ export const changePassword = createTool({
 
       if (!userData) {
           const errorMessage = `User with ID ${userId} not found in the response data.`;
-          logger.error(errorMessage, { response: userResponse });
+          logger.error({ response: userResponse }, errorMessage);
           return { success: false as const, message: errorMessage };
       }
       
-      logger.info(`Successfully fetched data for user: ${userData.userName}`);
+      logger.info({}, `Successfully fetched data for user: ${userData.userName}`);
 
       // Step 2: Call the `editUser` tool with the fetched data and the new password.
-      logger.info(`Calling editUser to update password for user ID: ${userId}`);
+      logger.info({}, `Calling editUser to update password for user ID: ${userId}`);
 
       // Construct the parameters for editUser based on required fields.
       // Only include the required `userId` and the new password fields.
@@ -93,18 +93,18 @@ export const changePassword = createTool({
       const editResponse = await editUser.execute({ context: editUserParams, runtimeContext });
 
       if (editResponse.success) {
-        logger.info(`Successfully changed password for user ID: ${userId}`);
+        logger.info({}, `Successfully changed password for user ID: ${userId}`);
       } else {
-        logger.error(`Failed to change password for user ID: ${userId}`, { error: editResponse });
+        logger.error({ error: editResponse }, `Failed to change password for user ID: ${userId}`);
       }
 
       return editResponse;
 
     } catch (error: any) {
       const errorMessage = "An unexpected error occurred during the password change process.";
-      logger.error(errorMessage, {
+      logger.error({
         error: error instanceof Error ? error.message : error,
-      });
+      }, errorMessage);
       return {
         success: false as const,
         message: errorMessage,

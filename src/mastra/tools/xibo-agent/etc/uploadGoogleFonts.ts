@@ -88,13 +88,13 @@ export const uploadGoogleFonts = createTool({
 
     if (!fontInfoResult.success) {
       const message = `Font family '${input.family}' not found on Google Fonts.`;
-      logger.error(message, { cause: fontInfoResult.message });
+      logger.error({ cause: fontInfoResult.message }, message);
       return { success: false, message: fontInfoResult.message, error: fontInfoResult };
     }
 
     if (fontInfoResult.fonts.length === 0) {
       const message = `Font family '${input.family}' not found on Google Fonts.`;
-      logger.error(message, { cause: 'No fonts returned' });
+      logger.error({ cause: 'No fonts returned' }, message);
       return { success: false, message, error: 'No fonts returned from API' };
     }
     
@@ -117,7 +117,7 @@ export const uploadGoogleFonts = createTool({
       const response = await fetch(downloadUrl);
       if (!response.ok) {
         const message = `Failed to download font file from Google. Status: ${response.status}`;
-        logger.error(message, { url: downloadUrl });
+        logger.error({ url: downloadUrl }, message);
         return { success: false, message, error: { statusCode: response.status } };
       }
       if (!response.body) {
@@ -131,7 +131,7 @@ export const uploadGoogleFonts = createTool({
       logger.info(`Font successfully downloaded to temporary file: ${tempFilePath}`);
     } catch (error: any) {
       const message = `Error downloading font file: ${error.message}`;
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return { success: false, message, error };
     }
 
@@ -155,14 +155,14 @@ export const uploadGoogleFonts = createTool({
         if (!uploadResponse.ok) {
             const decodedText = decodeErrorMessage(responseText);
             const message = `Failed to upload font to Xibo CMS. Status: ${uploadResponse.status}.`;
-            logger.error(message, { response: decodedText });
+            logger.error({ response: decodedText }, message);
             return { success: false, message, error: { statusCode: uploadResponse.status, responseBody: responseData } };
         }
 
         const validationResult = xiboFontUploadResponseSchema.safeParse(responseData);
         if (!validationResult.success) {
             const message = "Xibo CMS upload response validation failed.";
-            logger.error(message, { error: validationResult.error.issues, data: responseData });
+            logger.error({ error: validationResult.error.issues, data: responseData }, message);
             return { success: false, message, error: { validationIssues: validationResult.error.issues, receivedData: responseData } };
         }
 
@@ -174,7 +174,7 @@ export const uploadGoogleFonts = createTool({
         };
     } catch (error: any) {
         const message = `An unexpected error occurred during Xibo CMS upload: ${error.message}`;
-        logger.error(message, { error });
+        logger.error({ error }, message);
         return { success: false, message, error };
     } finally {
         if (fs.existsSync(tempFilePath)) {
@@ -182,7 +182,7 @@ export const uploadGoogleFonts = createTool({
                 fs.unlinkSync(tempFilePath);
                 logger.debug(`Temporary font file deleted: ${tempFilePath}`);
             } catch (cleanupError: any) {
-                logger.warn(`Failed to delete temporary font file: ${cleanupError.message}`, { error: cleanupError });
+                logger.warn({ error: cleanupError }, `Failed to delete temporary font file: ${cleanupError.message}`);
             }
         }
     }

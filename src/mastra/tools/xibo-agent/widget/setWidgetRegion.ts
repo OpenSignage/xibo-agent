@@ -60,10 +60,7 @@ export const setWidgetRegion = createTool({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => response.text());
-        logger.error(`setWidgetRegion: HTTP error occurred: ${response.status}`, {
-            status: response.status,
-            error: errorData,
-        });
+        logger.error({ status: response.status, error: errorData }, `setWidgetRegion: HTTP error occurred: ${response.status}`);
         return {
             success: false,
             message: `HTTP error! status: ${response.status}`,
@@ -75,7 +72,7 @@ export const setWidgetRegion = createTool({
       return { success: true, message: "Widget region set successfully." };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("setWidgetRegion: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "setWidgetRegion: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

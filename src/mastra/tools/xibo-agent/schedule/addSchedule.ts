@@ -92,7 +92,7 @@ export const addSchedule = createTool({
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => response.statusText);
-                logger.error('addSchedule: HTTP error while creating event', { status: response.status, error: errorData });
+                logger.error({ status: response.status, error: errorData }, 'addSchedule: HTTP error while creating event');
                 return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
             }
 
@@ -100,14 +100,14 @@ export const addSchedule = createTool({
             const parsedData = scheduleEventSchema.safeParse(data);
 
             if (!parsedData.success) {
-                logger.error('addSchedule: Zod validation failed', { error: parsedData.error });
+                logger.error({ error: parsedData.error }, 'addSchedule: Zod validation failed');
                 return { success: false, message: 'Validation failed for the API response.', error: parsedData.error.format() };
             }
             
             return { success: true, data: parsedData.data };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "Unknown error";
-            logger.error('addSchedule: Unexpected error while creating event', { error: errorMessage });
+            logger.error({ error: errorMessage }, 'addSchedule: Unexpected error while creating event');
             return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
         }
     },

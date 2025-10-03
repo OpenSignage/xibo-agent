@@ -123,7 +123,7 @@ export const getGoogleFonts = createTool({
 
       if (!response.ok) {
         const message = `Google Fonts API Error: ${data.error?.message || response.statusText}`;
-        logger.error(message, { error: data.error });
+        logger.error({ error: data.error }, message);
         return { success: false as const, message, error: data.error };
       }
 
@@ -131,7 +131,7 @@ export const getGoogleFonts = createTool({
 
       if(!validationResult.success){
         const message = "Google Fonts API response validation failed.";
-        logger.error(message, { error: validationResult.error.issues, data });
+        logger.error({ error: validationResult.error.issues, data }, message);
         return { success: false as const, message, error: { validationIssues: validationResult.error.issues, receivedData: data } };
       }
 
@@ -206,7 +206,7 @@ export const getGoogleFonts = createTool({
       };
     } catch (error: any) {
       const message = `Failed to fetch or parse Google Fonts data: ${error.message}`;
-      logger.error(message, { error });
+      logger.error({ error }, message);
       return { success: false as const, message, error };
     }
   }

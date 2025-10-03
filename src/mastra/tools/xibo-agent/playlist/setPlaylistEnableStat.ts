@@ -79,7 +79,7 @@ export const setPlaylistEnableStat = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("setPlaylistEnableStat: API error response", { status: response.status, error: parsedError });
+        logger.error({ status: response.status, error: parsedError }, "setPlaylistEnableStat: API error response");
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
       
@@ -90,12 +90,12 @@ export const setPlaylistEnableStat = createTool({
     } catch (error) {
       // Handle Zod validation errors.
       if (error instanceof z.ZodError) {
-        logger.error("setPlaylistEnableStat: Validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "setPlaylistEnableStat: Validation error");
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
       // Handle any other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("setPlaylistEnableStat: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "setPlaylistEnableStat: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

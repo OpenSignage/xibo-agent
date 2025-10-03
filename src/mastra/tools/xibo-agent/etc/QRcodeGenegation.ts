@@ -77,11 +77,11 @@ export const generateQRCode = createTool({
       const QRCode = require(qrcodePackage);
       const { content, fileName, size = 500 } = context;
 
-      logger.info('Starting QR code generation', {
+      logger.info({
         content: content.substring(0, 50) + (content.length > 50 ? '...' : ''),
         fileName,
         size,
-      });
+      }, 'Starting QR code generation');
 
       // Validate input parameters
       if (!content || content.trim().length === 0) {
@@ -112,9 +112,9 @@ export const generateQRCode = createTool({
 
       try {
         await fs.mkdir(outputDir, { recursive: true });
-        logger.debug('Output directory ensured', { outputDir });
+        logger.debug({ outputDir }, 'Output directory ensured');
       } catch (error) {
-        logger.error('Failed to create output directory', { error, outputDir });
+        logger.error({ error, outputDir }, 'Failed to create output directory');
         return {
           success: false,
           message: 'Failed to create output directory',
@@ -140,11 +140,11 @@ export const generateQRCode = createTool({
         // Generate QR code and save to file
         await QRCode.toFile(filePath, content, qrOptions);
 
-        logger.info('QR code generated successfully', {
+        logger.info({
           filePath,
           size,
           contentLength: content.length,
-        });
+        }, 'QR code generated successfully');
 
         return {
           success: true,
@@ -156,10 +156,10 @@ export const generateQRCode = createTool({
           },
         };
       } catch (qrError) {
-        logger.error('QR code generation failed', {
+        logger.error({
           error: qrError,
           content: content.substring(0, 100),
-        });
+        }, 'QR code generation failed');
         return {
           success: false,
           message: 'Failed to generate QR code',
@@ -171,7 +171,7 @@ export const generateQRCode = createTool({
         };
       }
     } catch (error) {
-      logger.error('Unexpected error in QR code generation', { error });
+      logger.error({ error }, 'Unexpected error in QR code generation');
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Unknown error occurred',

@@ -60,10 +60,7 @@ export const getWidgetDataTypes = createTool({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => response.text());
-        logger.error(`getWidgetDataTypes: HTTP error occurred: ${response.status}`, {
-            status: response.status,
-            error: errorData,
-        });
+        logger.error({ status: response.status, error: errorData }, `getWidgetDataTypes: HTTP error occurred: ${response.status}`);
         return {
             success: false,
             message: `HTTP error! status: ${response.status}`,
@@ -78,11 +75,11 @@ export const getWidgetDataTypes = createTool({
       return { success: true, data: validatedData };
     } catch (error) {
       if (error instanceof z.ZodError) {
-        logger.error("getWidgetDataTypes: Validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "getWidgetDataTypes: Validation error");
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("getWidgetDataTypes: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "getWidgetDataTypes: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

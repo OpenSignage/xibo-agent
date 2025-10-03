@@ -79,7 +79,7 @@ export const getPlaylistUsageByLayouts = createTool({
         } catch (e) {
             parsedError = responseText;
         }
-        logger.error("getPlaylistUsageByLayouts: API error response", { status: response.status, error: parsedError });
+        logger.error({ status: response.status, error: parsedError }, "getPlaylistUsageByLayouts: API error response");
         return { success: false, message: `HTTP error! status: ${response.status}`, errorData: parsedError };
       }
 
@@ -95,10 +95,10 @@ export const getPlaylistUsageByLayouts = createTool({
         layoutsArray = apiResponseSchema.parse(data);
       } else if (typeof data === 'object' && data !== null && Object.keys(data).length === 0) {
         // If it's an empty object, it signifies no usage. We treat it as an empty array.
-        logger.info("getPlaylistUsageByLayouts: Received an empty object, assuming no usage.", { data });
+        logger.info({ data }, "getPlaylistUsageByLayouts: Received an empty object, assuming no usage.");
       } else {
         // Handle unexpected response types.
-        logger.warn("getPlaylistUsageByLayouts: Unexpected response type, assuming no usage.", { response: data });
+        logger.warn({ response: data }, "getPlaylistUsageByLayouts: Unexpected response type, assuming no usage.");
       }
       
       // We then wrap the resulting array in an object to match the tool's standardized output schema.
@@ -106,12 +106,12 @@ export const getPlaylistUsageByLayouts = createTool({
     } catch (error) {
       // Handle any Zod validation errors.
       if (error instanceof z.ZodError) {
-        logger.error("getPlaylistUsageByLayouts: Validation error", { error: error.issues });
+        logger.error({ error: error.issues }, "getPlaylistUsageByLayouts: Validation error");
         return { success: false, message: "Validation error occurred", errorData: error.issues };
       }
       // Handle other unexpected errors.
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("getPlaylistUsageByLayouts: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "getPlaylistUsageByLayouts: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

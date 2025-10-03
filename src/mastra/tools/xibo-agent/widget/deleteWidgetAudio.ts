@@ -55,10 +55,7 @@ export const deleteWidgetAudio = createTool({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => response.text());
-        logger.error(`deleteWidgetAudio: HTTP error occurred: ${response.status}`, {
-            status: response.status,
-            error: errorData,
-        });
+        logger.error({ status: response.status, error: errorData }, `deleteWidgetAudio: HTTP error occurred: ${response.status}`);
         return {
             success: false,
             message: `HTTP error! status: ${response.status}`,
@@ -70,7 +67,7 @@ export const deleteWidgetAudio = createTool({
       return { success: true, message: "Widget audio deleted successfully." };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-      logger.error("deleteWidgetAudio: An unexpected error occurred", { error: errorMessage });
+      logger.error({ error: errorMessage }, "deleteWidgetAudio: An unexpected error occurred");
       return { success: false, message: errorMessage };
     }
   },

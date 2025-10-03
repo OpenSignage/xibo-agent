@@ -71,9 +71,9 @@ export const tagLayout = createTool({
       };
     }
 
-    logger.info(`Adding tags to layout ${context.layoutId}`, {
+    logger.info({
       tags: context.tags,
-    });
+    }, `Adding tags to layout ${context.layoutId}`);
 
     const headers = await getAuthHeaders();
     const url = `${config.cmsUrl}/api/layout/${context.layoutId}/tag`;
@@ -99,11 +99,11 @@ export const tagLayout = createTool({
       const responseText = await response.text();
       const decodedText = decodeErrorMessage(responseText);
       const errorMessage = `Failed to add tags to layout. API responded with status ${response.status}.`;
-      logger.error(errorMessage, {
+      logger.error({
         status: response.status,
         layoutId: context.layoutId,
         response: decodedText,
-      });
+      }, errorMessage);
 
       return {
         success: false,
@@ -117,7 +117,7 @@ export const tagLayout = createTool({
 
     // Parse and return successful response
     const data = await response.json();
-    logger.info(`Successfully added tags to layout ${context.layoutId}`);
+    logger.info({}, `Successfully added tags to layout ${context.layoutId}`);
 
     return {
       success: true,

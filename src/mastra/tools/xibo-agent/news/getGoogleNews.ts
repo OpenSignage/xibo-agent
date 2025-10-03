@@ -113,27 +113,27 @@ export const getGoogleNews = createTool({
   inputSchema,
   outputSchema: z.union([successSchema, errorSchema]),
   execute: async ({ context: input }): Promise<z.infer<typeof successSchema> | z.infer<typeof errorSchema>> => {
-    logger.info('Executing getGoogleNews with input:', { input });
+    logger.info({ input }, 'Executing getGoogleNews with input:');
     
     // --- Manual Input Validation ---
     if (!input.searchType || !['topic', 'geo', 'query'].includes(input.searchType)) {
         const message = `Invalid or missing 'searchType'. It must be one of 'topic', 'geo', or 'query'. Received: ${input.searchType}`;
-        logger.error(message, { input });
+        logger.error({ input }, message);
         return { success: false, message };
     }
     if (input.searchType === 'topic' && !input.topic) {
         const message = "When 'searchType' is 'topic', the 'topic' parameter is required.";
-        logger.error(message, { input });
+        logger.error({ input }, message);
         return { success: false, message };
     }
     if (input.searchType === 'geo' && !input.location) {
         const message = "When 'searchType' is 'geo', the 'location' parameter is required.";
-        logger.error(message, { input });
+        logger.error({ input }, message);
         return { success: false, message };
     }
     if (input.searchType === 'query' && !input.query) {
         const message = "When 'searchType' is 'query', the 'query' parameter is required.";
-        logger.error(message, { input });
+        logger.error({ input }, message);
         return { success: false, message };
     }
     // --- End Manual Input Validation ---
@@ -177,13 +177,13 @@ export const getGoogleNews = createTool({
       response = await fetch(rssUrl);
     } catch (error: any) {
       const message = `Network error while fetching Google News RSS feed: ${error.message}`;
-      logger.error(message, { url: rssUrl, error });
+      logger.error({ url: rssUrl, error }, message);
       return { success: false, message, error };
     }
     
     if (!response.ok) {
         const message = `Failed to fetch Google News RSS feed. Status: ${response.status} ${response.statusText}`;
-        logger.error(message, { url: rssUrl, status: response.status });
+        logger.error({ url: rssUrl, status: response.status }, message);
         return { success: false, message, error: { statusCode: response.status } };
     }
     
@@ -196,7 +196,7 @@ export const getGoogleNews = createTool({
 
         if (!validationResult.success) {
             const message = "Google News RSS feed validation failed.";
-            logger.error(message, { url: rssUrl, error: validationResult.error.issues, data: parsedXml });
+            logger.error({ url: rssUrl, error: validationResult.error.issues, data: parsedXml }, message);
             return {
                 success: false,
                 message,
@@ -220,7 +220,7 @@ export const getGoogleNews = createTool({
         };
     } catch (error: any) {
       const message = `Error parsing or processing Google News RSS feed: ${error.message}`;
-      logger.error(message, { url: rssUrl, error });
+      logger.error({ url: rssUrl, error }, message);
       return { success: false, message, error };
     }
   },

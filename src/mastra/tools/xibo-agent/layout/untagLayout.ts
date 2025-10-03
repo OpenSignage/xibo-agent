@@ -73,9 +73,9 @@ export const untagLayout = createTool({
       };
     }
 
-    logger.info(`Removing tags from layout ${context.layoutId}`, {
+    logger.info({
       tags: context.tags,
-    });
+    }, `Removing tags from layout ${context.layoutId}`);
 
     const headers = await getAuthHeaders();
     const url = `${config.cmsUrl}/api/layout/${context.layoutId}/untag`;
@@ -101,11 +101,11 @@ export const untagLayout = createTool({
       const responseText = await response.text();
       const decodedText = decodeErrorMessage(responseText);
       const errorMessage = `Failed to remove tags from layout. API responded with status ${response.status}.`;
-      logger.error(errorMessage, {
+      logger.error({
         status: response.status,
         layoutId: context.layoutId,
         response: decodedText,
-      });
+      }, errorMessage);
 
       return {
         success: false,
@@ -119,7 +119,7 @@ export const untagLayout = createTool({
 
     // Parse and return successful response
     const data = await response.json();
-    logger.info(`Successfully removed tags from layout ${context.layoutId}`);
+    logger.info({}, `Successfully removed tags from layout ${context.layoutId}`);
 
     return {
       success: true,

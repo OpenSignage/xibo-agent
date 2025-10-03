@@ -104,7 +104,7 @@ export const editSchedule = createTool({
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => response.statusText);
-                logger.error(`editSchedule: HTTP error while ${action} event ${eventId || ''}`, { status: response.status, error: errorData });
+                logger.error({ status: response.status, error: errorData }, `editSchedule: HTTP error while ${action} event ${eventId || ''}`);
                 return { success: false, message: `HTTP error! status: ${response.status}`, error: errorData };
             }
 
@@ -112,14 +112,14 @@ export const editSchedule = createTool({
             const parsedData = scheduleEventSchema.safeParse(data);
 
             if (!parsedData.success) {
-                logger.error('editSchedule: Zod validation failed', { error: parsedData.error });
+                logger.error({ error: parsedData.error }, 'editSchedule: Zod validation failed');
                 return { success: false, message: 'Validation failed for the API response.', error: parsedData.error.format() };
             }
             
             return { success: true, data: parsedData.data };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "Unknown error";
-            logger.error(`editSchedule: Unexpected error while ${action} event`, { eventId, error: errorMessage });
+            logger.error({ eventId, error: errorMessage }, `editSchedule: Unexpected error while ${action} event`);
             return { success: false, message: `An unexpected error occurred: ${errorMessage}`, error };
         }
     },
