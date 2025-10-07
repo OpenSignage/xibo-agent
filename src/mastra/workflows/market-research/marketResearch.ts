@@ -27,7 +27,7 @@ const saveReportStep = createStep(saveReportTool);
 const successOutputSchema = z.object({
   success: z.literal(true),
   data: z.object({
-    reportText: z.string().describe('The final, generated report content.'),
+    summarizedText: z.string().describe('A short summary of the generated report suitable for final reply.'),
     mdFileName: z.string().describe('The saved report file name (e.g., "xxxx.md").'),
     pdfFileName: z.string().describe('The saved PDF file name (e.g., "xxxx.pdf").'),
   }),
@@ -46,7 +46,7 @@ const finalOutputSchema = z.union([successOutputSchema, errorOutputSchema]);
  */
 export const marketResearchWorkflow = createWorkflow({
   id: 'market-research-workflow',
-  description: 'Automated market research workflow. Given a topic, it performs web search, fetches top sources (including PDFs), then summarizes and analyzes the content to produce a marketing-oriented report in Markdown. The report is saved to persistent_data/generated/reports as <title-YYYY-MM-DD>.md, and a PDF with the same basename is also generated. The workflow returns reportText along with saved file names (mdFileName, pdfFileName). Artifacts can be downloaded via /ext-api/download/report/:fileName. Use maxWebsites to control how many sources are processed.',
+  description: 'Automated market research workflow. Given a topic, it performs web search, fetches top sources (including PDFs), then summarizes and analyzes the content to produce a marketing-oriented report in Markdown. The full report is saved to persistent_data/generated/reports as <title-YYYY-MM-DD>.md (and PDF). The workflow returns a short summarizedText along with saved file names (mdFileName, pdfFileName). Artifacts can be downloaded via /ext-api/download/report/:fileName. Use maxWebsites to control how many sources are processed.',
   inputSchema: z.object({ 
     topic: z.string().describe('Topic to research (keyword)'),
     maxWebsites: z.number().optional().default(20).describe('Maximum number of websites to scrape (default: 20)')
@@ -133,7 +133,7 @@ export const marketResearchWorkflow = createWorkflow({
 
         // Retry with exponential backoff and jitter
         const attemptScrape = async (url: string, title: string) => {
-            const maxRetries = 3;
+            const maxRetries = 2; // retry up to 2 times (total attempts = 3)
             const baseDelayMs = 500;
             for (let attempt = 0; attempt <= maxRetries; attempt++) {
                 try {
@@ -163,7 +163,7 @@ export const marketResearchWorkflow = createWorkflow({
         };
 
         // Concurrency-limited execution (p-limit equivalent with chunking)
-        const concurrency = 6;
+        const concurrency = 2;
         for (let i = 0; i < topResults.length; i += concurrency) {
             const batch = topResults.slice(i, i + concurrency);
             const promises = batch.map(({ url, title }) => attemptScrape(url, title));
@@ -242,18 +242,43 @@ export const marketResearchWorkflow = createWorkflow({
             return { success: false, message: 'レポートが空のため、ファイルに保存できませんでした。' } as const;
         }
 
+        // Save full report as before
         const saveResult = await saveReportStep.execute({ ...params, inputData: { title: topic, content: reportText } });
 
         if (!saveResult.success) {
-            // If saving fails, still return the report text to the user.
             logger.error({ error: saveResult.message }, 'Failed to save report files');
             return { success: false, message: `レポートのファイル保存に失敗しました: ${saveResult.message}` } as const;
         }
+
+        // Generate a short summary for final reply
+        let summarizedText = '';
+        try {
+            // Reduce request frequency between two Gemini calls
+            const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+            await sleep(3000);
+            const summaryRes = await summarizeStep.execute({
+              ...params,
+              inputData: {
+                text: reportText,
+                objective: '次のレポート本文をMarkdownで要約してください。出力は次の形式のみ: "## 要約" の見出しの下に、箇条書きで3–5項目。各項目は1行、冗長な前置き・結論・補足は禁止。重要な数値・固有名詞は保持。',
+                temperature: 0.3,
+                topP: 0.9,
+              },
+            });
+            if (summaryRes.success) {
+              summarizedText = summaryRes.data.summary;
+            } else {
+              summarizedText = reportText.slice(0, 500);
+            }
+        } catch {
+            summarizedText = reportText.slice(0, 500);
+        }
+
         logger.info({ mdFileName: require('path').basename(saveResult.data.filePath), pdfFileName: (saveResult.data.pdfFileName) }, 'Report files saved');
         return {
             success: true,
             data: {
-                reportText,
+                summarizedText,
                 mdFileName: require('path').basename(saveResult.data.filePath),
                 pdfFileName: (saveResult.data.pdfFileName),
             },

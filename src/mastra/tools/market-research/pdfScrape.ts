@@ -62,8 +62,9 @@ export const pdfScrapeTool = createTool({
       try {
         textFromPdfTs = await pdfToText(buffer);
         logger.info({ url, length: textFromPdfTs.length }, 'Successfully extracted text with pdf-ts');
-      } catch (pdfTsError) {
-        logger.warn({ url, error: pdfTsError }, 'pdf-ts failed to extract text. This might be an image-based PDF or a corrupted file.');
+      } catch (pdfTsError: any) {
+        const msg = pdfTsError instanceof Error ? pdfTsError.message : String(pdfTsError);
+        logger.warn({ url, message: msg }, 'pdf-ts failed to extract text. This might be an image-based PDF or a corrupted file.');
       }
 
       // 2. If pdf-ts returns little or no text, use Tesseract.js OCR as a fallback
@@ -73,10 +74,16 @@ export const pdfScrapeTool = createTool({
       if (textFromPdfTs.replace(/\s/g, '').length < 100) {
         logger.info({ url }, 'pdf-ts extracted minimal text. Attempting OCR with Tesseract.js...');
         
+        // Throttle progress logs to reduce terminal spam
+        let lastLoggedPct = -10;
         const result = await Tesseract.recognize(buffer, 'jpn+eng', {
             logger: (m) => {
                 if (m.status === 'recognizing text') {
-                    logger.info(`Tesseract OCR progress: ${Math.round(m.progress * 100)}%`);
+                    const pct = Math.round((m.progress || 0) * 100);
+                    if (pct >= lastLoggedPct + 10) {
+                        lastLoggedPct = pct;
+                        logger.info(`Tesseract OCR progress: ${pct}%`);
+                    }
                 }
             },
         });
@@ -95,12 +102,14 @@ export const pdfScrapeTool = createTool({
       } as const;
 
     } catch (error) {
+      const status: number | undefined = (error as any)?.response?.status;
+      const code: string | undefined = (error as any)?.code || (error as any)?.response?.statusText;
       const message = error instanceof Error ? error.message : "An unknown error occurred during PDF scraping.";
-      logger.error({ url, error }, `Failed to scrape PDF.`);
+      logger.error({ url, status, code, message }, `Failed to scrape PDF.`);
       return {
         success: false,
         message,
-        error,
+        error: { status, code },
       } as const;
     }
   },

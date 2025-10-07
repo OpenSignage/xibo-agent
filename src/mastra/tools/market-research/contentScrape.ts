@@ -90,6 +90,16 @@ export const contentScrapeTool = createTool({
     logger.info({ url }, `Attempting to scrape content...`);
 
     try {
+      // Derive referer from origin to mimic typical browser requests
+      const origin = (() => {
+        try {
+          const u = new URL(url);
+          return `${u.protocol}//${u.host}/`;
+        } catch {
+          return undefined;
+        }
+      })();
+
       const response = await axios.get(url, {
         responseType: 'arraybuffer',
         httpsAgent,
@@ -97,6 +107,15 @@ export const contentScrapeTool = createTool({
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
           'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+          'Upgrade-Insecure-Requests': '1',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          ...(origin ? { Referer: origin } : {}),
         },
         timeout: 15000,
       });
@@ -141,13 +160,50 @@ export const contentScrapeTool = createTool({
         data: { url, content: cleanedContent }
       } as const;
 
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "An unknown error occurred during content scraping.";
-      logger.error({ url, error }, `Failed to scrape content.`);
-      return { 
-        success: false, 
-        message,
-        error,
+    } catch (error: any) {
+      const status: number | undefined = error?.response?.status;
+      const code: string | undefined = error?.code || error?.response?.statusText;
+      const message: string = error instanceof Error ? error.message : String(error);
+      logger.warn({ url, status, code, message }, 'Primary scrape failed; checking fallback options');
+
+      // Fallback via r.jina.ai reader for common anti-bot/protected pages
+      if (status === 401 || status === 403 || status === 503) {
+        try {
+          const withoutScheme = url.replace(/^https?:\/\//i, '');
+          const jinaUrl = `https://r.jina.ai/http://${withoutScheme}`;
+          const res2 = await axios.get(jinaUrl, {
+            responseType: 'text',
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36',
+              'Accept': 'text/plain, */*;q=0.1',
+              'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            },
+            timeout: 15000,
+            // Let axios treat non-2xx as errors; we handle via try/catch
+          });
+
+          const text = typeof res2.data === 'string' ? res2.data : String(res2.data ?? '');
+          const cleaned = text.replace(/\s\s+/g, ' ').trim();
+          if (cleaned.length > 0) {
+            logger.info({ url }, 'Fallback via r.jina.ai succeeded');
+            return {
+              success: true,
+              data: { url, content: cleaned }
+            } as const;
+          }
+        } catch (fallbackErr: any) {
+          const fMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+          logger.warn({ url, message: fMsg }, 'Fallback via r.jina.ai failed');
+        }
+      }
+
+      const finalMessage = error instanceof Error ? error.message : 'An unknown error occurred during content scraping.';
+      // Avoid logging huge error objects; keep only small, relevant fields
+      logger.error({ url, status, code, message: finalMessage }, `Failed to scrape content.`);
+      return {
+        success: false,
+        message: finalMessage,
+        error: { status, code },
       } as const;
     }
   },

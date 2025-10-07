@@ -34,10 +34,13 @@ export const marketingAgent = new Agent({
   name: 'Marketing Agent',
   description: 'An AI agent that performs market research, analyzes trends, and gathers competitive intelligence.',
   // Use a lighter model to reduce post-workflow quota pressure
-  model: google('gemini-2.0-flash-exp'),
+  model: google('gemini-2.5-flash'),
   instructions: marketingAgentInstructions,
   workflows: {
     marketResearch: marketResearchWorkflow,
+    // Aliases to ensure prompt variants are resolved
+    'market-research-workflow': marketResearchWorkflow,
+    'market-research': marketResearchWorkflow,
     productAnalysis: productAnalysisWorkflow,
     strategyPlanner: strategyPlannerWorkflow,
     podcastPlanner: podcastPlannerWorkflow,

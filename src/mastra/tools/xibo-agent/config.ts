@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { findUpSync } from 'find-up';
 import { z } from "zod";
+import { EXT_API_BASE } from "../../config/constants";
 
 /**
  * Finds the project root by searching upwards for a package.json file.
@@ -25,7 +26,7 @@ export const config = {
   clientSecret: process.env.XIBO_CLIENT_SECRET || "",
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   googleCloudProjectId: process.env.GOOGLE_CLOUD_PROJECT_ID || "",
-  apiUrl: "http://localhost:4111/ext-api",
+  apiUrl: EXT_API_BASE,
 
   // Define directories relative to the project root for stability.
   projectRoot: projectRoot,

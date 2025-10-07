@@ -1,3 +1,4 @@
+import { GET_IMAGE_API } from '../../../config/constants';
 /*
  * Copyright (C) 2025 Open Source Digital Signage Initiative.
  *
@@ -67,7 +68,7 @@ function loadHistory(): History {
       Object.values(parsed).forEach(generator => {
         if (generator.images) {
           generator.images.forEach((image: any) => {
-            image.imageUrl = `http://localhost:4111/ext-api/getImage/${image.filename}`;
+            image.imageUrl = `${GET_IMAGE_API}/${image.filename}`;
           });
         }
       });
@@ -179,7 +180,7 @@ export function getHistory(generatorId: string): Generator {
   const generator = { ...history[generatorId] };
   generator.images = generator.images.map(image => ({
     ...image,
-    imageUrl: `http://localhost:4111/ext-api/getImage/${image.filename}`
+    imageUrl: `${GET_IMAGE_API}/${image.filename}`
   }));
   
   return generator;
