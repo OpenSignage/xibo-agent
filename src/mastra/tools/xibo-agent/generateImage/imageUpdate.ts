@@ -1,3 +1,4 @@
+import { GET_IMAGE_API } from '../../../config/constants';
 /*
  * Copyright (C) 2025 Open Source Digital Signage Initiative.
  *
@@ -203,7 +204,7 @@ export const updateImage = createTool({
           fs.writeFileSync(imagePath, croppedBuffer);
           
           // Create image URL for ext-api
-          imageUrl = `http://localhost:4111/ext-api/getImage/${filename}`;
+          imageUrl = `${GET_IMAGE_API}/${filename}`;
           
           logger.info(`Image updated and saved to: ${imagePath} (${croppedWidth}x${croppedHeight})`);
           logger.debug(`Image URL: ${imageUrl}`);

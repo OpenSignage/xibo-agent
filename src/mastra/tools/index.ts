@@ -3,4 +3,4 @@
 //export * from './xibo-manual';
 
 // Presenter関連のエクスポート
-export * from './presenter';
+//export * from './presenter';

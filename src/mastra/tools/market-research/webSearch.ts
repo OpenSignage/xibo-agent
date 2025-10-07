@@ -100,7 +100,8 @@ export const webSearchTool = createTool({
         // Handle invalid request parameters
         if (response.status === 422) {
           const errorDetails = await response.text().catch(() => 'Could not read error details.');
-          logger.error({ query, offset, errorDetails }, 'Invalid request (422)');
+          const snippet = (errorDetails || '').slice(0, 500);
+          logger.error({ query, offset, errorDetails: snippet }, 'Invalid request (422)');
           return {
             success: false,
             message: 'Invalid request parameters',
@@ -112,11 +113,12 @@ export const webSearchTool = createTool({
         // Handle other HTTP errors
         if (!response.ok) {
           const errorDetails = await response.text().catch(() => 'Could not read error details.');
+          const snippet = (errorDetails || '').slice(0, 500);
           return {
             success: false,
             message: `Brave Search API request failed with status ${response.status}`,
             error: { status: response.status },
-            errorData: errorDetails
+            errorData: snippet
           };
         }
 

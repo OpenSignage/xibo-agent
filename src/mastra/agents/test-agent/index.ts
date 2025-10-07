@@ -22,19 +22,19 @@
 import { Agent } from '@mastra/core/agent';
 import { google } from '@ai-sdk/google';
 import { getTools } from '../../tools/xibo-manual/manual';
-import { xiboManualInstructions } from './instructions';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
 import { fastembed } from '@mastra/fastembed';
+import { getSessionInfo } from './getSessionInfo';
 
 // Defines and exports the specialized agent for handling Xibo manual queries.
-export const xiboManualAgent = new Agent({
-  name: 'Xibo Manual Agent',
-  instructions: xiboManualInstructions,
-  //model: google('gemini-2.0-flash-exp'),
+export const testAgent = new Agent({
+  name: 'Test Agent',
+  instructions: 'あなたはテストエージェントです。',
   model: google('gemini-2.5-flash'),
-
-  tools: getTools(),
+  tools: {
+    getSessionInfo,
+  },
   memory: new Memory({
     options: {
       // Retain the last 40 messages for context.
@@ -58,11 +58,11 @@ export const xiboManualAgent = new Agent({
     },
     // Use a LibSQL database for persistent storage of memories.
     storage: new LibSQLStore({
-      url: 'file:../../memory.db'
+      url: 'file:../../testAgent.db'
     }),
     // Use a LibSQL vector store for efficient semantic searching.
     vector: new LibSQLVector({
-      connectionUrl: 'file:../../memory.db'
+      connectionUrl: 'file:../../testAgent.db'
     }),
     // Use the 'fastembed' model for creating vector embeddings of text.
     embedder: fastembed

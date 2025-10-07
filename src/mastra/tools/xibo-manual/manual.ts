@@ -11,7 +11,8 @@
  */
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateText } from 'ai';
+import { google } from '../../models';
 import { config } from './config';
 import fs from 'fs';
 import path from 'path';
@@ -99,8 +100,6 @@ const loadManualContent = () => {
 
 const MANUAL_CONTENT = loadManualContent();
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY || '');
-
 // Interface for cache entries
 interface CacheEntry {
   answer: string;
@@ -146,8 +145,6 @@ const findRelevantSection = async (query: string) => {
       };
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-
     const prompt = `あなたはXibo-CMSの専門家です。以下のマニュアルの内容を基に、ユーザーの質問に回答してください。
 マニュアルには \`![代替テキスト](img/ファイル名.png)\` という形式で画像への参照が含まれています。回答を生成する際、関連する画像があれば、そのMarkdown形式のリンク文字列を、一切変更せずにそのまま回答に含めてください。
 
@@ -158,9 +155,11 @@ ${MANUAL_CONTENT}
 
 回答は日本語で、簡潔かつ具体的にお願いします。また、回答の最後に、参考にしたマニュアルのセクション名を記載してください。`;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    let answer = response.text();
+    const { text } = await generateText({
+      model: google('gemini-2.5-pro'),
+      prompt,
+    });
+    let answer = text;
     
     if (!answer) {
       logger.warn('No answer generated');
@@ -188,7 +187,7 @@ ${MANUAL_CONTENT}
       relevantSection
     };
   } catch (error) {
-    logger.error('An error occurred while generating an answer with AI', { error });
+    logger.error({ error }, 'An error occurred while generating an answer with AI');
     return {
       answer: 'I apologize, but I cannot currently generate an answer.',
       relevantSection: manualSections.introduction

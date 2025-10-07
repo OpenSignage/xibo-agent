@@ -26,6 +26,8 @@ import { config } from './tools/xibo-agent/config';
 import { xiboAgent } from './agents/xibo-agent';
 import { xiboManualAgent } from './agents/xibo-manual';
 import { marketingAgent } from './agents/marketing-agent';
+import { testAgent } from './agents/test-agent';
+//import { voiceAgent } from './agents/voice-agent';
 
 // Import workflows
 import { marketResearchWorkflow } from './workflows/market-research/marketResearch';
@@ -86,10 +88,13 @@ export const mastra = new Mastra({
     xibo: xiboAgent,         // Xibo system operation agent
     manual: xiboManualAgent, // Xibo manual operation agent
     marketing: marketingAgent, // Marketing agent
+    test: testAgent // Test agent
   },
   // Register available workflows
   workflows: {
     marketResearch: marketResearchWorkflow,
+    'market-research-workflow': marketResearchWorkflow,
+    'market-research': marketResearchWorkflow,
     productAnalysis: productAnalysisWorkflow,
     intelligentPresenter: intelligentPresenterWorkflow,
     strategyPlanner: strategyPlannerWorkflow,

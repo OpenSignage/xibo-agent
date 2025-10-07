@@ -1,3 +1,4 @@
+import { GET_VIDEO_API } from '../../../config/constants';
 /*
  * Copyright (C) 2025 Open Source Digital Signage Initiative.
  *
@@ -132,7 +133,7 @@ export const videoGeneration = createTool({
           throw new Error("Failed to update video history after saving the video.");
       }
 
-      const videoUrl = `http://localhost:4111/ext-api/getVideo/${fileName}`;
+      const videoUrl = `${GET_VIDEO_API}/${fileName}`;
 
       return {
         success: true,

@@ -29,6 +29,7 @@ import fs from 'fs/promises';
 import nodeFs from 'fs';
 import https from 'https';
 import http from 'http';
+import crypto from 'crypto';
 
 
 //
@@ -1073,13 +1074,20 @@ export const createPowerpointTool = createTool({
           return paletteColors[i];
         };
 
-        // Normalize icon image to white background (avoid black background when alpha is present)
+        // Normalize icon image by painting solid white background under it (no transparency)
         const normalizeIconBackground = async (iconPath: string): Promise<string> => {
           try {
-            const sharpMod: any = await import('sharp');
-            const sharp = (sharpMod && sharpMod.default) ? sharpMod.default : sharpMod;
-            const img = sharp(iconPath).flatten({ background: { r: 255, g: 255, b: 255 } });
-            await img.toFile(iconPath);
+            const { createCanvas, loadImage } = await import('canvas');
+            const img = await loadImage(iconPath);
+            const w = Math.max(1, (img as any).width || 0);
+            const h = Math.max(1, (img as any).height || 0);
+            const canvas = createCanvas(w, h);
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, w, h);
+            ctx.drawImage(img as any, 0, 0, w, h);
+            const buf = canvas.toBuffer('image/png');
+            await fs.writeFile(iconPath, buf);
           } catch {
             // ignore normalization failures; use original
           }
@@ -1496,18 +1504,24 @@ export const createPowerpointTool = createTool({
             // debug dispatch log removed after verification
             try { logger.debug({ type: String(type||''), region: { x: rx, y: ry, w: rw, h: rh } }, 'drawInfographic(entry)'); } catch {}
                     // Registry-driven rendering first
-                    try {
-                      const { render: renderFromRegistry } = await import('./infographicRegistry');
-                      const ok = await renderFromRegistry({
-                        slide: targetSlide,
-                        type: String(type || ''),
-                        payload,
-                        region: { x: rx, y: ry, w: rw, h: rh },
-                        templateConfig,
-                        helpers: { pickTextColorForBackground, getPaletteColor }
-                      });
-                      if (ok) { try { logger.debug('drawInfographic(done:registry)'); } catch {} return; }
-                    } catch (e) { /* swallow to allow fallback; errors are visible upstream when needed */ }
+                    {
+                      const t = String(type || '').toLowerCase();
+                      const bypassRegistry = false;
+                      if (!bypassRegistry) {
+                        try {
+                          const { render: renderFromRegistry } = await import('./infographicRegistry');
+                          const ok = await renderFromRegistry({
+                            slide: targetSlide,
+                            type: String(type || ''),
+                            payload,
+                            region: { x: rx, y: ry, w: rw, h: rh },
+                            templateConfig,
+                            helpers: { pickTextColorForBackground, getPaletteColor }
+                          });
+                          if (ok) { try { logger.debug('drawInfographic(done:registry)'); } catch {} return; }
+                        } catch (e) { /* swallow to allow fallback; errors are visible upstream when needed */ }
+                      }
+                    }
             try { logger.debug('drawInfographic(fallback)'); } catch {}
             const renderChartImage = async (ct: 'bar'|'pie'|'line', labels: string[], values: number[], titleText?: string): Promise<string | null> => {
               try {
@@ -2117,7 +2131,7 @@ export const createPowerpointTool = createTool({
                     const iconStyle: string = String(iconCfg.style || 'line');
                     const iconMonochrome: boolean = true; // fixed monochrome (request)
                     const fixedGlyph: 'white'|'black' = (String(iconCfg?.fixed?.glyph || 'black').toLowerCase() === 'white') ? 'white' : 'black';
-                    const fixedBg: 'white'|'transparent' = (String(iconCfg?.fixed?.background || 'white').toLowerCase() === 'white') ? 'white' : 'transparent';
+          const fixedBg: 'white'|'transparent' = (String(iconCfg?.fixed?.background || 'white').toLowerCase() === 'white') ? 'white' : 'transparent';
 
                     for (let i = 0; i < Math.min(4, items.length); i++) {
                         const it: any = items[i] || {};
@@ -2140,10 +2154,29 @@ export const createPowerpointTool = createTool({
                                     try {
                                         const { generateImage } = await import('./generateImage');
                                         const prompt = buildIconPrompt(rawIcon, iconStyle, iconMonochrome, fixedGlyph, fixedBg);
-                                        const out = await generateImage({ prompt, aspectRatio: '1:1' });
-                                        if (out && out.success && out.path) {
-                                            iconPath = out.path;
-                                            try { imagePathsToDelete.add(out.path); } catch {}
+                                        const cacheDir = path.join(config.generatedDir, 'cache', 'icons');
+                                        try { await fs.mkdir(cacheDir, { recursive: true }); } catch {}
+                                        const key = JSON.stringify({ k: sanitizeIconKeyword(rawIcon), style: iconStyle, mono: iconMonochrome, glyph: fixedGlyph, bg: fixedBg });
+                                        const hash = crypto.createHash('sha1').update(key).digest('hex');
+                                        const cachePath = path.join(cacheDir, `icon-${hash}.png`);
+                                        try {
+                                            try { logger.info({ rawIcon, hash, cachePath }, 'Icon cache lookup (callouts)'); } catch {}
+                                            await fs.access(cachePath);
+                                            iconPath = cachePath;
+                                            try { logger.info({ cachePath }, 'Icon cache hit (callouts)'); } catch {}
+                                        } catch {
+                                            try { logger.info({ rawIcon, hash }, 'Icon cache miss (callouts); generating via AI'); } catch {}
+                                            const out = await generateImage({ prompt, aspectRatio: '1:1' });
+                                            if (out && out.success && out.path) {
+                                                try {
+                                                    await fs.copyFile(out.path, cachePath);
+                                                    try { logger.info({ from: out.path, to: cachePath }, 'Icon cached (callouts)'); } catch {}
+                                                } catch (copyErr) {
+                                                    try { logger.warn({ error: String(copyErr), from: out.path, to: cachePath }, 'Icon cache copy failed (callouts)'); } catch {}
+                                                }
+                                                iconPath = cachePath;
+                                                try { imagePathsToDelete.add(out.path); } catch {}
+                                            }
                                         }
                                     } catch {}
                                 }
@@ -2155,7 +2188,8 @@ export const createPowerpointTool = createTool({
                         const textWidth = iconPath ? (boxW - (textLeftX - x) - 0.1) : (boxW - 0.2);
 
                         if (iconPath) {
-                            try { iconPath = await normalizeIconBackground(iconPath); } catch {}
+                            // Only convert white background to transparent when glyph is dark
+                            if (fixedGlyph === 'black') { try { iconPath = await normalizeIconBackground(iconPath); } catch {} }
                             // Place icon square within box, top pad
                             const ix = x + iconPad;
                             const iy = y + iconPad;
@@ -2236,17 +2270,36 @@ export const createPowerpointTool = createTool({
                                         try {
                                             const { generateImage } = await import('./generateImage');
                                             const prompt = buildIconPrompt(rawIcon, iconStyle, iconMonochrome, fixedGlyph as any, fixedBg as any);
-                                            const out = await generateImage({ prompt, aspectRatio: '1:1' });
-                                            if (out && out.success && out.path) {
-                                                iconPath = out.path;
-                                                try { imagePathsToDelete.add(out.path); } catch {}
+                                            const cacheDir = path.join(config.generatedDir, 'cache', 'icons');
+                                            try { await fs.mkdir(cacheDir, { recursive: true }); } catch {}
+                                            const key = JSON.stringify({ k: sanitizeIconKeyword(rawIcon), style: iconStyle, mono: iconMonochrome, glyph: fixedGlyph, bg: fixedBg });
+                                            const hash = crypto.createHash('sha1').update(key).digest('hex');
+                                            const cachePath = path.join(cacheDir, `icon-${hash}.png`);
+                                            try {
+                                                try { logger.info({ rawIcon, hash, cachePath }, 'Icon cache lookup (kpi)'); } catch {}
+                                                await fs.access(cachePath);
+                                                iconPath = cachePath;
+                                                try { logger.info({ cachePath }, 'Icon cache hit (kpi)'); } catch {}
+                                            } catch {
+                                                try { logger.info({ rawIcon, hash }, 'Icon cache miss (kpi); generating via AI'); } catch {}
+                                                const out = await generateImage({ prompt, aspectRatio: '1:1' });
+                                                if (out && out.success && out.path) {
+                                                    try {
+                                                        await fs.copyFile(out.path, cachePath);
+                                                        try { logger.info({ from: out.path, to: cachePath }, 'Icon cached (kpi)'); } catch {}
+                                                    } catch (copyErr) {
+                                                        try { logger.warn({ error: String(copyErr), from: out.path, to: cachePath }, 'Icon cache copy failed (kpi)'); } catch {}
+                                                    }
+                                                    iconPath = cachePath;
+                                                    try { imagePathsToDelete.add(out.path); } catch {}
+                                                }
                                             }
                                         } catch {}
                                     }
                                 }
                             }
                             if (iconPath) {
-                                try { iconPath = await normalizeIconBackground(iconPath); } catch {}
+                                if (fixedGlyph === 'black') { try { iconPath = await normalizeIconBackground(iconPath); } catch {} }
                                 // Protrude half of icon outside the top-left corner of the card box (no white circle)
                                 const ix = x - iconSize / 2;
                                 const iy = y - iconSize / 2;

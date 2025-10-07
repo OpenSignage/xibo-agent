@@ -1122,10 +1122,39 @@ register('callouts', async ({ slide, payload, region, templateConfig, helpers })
           iconPath = rawIcon;
         } else {
           try {
+            // cache-aware generation (callouts)
+            const fs = await import('fs/promises');
+            const pathMod = await import('path');
+            const cryptoMod = await import('crypto');
+            const { config } = await import('../xibo-agent/config');
             const { generateImage } = await import('./generateImage');
-            const prompt = `${rawIcon}, minimal line icon, monochrome, transparent background`;
-            const out = await generateImage({ prompt, aspectRatio: '1:1' });
-            if (out && out.success && out.path) iconPath = out.path;
+            const cacheDir = pathMod.join(config.generatedDir, 'cache', 'icons');
+            try { await fs.mkdir(cacheDir, { recursive: true }); } catch {}
+            const styleHint = (iconCfg.style ? String(iconCfg.style) : 'line');
+            const monochrome = true; // calloutsは固定
+            const key = JSON.stringify({ k: rawIcon.toLowerCase(), style: styleHint, mono: monochrome, glyph: 'black', bg: 'transparent' });
+            const hash = (cryptoMod as any).createHash('sha1').update(key).digest('hex');
+            const cachePath = pathMod.join(cacheDir, `icon-${hash}.png`);
+            try {
+              await fs.access(cachePath);
+              iconPath = cachePath;
+            } catch {
+              const prompt = `${rawIcon}, minimal ${styleHint} icon, monochrome, transparent background, centered, no text`;
+              const out = await generateImage({ prompt, aspectRatio: '1:1' });
+              if (out && out.success && out.path) {
+                try {
+                  const { createCanvas, loadImage } = await import('canvas');
+                  const img = await loadImage(out.path);
+                  const canvas = createCanvas(256, 256);
+                  const ctx = canvas.getContext('2d');
+                  ctx.clearRect(0, 0, 256, 256);
+                  ctx.drawImage(img as any, 0, 0, 256, 256);
+                  const buf = canvas.toBuffer('image/png');
+                  await fs.writeFile(cachePath, buf);
+                } catch { try { await fs.copyFile(out.path, cachePath); } catch {} }
+                iconPath = cachePath;
+              }
+            }
           } catch {}
         }
       }
@@ -1134,19 +1163,26 @@ register('callouts', async ({ slide, payload, region, templateConfig, helpers })
     const ensureTransparent = async (p: string | null): Promise<string | null> => {
       if (!p) return p;
       try {
-        const sharp = (await import('sharp')).default;
-        const img = sharp(p).png();
-        // Replace near-white pixels with transparency using chroma key-like approach
-        const { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
-        const out = Buffer.from(data);
-        for (let i = 0; i < out.length; i += info.channels) {
-          const r = out[i], g = out[i+1], b = out[i+2];
-          const aIdx = i + (info.channels - 1);
+        const { createCanvas, loadImage } = await import('canvas');
+        const img = await loadImage(p);
+        const w = Math.max(1, (img as any).width || 0);
+        const h = Math.max(1, (img as any).height || 0);
+        const canvas = createCanvas(w, h);
+        const ctx = canvas.getContext('2d');
+        // Simple white-to-transparent key: draw image, then scan and clear near-white
+        ctx.drawImage(img as any, 0, 0, w, h);
+        const imageData = ctx.getImageData(0, 0, w, h);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i], g = data[i+1], b = data[i+2];
           const nearWhite = r > 245 && g > 245 && b > 245;
-          if (nearWhite) out[aIdx] = 0; // set alpha to 0
+          if (nearWhite) data[i+3] = 0; // alpha 0
         }
+        ctx.putImageData(imageData, 0, 0);
         const outPath = p.replace(/\.(jpg|jpeg)$/i, '.png');
-        await sharp(out, { raw: { width: info.width, height: info.height, channels: info.channels } }).png().toFile(outPath);
+        const buf = canvas.toBuffer('image/png');
+        const fs = await import('fs/promises');
+        await (fs as any).writeFile(outPath, buf);
         return outPath;
       } catch { return p; }
     };
@@ -1257,22 +1293,47 @@ register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
       (async () => {
         try {
           if (!iconPath && rawIcon) {
+            // cache-aware generation
             const { generateImage } = await import('./generateImage');
+            const fs = await import('fs/promises');
+            const pathMod = await import('path');
+            const { config } = await import('../xibo-agent/config');
+            const cryptoMod = await import('crypto');
+            const cacheDir = pathMod.join(config.generatedDir, 'cache', 'icons');
+            try { await fs.mkdir(cacheDir, { recursive: true }); } catch {}
             const styleHint = (iconCfg.style ? String(iconCfg.style) : 'line');
             const monochrome = iconCfg.monochrome !== false;
-            const prompt = `${rawIcon}, minimal ${styleHint} icon${monochrome? ', monochrome':''}, solid ${glyphColorFixed} glyph on ${bgColorFixed} square background, centered, no text`;
-            const out = await generateImage({ prompt, aspectRatio: '1:1' });
-            if (out && out.success && out.path) iconPath = out.path;
+            const key = JSON.stringify({ k: rawIcon.toLowerCase(), style: styleHint, mono: monochrome, glyph: glyphColorFixed, bg: bgColorFixed });
+            const hash = (cryptoMod as any).createHash('sha1').update(key).digest('hex');
+            const cachePath = pathMod.join(cacheDir, `icon-${hash}.png`);
+            try {
+              await fs.access(cachePath);
+              iconPath = cachePath;
+            } catch {
+              const prompt = `${rawIcon}, minimal ${styleHint} icon${monochrome? ', monochrome':''}, transparent background, centered, no text`;
+              const out = await generateImage({ prompt, aspectRatio: '1:1' });
+              if (out && out.success && out.path) {
+                try {
+                  const { createCanvas, loadImage } = await import('canvas');
+                  const img = await loadImage(out.path);
+                  const canvas = createCanvas(256, 256);
+                  const ctx = canvas.getContext('2d');
+                  ctx.clearRect(0, 0, 256, 256);
+                  ctx.drawImage(img as any, 0, 0, 256, 256);
+                  const buf = canvas.toBuffer('image/png');
+                  await fs.writeFile(cachePath, buf);
+                } catch { try { await fs.copyFile(out.path, cachePath); } catch {} }
+                iconPath = cachePath;
+              }
+            }
           }
         } catch {}
         try {
           if (iconPath) {
             const iw = Math.min(iconSize, cardW * 0.3);
             const ih = iw;
-            // overlap top-left corner (50% outside the card)
             const ix = x - iw * 0.5;
             const iy = y - ih * 0.5;
-            // background white behind icon to guarantee white background
             slide.addShape('rect', { x: ix, y: iy, w: iw, h: ih, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 } });
             slide.addImage({ path: iconPath, x: ix, y: iy, w: iw, h: ih, sizing: { type: 'contain', w: iw, h: ih } as any });
             iconRendered = true;
