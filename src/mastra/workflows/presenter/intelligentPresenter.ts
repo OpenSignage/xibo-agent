@@ -368,6 +368,7 @@ logger.debug("🤖 [Designer AI] Analyzing report and designing presentation str
             - 重要: 本ワークフローでは "layout": "freeform" は使用しません。"elements" キーは出力しないでください。
             - レイアウト選択ガイド（厳守）:
                 1) content_only: 視覚要素が不要で、本文の要点のみで十分な場合。
+                   - 重要: content_only を選択したスライドでは visual_recipe を絶対に出力しない（null か省略）。bullets と重複する checklists なども出力しない。
                 2) content_with_visual: 右側に図・画像・簡潔な可視化（KPI/比較/アイコン列など）を置き、左側に本文（bullets）を配置する二分構成。本文だけで終わらせず、原則ビジュアルを伴うこと。
                 3) content_with_bottom_visual: 視覚要素が帯状（process/roadmap/gantt/timeline 等）で、本文の幅を広く使いたい場合。帯は下部に配置。
                 4) content_with_image: 左に画像（AI自動生成推奨）、右に本文。画像で雰囲気・事例を見せつつ、右で要点を整理する。
@@ -386,7 +387,7 @@ logger.debug("🤖 [Designer AI] Analyzing report and designing presentation str
                 - 手順/流れには 'process'、時系列には 'timeline'。
                 - visual_recipe が 'process'|'roadmap'|'gantt'|'timeline' の場合は、本文の可読性を優先して "content_with_bottom_visual" を推奨。
                 - visual_recipe が 'checklist' の場合は、"checklist_top_bullets_bottom" を優先。bullets と内容が重複する場合は、bullets を短く要約する。'content_with_visual' は原則避ける。
-                - visual_suggestion が 'none' でも、checklist / callouts / comparison / process / timeline / table 等が有効なら積極的に提案する（重複は避ける）。
+            - visual_suggestion が 'none' の場合や本文のみで十分な場合は、visual_recipe を null とする（text-only）。
                 1) KPI: { "type": "kpi", "items": [{"label": string, "value": string, "icon"?: string}] }
                 2) 比較: { "type": "comparison", "a": {"label": string, "value": string}, "b": {"label": string, "value": string} }
                 3) タイムライン: { "type": "timeline", "steps": [{"label": string}, ...] }

@@ -484,7 +484,6 @@ async function readImageDimensions(filePath: string): Promise<{ width: number; h
   }
   return undefined;
 }
-
 /**
  * Prepare bullets so that lines following a header-like bullet (contains '：')
  * are visually grouped as sub-lines by adding full-width spaces as a prefix.
@@ -798,7 +797,6 @@ export const createPowerpointTool = createTool({
     })();
     const presenterDir = config.presentationsDir;
     const filePath = path.join(presenterDir, `${fileName}.pptx`);
-
     try { logger.info({ filePath, slideCount: slides.length }, 'CreatePowerPoint: start'); } catch {}
 
     try {
@@ -1074,25 +1072,10 @@ export const createPowerpointTool = createTool({
           return paletteColors[i];
         };
 
-        // Normalize icon image by painting solid white background under it (no transparency)
-        const normalizeIconBackground = async (iconPath: string): Promise<string> => {
-          try {
-            const { createCanvas, loadImage } = await import('canvas');
-            const img = await loadImage(iconPath);
-            const w = Math.max(1, (img as any).width || 0);
-            const h = Math.max(1, (img as any).height || 0);
-            const canvas = createCanvas(w, h);
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(0, 0, w, h);
-            ctx.drawImage(img as any, 0, 0, w, h);
-            const buf = canvas.toBuffer('image/png');
-            await fs.writeFile(iconPath, buf);
-          } catch {
-            // ignore normalization failures; use original
-          }
-          return iconPath;
-        };
+        //（以前の対処療法ヘルパーを削除）
+
+        // 透明背景維持のための無加工パス（以前の白下地再合成は撤回）
+        const normalizeIconBackground = async (iconPath: string): Promise<string> => iconPath;
 
         // Sanitize icon name and provide simple synonyms for common keywords
         const sanitizeIconKeyword = (raw: string): string => {
@@ -1206,7 +1189,7 @@ export const createPowerpointTool = createTool({
             if (missingStyleRefs.length) {
               try { logger.warn({ layout: layoutKey, missingStyleRefs }, 'Template styleRef paths not found.'); } catch {}
             }
-            const style = resolveStyle(...styleRefObjs, el?.style);
+            let style = resolveStyle(...styleRefObjs, el?.style);
             const type = String(el?.type || '');
             if (type === 'visual') {
               // Resolve recipe from slide data using recipeRef (default: visual_recipe)
@@ -1257,6 +1240,13 @@ export const createPowerpointTool = createTool({
               if (!textVal) textVal = String(el?.text || '');
               if (!textVal) continue;
       try { logger.debug({ layoutKey, contentPath, sample: textVal.slice(0,64), length: textVal.length }, 'render:text:prepare'); } catch {}
+              // If bullets area, merge default bullets style from components as a safety net
+              if (contentPath === 'bullets' || areaName === 'panelBullets') {
+                const bulletsDefault = (templateConfig?.components as any)?.bulletsText;
+                if (bulletsDefault && typeof bulletsDefault === 'object') {
+                  style = resolveStyle(bulletsDefault, style);
+                }
+              }
               // Auto text color: if color未指定かつ背景(fill)がある場合、背景に応じて黒/白を自動選択
               let bgHexForText = normalizeColorToPptxHex(style?.fill) || relaxedToHex6(typeof style?.fill === 'string' ? style.fill : undefined);
               if (!bgHexForText) bgHexForText = areaBgHex[areaName];
@@ -1290,6 +1280,11 @@ export const createPowerpointTool = createTool({
                 const areaBulletsBg = (templateConfig?.areaStyles?.bullets?.bg);
                 if (typeof areaBulletsBg === 'string' && areaBulletsBg.trim()) {
                   textOptions.fill = buildFill(areaBulletsBg);
+                }
+                // Ensure bullets background is set even if template areaStyles.bullets.bg is missing
+                if (!textOptions.fill) {
+                  const bulletsDefault = (templateConfig?.components as any)?.bulletsText;
+                  if (bulletsDefault?.fill) textOptions.fill = buildFill(bulletsDefault.fill);
                 }
               }
               if (style?.lineColor || Number.isFinite(style?.lineWidth)) textOptions.line = { color: normalizeColorToPptxHex(style?.lineColor) || (normalizeColorToPptxHex(style?.fill) || 'FFFFFF'), width: Number(style?.lineWidth) || 0 };
@@ -1436,6 +1431,10 @@ export const createPowerpointTool = createTool({
         // bullets area style from template
         const bulletsBg = typeof templateConfig?.areaStyles?.bullets?.bg === 'string' ? templateConfig.areaStyles.bullets.bg : undefined;
         const bulletsShadowValue: any = templateConfig?.areaStyles?.bullets?.shadow;
+        // Merge components.bulletsText defaults (line spacing and fallback fill)
+        const bulletsParaAfterTpl = Number((templateConfig?.components as any)?.bulletsText?.paraSpaceAfter);
+        const bulletsFillDefault = (templateConfig?.components as any)?.bulletsText?.fill as (string|undefined);
+        const bulletsBgFinal = bulletsBg || bulletsFillDefault;
         // Draw infographic primitives on the given slide
         const ChartType: any = (pres as any).ChartType;
                 /**
@@ -1510,10 +1509,19 @@ export const createPowerpointTool = createTool({
                       if (!bypassRegistry) {
                         try {
                           const { render: renderFromRegistry } = await import('./infographicRegistry');
+                          // Merge context_for_visual from slide data into payload so the registry
+                          // can render a visual title and have complete context regardless of caller path.
+                          const payloadForRegistry = (payload && typeof payload === 'object') ? { ...(payload as any) } : payload;
+                          try {
+                            const ctxForVisual = (targetSlide as any)?.__data?.context_for_visual;
+                            if (ctxForVisual && payloadForRegistry && typeof payloadForRegistry === 'object' && !('context_for_visual' in (payloadForRegistry as any))) {
+                              (payloadForRegistry as any).context_for_visual = String(ctxForVisual);
+                            }
+                          } catch {}
                           const ok = await renderFromRegistry({
                             slide: targetSlide,
                             type: String(type || ''),
-                            payload,
+                            payload: payloadForRegistry,
                             region: { x: rx, y: ry, w: rw, h: rh },
                             templateConfig,
                             helpers: { pickTextColorForBackground, getPaletteColor }
@@ -1897,7 +1905,7 @@ export const createPowerpointTool = createTool({
                             const autoBar = !rawBar || rawBar === 'auto';
                             const barHex = autoBar ? getPaletteColor(i).replace('#','') : (normalizeColorToPptxHex(ganttStyleLocalBar.barColor) || getPaletteColor(i).replace('#',''));
                             const lineHex = normalizeColorToPptxHex(ganttStyleLocalBar.barLineColor) || barHex;
-                            targetSlide.addShape('rect', { x, y, w, h: barH, fill: { color: barHex }, line: { color: lineHex, width: 0.5 } });
+                            targetSlide.addShape('rect', { x: x, y, w, h: barH, fill: { color: barHex }, line: { color: lineHex, width: 0.5 } });
                             // Per-phase start date label (above the bar)
                             const ganttStyleLocalDate: any = (templateConfig?.visualStyles?.gantt) || {};
                             const dateFs = Number.isFinite(Number(ganttStyleLocalDate.labelFontSize)) ? Math.max(6, Number(ganttStyleLocalDate.labelFontSize)) : 12;
@@ -1913,7 +1921,7 @@ export const createPowerpointTool = createTool({
                             const durationDays = Math.max(1, Math.round((t.end!.getTime() - t.start!.getTime()) / dayMs));
                             const durText = `${durationDays}日`;
                             const textColor = pickTextColorForBackground(`#${barHex}`).toString();
-                            targetSlide.addText(durText, { x, y, w, h: barH, fontSize: 10, fontFace: JPN_FONT, color: textColor, align: 'center', valign: 'middle' });
+                            targetSlide.addText(durText, { x: x, y, w, h: barH, fontSize: 10, fontFace: JPN_FONT, color: textColor, align: 'center', valign: 'middle' });
                         });
                     } else {
                         // Fallback: index-based if dates are unusable
@@ -2151,9 +2159,9 @@ export const createPowerpointTool = createTool({
                                 if (/\\|\//.test(rawIcon) || /\.(png|jpg|jpeg)$/i.test(rawIcon)) {
                                     iconPath = rawIcon;
                                 } else {
-                                    try {
-                                        const { generateImage } = await import('./generateImage');
-                                        const prompt = buildIconPrompt(rawIcon, iconStyle, iconMonochrome, fixedGlyph, fixedBg);
+                                        try {
+                                            const { generateIcon } = await import('./generateIcon');
+                                            const prompt = buildIconPrompt(rawIcon, iconStyle, iconMonochrome, fixedGlyph, fixedBg);
                                         const cacheDir = path.join(config.generatedDir, 'cache', 'icons');
                                         try { await fs.mkdir(cacheDir, { recursive: true }); } catch {}
                                         const key = JSON.stringify({ k: sanitizeIconKeyword(rawIcon), style: iconStyle, mono: iconMonochrome, glyph: fixedGlyph, bg: fixedBg });
@@ -2166,8 +2174,8 @@ export const createPowerpointTool = createTool({
                                             try { logger.info({ cachePath }, 'Icon cache hit (callouts)'); } catch {}
                                         } catch {
                                             try { logger.info({ rawIcon, hash }, 'Icon cache miss (callouts); generating via AI'); } catch {}
-                                            const out = await generateImage({ prompt, aspectRatio: '1:1' });
-                                            if (out && out.success && out.path) {
+                                                const out = await generateIcon({ prompt });
+                                            if (out?.success && out.path) {
                                                 try {
                                                     await fs.copyFile(out.path, cachePath);
                                                     try { logger.info({ from: out.path, to: cachePath }, 'Icon cached (callouts)'); } catch {}
@@ -2176,7 +2184,7 @@ export const createPowerpointTool = createTool({
                                                 }
                                                 iconPath = cachePath;
                                                 try { imagePathsToDelete.add(out.path); } catch {}
-                                            }
+                                            } else { }
                                         }
                                     } catch {}
                                 }
@@ -2187,16 +2195,20 @@ export const createPowerpointTool = createTool({
                         const textLeftX = iconPath ? (x + iconPad + iconSize + iconPad) : (x + 0.1);
                         const textWidth = iconPath ? (boxW - (textLeftX - x) - 0.1) : (boxW - 0.2);
 
-                        if (iconPath) {
-                            // Only convert white background to transparent when glyph is dark
-                            if (fixedGlyph === 'black') { try { iconPath = await normalizeIconBackground(iconPath); } catch {} }
-                            // Place icon square within box, top pad
-                            const ix = x + iconPad;
-                            const iy = y + iconPad;
-                            const iw = Math.min(iconSize, boxW * 0.3);
-                            const ih = Math.min(iconSize, boxH * 0.5);
-                            targetSlide.addImage({ path: iconPath, x: ix, y: iy, w: iw, h: ih, sizing: { type: 'contain', w: iw, h: ih } as any, shadow: shadowOf(resolveVisualShadow('image')) });
-                        }
+                            if (iconPath) {
+                              const ix = x + iconPad;
+                              const iy = y + iconPad;
+                              const iw = Math.min(iconSize, boxW * 0.3);
+                              const ih = Math.min(iconSize, boxH * 0.5);
+                              try {
+                                const buf = await fs.readFile(iconPath);
+                                const b64 = (buf as Buffer).toString('base64');
+                                const dataUrl = `data:image/png;base64,${b64}`;
+                                targetSlide.addImage({ data: dataUrl, x: ix, y: iy, w: iw, h: ih, sizing: { type: 'contain', w: iw, h: ih } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                              } catch (e) {
+                                
+                              }
+                            }
 
                         // Title (label)
                         targetSlide.addText(String(it?.label ?? ''), { x: textLeftX, y: y + 0.1, w: textWidth, h: 0.4, fontSize: 12, bold: true, fontFace: JPN_FONT, color: calloutColor });
@@ -2268,7 +2280,7 @@ export const createPowerpointTool = createTool({
                                         iconPath = rawIcon;
                                     } else {
                                         try {
-                                            const { generateImage } = await import('./generateImage');
+                                            const { generateIcon } = await import('./generateIcon');
                                             const prompt = buildIconPrompt(rawIcon, iconStyle, iconMonochrome, fixedGlyph as any, fixedBg as any);
                                             const cacheDir = path.join(config.generatedDir, 'cache', 'icons');
                                             try { await fs.mkdir(cacheDir, { recursive: true }); } catch {}
@@ -2282,8 +2294,8 @@ export const createPowerpointTool = createTool({
                                                 try { logger.info({ cachePath }, 'Icon cache hit (kpi)'); } catch {}
                                             } catch {
                                                 try { logger.info({ rawIcon, hash }, 'Icon cache miss (kpi); generating via AI'); } catch {}
-                                                const out = await generateImage({ prompt, aspectRatio: '1:1' });
-                                                if (out && out.success && out.path) {
+                                                const out = await generateIcon({ prompt });
+                                                if (out?.success && out.path) {
                                                     try {
                                                         await fs.copyFile(out.path, cachePath);
                                                         try { logger.info({ from: out.path, to: cachePath }, 'Icon cached (kpi)'); } catch {}
@@ -2292,18 +2304,23 @@ export const createPowerpointTool = createTool({
                                                     }
                                                     iconPath = cachePath;
                                                     try { imagePathsToDelete.add(out.path); } catch {}
-                                                }
+                                                } else { }
                                             }
                                         } catch {}
                                     }
                                 }
                             }
                             if (iconPath) {
-                                if (fixedGlyph === 'black') { try { iconPath = await normalizeIconBackground(iconPath); } catch {} }
-                                // Protrude half of icon outside the top-left corner of the card box (no white circle)
                                 const ix = x - iconSize / 2;
                                 const iy = y - iconSize / 2;
-                                targetSlide.addImage({ path: iconPath, x: ix, y: iy, w: iconSize, h: iconSize, sizing: { type: 'contain', w: iconSize, h: iconSize } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                                try {
+                                  const buf = await fs.readFile(iconPath);
+                                  const b64 = (buf as Buffer).toString('base64');
+                                  const dataUrl = `data:image/png;base64,${b64}`;
+                                  targetSlide.addImage({ data: dataUrl, x: ix, y: iy, w: iconSize, h: iconSize, sizing: { type: 'contain', w: iconSize, h: iconSize } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                                } catch (e) {
+                                  
+                                }
                             }
                         } catch {}
                         // Text areas and fitting (Label top, Value below)
@@ -2696,7 +2713,7 @@ export const createPowerpointTool = createTool({
                 if (isTitleSlide && titleSlideImagePath) {
                     try {
                     await fs.access(titleSlideImagePath);
-                    slide.background = { path: titleSlideImagePath };
+                    slide.background = { path: titleSlideImagePath } as any;
                         
                 } catch (error) {
                         logger.warn({ path: titleSlideImagePath, error }, 'Could not access title slide image file. Using default background.');
@@ -2715,7 +2732,8 @@ export const createPowerpointTool = createTool({
                             'Express the slide theme as visual metaphors using shapes, gradients, light, depth, and rhythm — not text.',
                             'Design cues: clean geometric patterns, subtle gradient layers, soft light streaks, particle networks, depth-of-field bokeh, tasteful contrast.',
                             paletteHint,
-                            'Minimal, elegant, high-resolution, professional. No text overlay.'
+                            'Minimal, elegant, high-resolution, professional. No text overlay.',
+                            'Prohibit transparency or alpha in the artwork. Use fully opaque pixels over the entire canvas.'
                         ].filter(Boolean).join(' ');
                         const negativePrompt: string | undefined = String(slide0.titleSlideImageNegativePrompt || tplBgSrc.negativePrompt || '').trim() || undefined;
                         try { logger.debug({ prompt: composedPrompt, negativePrompt }, 'Title background image: sending prompt to generator'); } catch {}
@@ -2928,26 +2946,44 @@ export const createPowerpointTool = createTool({
                             // Use unified per-slide recipe (from slide or context)
                             const typeStr = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
                             const preferBottom = shouldPlaceVisualBottom(typeStr, perSlideRecipeHere);
+                            const isChecklist = typeStr === 'checklist';
                             // Render template elements; when preferBottom is true, skip template visual element
                             // When we prefer bottom placement, skip both the template visual and template bullets,
                             // we will render bullets ourselves at full width later.
-                            const elementsToRender = preferBottom
+                            const elementsToRender = (preferBottom || isChecklist)
                               ? (tmplElements.filter((e: any) => {
                                   const t = String(e?.type || '');
                                   const isVisual = t === 'visual';
                                   const isTemplateBullets = t === 'text' && (String(e?.contentRef || '').toLowerCase() === 'bullets');
-                                  return !(isVisual || isTemplateBullets);
+                                  // 重要: checklist もしくは preferBottom の場合はテンプレ側 bullets を必ず抑止
+                                  const suppressTemplateBullets = preferBottom || isChecklist;
+                                  return !(isVisual || (suppressTemplateBullets && isTemplateBullets));
                                 }))
                               : tmplElements;
                             // Provide slide data to renderer
                             (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath, context_for_visual: (slideData as any).context_for_visual };
                             await renderElementsFromTemplate(slide as any, 'content_with_visual', elementsToRender);
                             try { logger.debug({ layout: 'content_with_visual', preferBottom, hadVisualEl: Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual') }, 'Template elements rendered for content_with_visual'); } catch {}
+                            // Checklist は bullets を必ず表示（テンプレに bullets 要素があっても念のため上書き描画）
+                            if (isChecklist) {
+                                const bulletsArrCv = Array.isArray(slideData.bullets) ? slideData.bullets.map((b:any)=>String(b||'').trim()).filter(Boolean) : [];
+                                if (bulletsArrCv.length) {
+                                    const bulletsTextCv = bulletsArrCv.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
+                                    // Checklist は下帯配置を優先 → bullets はフル幅
+                                    const preferBottomChecklist = true; // checklist は常に下帯
+                                    const bx = preferBottomChecklist ? marginX : twoColTextX;
+                                    const bw = preferBottomChecklist ? contentW : twoColTextW;
+                                    const bh = Math.max(2.5, twoColTextH - 0.5);
+                                    slide.addText(bulletsTextCv, { x: bx, y: contentTopY + 0.5, w: bw, h: bh, fontSize: 18, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                                }
+                            }
                             delete (slide as any).__data;
                             // If template doesn't include a visual element or we intentionally skipped it, render either right-panel or bottom-band
                             const templateHadVisualEl = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
                             __templateHasVisualElForLayout = __templateHasVisualElForLayout || templateHadVisualEl;
-                            if (!preferBottom && templateHadVisualEl) {
+                            if (isChecklist) {
+                                visualRendered = true; // suppress checklist visual entirely
+                            } else if (!preferBottom && templateHadVisualEl) {
                                 // Respect template rendering only (no code-side duplication)
                                 visualRendered = true;
                             } else {
@@ -2976,8 +3012,9 @@ export const createPowerpointTool = createTool({
                                     const maxBottom = pageH - reservedBottomDyn;
                                     const availH = Math.max(0.6, maxBottom - yStart);
                                     const va = { x: marginX, y: yStart, w: contentW, h: availH };
-                                    if (perSlideRecipeHere && typeof perSlideRecipeHere === 'object') {
-                                        await drawInfographic(slide as any, String(typeStr), perSlideRecipeHere, va);
+                                    if (!isChecklist && perSlideRecipeHere && typeof perSlideRecipeHere === 'object') {
+                                        const recipeWithCtx = (slideData as any)?.context_for_visual ? { ...(perSlideRecipeHere as any), context_for_visual: (slideData as any).context_for_visual } : perSlideRecipeHere;
+                                        await drawInfographic(slide as any, String(typeStr), recipeWithCtx, va);
                                         visualRendered = true;
                                     } else if (slideData.imagePath) {
                                         slide.addImage({ path: slideData.imagePath, x: va.x, y: va.y, w: va.w, h: va.h, sizing: { type: 'contain', w: va.w, h: va.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
@@ -2987,17 +3024,24 @@ export const createPowerpointTool = createTool({
                             const bulletsArr2 = Array.isArray(slideData.bullets) ? slideData.bullets.map((b:any)=>String(b||'').trim()).filter(Boolean) : [];
                             if (bulletsArr2.length) {
                                 const bulletsText2 = bulletsArr2.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
-                                slide.addText(bulletsText2, { x: marginX, y: contentTopY + 0.5, w: contentW, h: Math.max(2.5, twoColTextH - 0.5), fontSize: 18, bullet: { type: 'bullet' }, fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                                slide.addText(bulletsText2, { x: marginX, y: contentTopY + 0.5, w: contentW, h: Math.max(2.5, twoColTextH - 0.5), fontSize: 18, bullet: { type: 'bullet' }, fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                             }
                                 } else {
-                                    const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.6, twoColVisualW, 3.4);
-                                    logger.warn({ layout: 'content_with_visual', area: vArea, recipeType: (slideData as any)?.visual_recipe?.type || null }, 'Template elements missing visual. Falling back to code-rendered visual region');
-                                    if ((slideData as any).visual_recipe) {
-                                        await drawInfographic(slide as any, String(((slideData as any).visual_recipe?.type) || ''), (slideData as any).visual_recipe, vArea);
-                                        visualRendered = true;
-                                    } else if (slideData.imagePath) {
-                                        slide.addImage({ path: slideData.imagePath, x: vArea.x, y: vArea.y, w: vArea.w, h: vArea.h, sizing: { type: 'contain', w: vArea.w, h: vArea.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
-                                        visualRendered = true;
+                                    // Fallback visual only when not checklist; otherwise ensure bullets are shown and skip visual
+                                    if (!isChecklist) {
+                                        const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.6, twoColVisualW, 3.4);
+                                        logger.warn({ layout: 'content_with_visual', area: vArea, recipeType: (slideData as any)?.visual_recipe?.type || null }, 'Template elements missing visual. Falling back to code-rendered visual region');
+                                        if ((slideData as any).visual_recipe) {
+                                            const vr = (slideData as any).visual_recipe;
+                                            const vrWithCtx = (slideData as any)?.context_for_visual ? { ...vr, context_for_visual: (slideData as any).context_for_visual } : vr;
+                                            await drawInfographic(slide as any, String(vr.type || ''), vrWithCtx, vArea);
+                                            visualRendered = true;
+                                        } else if (slideData.imagePath) {
+                                            slide.addImage({ path: slideData.imagePath, x: vArea.x, y: vArea.y, w: vArea.w, h: vArea.h, sizing: { type: 'contain', w: vArea.w, h: vArea.h } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                                            visualRendered = true;
+                                        }
+                                    } else {
+                                        visualRendered = true; // nothing to draw for checklist; bullets are already rendered
                                     }
                                 }
                             }
@@ -3023,7 +3067,7 @@ export const createPowerpointTool = createTool({
                         const bArea = resolveArea('bullets', bX, contentTopY + 0.5, bW, Math.max(2.5, twoColTextH - 0.5));
                     const cleanedBulletsCv = (slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim());
                     const bulletTextCv = cleanedBulletsCv.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
-                        slide.addText(bulletTextCv, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: 18, bullet: { type: 'bullet' }, fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                        slide.addText(bulletTextCv, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: 18, bullet: { type: 'bullet' }, fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                     }
                     // Non-template path: if visual exists and is crowded for right-panel, draw into bottom band instead
                     if (perSlideRecipeHere) {
@@ -3056,12 +3100,18 @@ export const createPowerpointTool = createTool({
                             const availHDyn = Math.max(0.6, maxBottom - yStartDyn);
                             const vAreaDyn = { x: marginX, y: yStartDyn, w: contentW, h: availHDyn };
                             // debug computed area removed after verification
-                            await drawInfographic(slide as any, String(typeStr || ''), perSlideRecipeHere, vAreaDyn);
+                            {
+                                const recipeWithCtx = (slideData as any)?.context_for_visual ? { ...(perSlideRecipeHere as any), context_for_visual: (slideData as any).context_for_visual } : perSlideRecipeHere;
+                                await drawInfographic(slide as any, String(typeStr || ''), recipeWithCtx, vAreaDyn);
+                            }
                             visualRendered = true;
                         } else {
                             // Right-panel recipe → two-column as before
                             const vArea = resolveArea('visual', twoColVisualX, contentTopY + 0.7, twoColVisualW, twoColVisualH);
-                            await drawInfographic(slide as any, String(typeStr || ''), perSlideRecipeHere, vArea);
+                            {
+                                const recipeWithCtx = (slideData as any)?.context_for_visual ? { ...(perSlideRecipeHere as any), context_for_visual: (slideData as any).context_for_visual } : perSlideRecipeHere;
+                                await drawInfographic(slide as any, String(typeStr || ''), recipeWithCtx, vArea);
+                            }
                             visualRendered = true;
                         }
                     }
@@ -3082,7 +3132,7 @@ export const createPowerpointTool = createTool({
                                 if (!items || !items.length) return 0;
                                 const charWidthIn = fontPt / 144; // approx visual width per char
                                 const maxCharsPerLine = Math.max(8, Math.floor(widthIn / Math.max(0.06, charWidthIn)));
-                                const lineHeightIn = (fontPt * 1.2) / 72; // 1.2em
+                                const lineHeightIn = (fontPt * 1.2) / 72; // 1.2em line height in inches
                                 const paraAfterIn = (paraAfterPtLocal || 0) / 72;
                                 let total = 0;
                                 for (const raw of items) {
@@ -3096,7 +3146,22 @@ export const createPowerpointTool = createTool({
                             const estBulletsH = estimateBulletsHeightInches(bulletsArr, Number(bA.w) || contentW, 20, 12);
                             const bulletsBottomY = (Number(bA.y) || (contentTopY + 0.5)) + Math.min(Number(bA.h) || 2.4, estBulletsH);
                             const reservedBottom = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
-                            const yStartDyn = Math.max(contentTopY + 0.7, bulletsBottomY + 0.2);
+                            // Compute dynamic visual region start
+                            let yStartDyn = Math.max(contentTopY + 0.7, bulletsBottomY + 0.2);
+                            // Optional: Draw a visual title from context_for_visual and shrink the visual region
+                            try {
+                              const ctxTitleRaw = String(((slideData as any)?.context_for_visual || '')).trim();
+                              if (ctxTitleRaw) {
+                                const vt = (templateConfig?.visualStyles?.visual_title) || {};
+                                const fs = Number(vt.fontSize) || 16;
+                                const color = (typeof vt.color === 'string' && vt.color.trim()) ? normalizeColorToPptxHex(vt.color) || '#111111' : '#111111';
+                                const bold = (vt.bold === true);
+                                const padY = Number(vt.padY) || 0.06;
+                                const tH = Math.max(0.3, fs / 72 + 0.12);
+                                slide.addText(ctxTitleRaw, { x: marginX, y: yStartDyn, w: contentW, h: tH, fontSize: fs, bold, align: 'left', valign: 'top', fontFace: JPN_FONT, color });
+                                yStartDyn = yStartDyn + tH + padY;
+                              }
+                            } catch {}
                             const maxBottom = pageH - reservedBottom;
                             const availHDyn = Math.max(0.6, maxBottom - yStartDyn);
                             const areaOverrides = { visual: { x: Number(vA.x) || marginX, y: yStartDyn, w: Number(vA.w) || contentW, h: availHDyn } } as any;
@@ -3109,6 +3174,20 @@ export const createPowerpointTool = createTool({
                                 visualRendered = true;
                             } else {
                                 const va = resolveArea('visual', marginX, bottomBandY, contentW, bottomBandH);
+                                // Also handle context_for_visual title for fallback rendering
+                                try {
+                                  const ctxTitleRaw2 = String(((slideData as any)?.context_for_visual || '')).trim();
+                                  if (ctxTitleRaw2) {
+                                    const vt2 = (templateConfig?.visualStyles?.visual_title) || {};
+                                    const fs2 = Number(vt2.fontSize) || 16;
+                                    const color2 = (typeof vt2.color === 'string' && vt2.color.trim()) ? normalizeColorToPptxHex(vt2.color) || '#111111' : '#111111';
+                                    const bold2 = (vt2.bold === true);
+                                    const padY2 = Number(vt2.padY) || 0.06;
+                                    const tH2 = Math.max(0.3, fs2 / 72 + 0.12);
+                                    slide.addText(ctxTitleRaw2, { x: marginX, y: va.y, w: va.w, h: tH2, fontSize: fs2, bold: bold2, align: 'left', valign: 'top', fontFace: JPN_FONT, color: color2 });
+                                    va.y = va.y + tH2 + padY2; va.h = Math.max(0.2, va.h - (tH2 + padY2));
+                                  }
+                                } catch {}
                                 // Keep bottom visual fully visible above reserved footer area
                                 const reservedBottom = typeof templateConfig?.branding?.reservedBottom === 'number' ? Math.max(0, templateConfig.branding.reservedBottom) : 0.8;
                                 if ((va.y + va.h) > (pageH - reservedBottom)) {
@@ -3140,8 +3219,8 @@ export const createPowerpointTool = createTool({
                         const bArea = resolveArea('bullets', twoColTextX, contentTopY + 0.5, contentW, 2.4);
                         const cleanedBullets = mergeQuotedContinuations((slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim()));
                         const bulletText = cleanedBullets.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
-                        const bulletFontPt = 20; const paraAfterPt = 12;
-                        slide.addText(bulletText, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: bulletFontPt, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: paraAfterPt, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                        const bulletFontPt = 20; const paraAfterPt = (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6);
+                        slide.addText(bulletText, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: bulletFontPt, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: paraAfterPt, color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         // Estimate rendered bullet height to maximize visual area below
                         const estimateBulletsHeightInches = (items: string[], widthIn: number, fontPt: number, paraAfterPtLocal: number): number => {
                             if (!items || !items.length) return 0;
@@ -3223,7 +3302,7 @@ export const createPowerpointTool = createTool({
                         }
                         // Bullets on the right
                         const bulletsText = (slideData.bullets || []).map((b:any)=>String(b||'').replace(/\n[ \t　]*/g,' ').trim()).join('\n').replace(/\*\*([^*]+)\*\*/g,'$1');
-                        slide.addText(bulletsText, { x: bulletsArea.x, y: bulletsArea.y, w: bulletsArea.w, h: bulletsArea.h, fontSize: 18, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                        slide.addText(bulletsText, { x: bulletsArea.x, y: bulletsArea.y, w: bulletsArea.w, h: bulletsArea.h, fontSize: 18, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                     }
                     break;
                 case 'visual_only':
@@ -3441,30 +3520,25 @@ export const createPowerpointTool = createTool({
                         // expose to outer scope via locals
                         var __hasTemplate_co = hasTemplate;
                         var __hasBulletsEl_co = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'text' && (String(e?.area) === 'bullets' || String(e?.contentRef) === 'bullets'));
-                        // If this slide actually has a visual, prefer rendering via an appropriate layout template
-                        if (perSlideRecipeHere && typeof perSlideRecipeHere === 'object') {
-                            const typeStrCO = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
-                            const preferBottom = isBottomVisual || shouldPlaceVisualBottom(typeStrCO, perSlideRecipeHere);
-                            const targetLayout = preferBottom ? 'content_with_bottom_visual' : 'content_with_visual';
-                            const targetElems = templateConfig?.layouts?.[targetLayout]?.elements;
-                            if (Array.isArray(targetElems) && targetElems.length) {
-                                __templateHasElementsForLayout = true;
-                                try { logger.debug({ from: 'content_only', to: targetLayout }, 'Redirecting rendering to target layout to avoid overlap.'); } catch {}
-                                (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere };
-                                await renderElementsFromTemplate(slide as any, targetLayout, targetElems);
-                                const hasVisualEl = Array.isArray(targetElems) && targetElems.some((e: any) => String(e?.type) === 'visual');
-                                if (hasVisualEl) { visualRendered = true; __templateHasVisualElForLayout = true; }
-                                delete (slide as any).__data;
-                                break;
-                            }
+                        // content_only: ignore any visual_recipe to avoid duplication with bullets
+                        if (perSlideRecipeHere) {
+                            try { logger.info({ layout: 'content_only' }, 'Ignoring visual_recipe on content_only slide'); } catch {}
                         }
                         if (hasTemplate) {
                             __templateHasElementsForLayout = true;
                             try { logger.debug({ layout: 'content_only' }, 'Template elements present: skipping code-rendered defaults for content_only'); } catch {}
-                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: perSlideRecipeHere, imagePath: slideData.imagePath };
-                            await renderElementsFromTemplate(slide as any, 'content_only', tmplElements);
-                            // Mark visual presence to prevent fallback duplication
-                            const hasVisualEl = Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
+                            const typeStrCO_pref = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
+                            const preferBottomCO = perSlideRecipeHere ? shouldPlaceVisualBottom(typeStrCO_pref, perSlideRecipeHere) : false;
+                            const isChecklistCO = perSlideRecipeHere ? (typeStrCO_pref === 'checklist') : false;
+                            const isComparisonCO = perSlideRecipeHere ? (typeStrCO_pref === 'comparison') : false;
+                            // When roadmap/timeline/etc. should be at bottom, suppress template visual elements
+                            // Also suppress when checklist on content_only (avoid duplication with bullets)
+                            const suppressVisual = preferBottomCO || isChecklistCO || isComparisonCO;
+                            const elementsForRender = (suppressVisual && Array.isArray(tmplElements)) ? tmplElements.filter((e: any) => String(e?.type) !== 'visual') : tmplElements;
+                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets, visual_recipe: (suppressVisual ? undefined : perSlideRecipeHere), imagePath: slideData.imagePath };
+                            await renderElementsFromTemplate(slide as any, 'content_only', elementsForRender);
+                            // Mark visual presence only if we actually rendered a visual in template
+                            const hasVisualEl = !suppressVisual && Array.isArray(tmplElements) && tmplElements.some((e: any) => String(e?.type) === 'visual');
                             if (hasVisualEl) { visualRendered = true; __templateHasVisualElForLayout = true; }
                             delete (slide as any).__data;
                         }
@@ -3487,7 +3561,7 @@ export const createPowerpointTool = createTool({
                     // If visual exists and is bottom-type or will be placed at bottom, shorten bullets area to avoid overlap
                     if (perSlideRecipeHere) {
                         const typeStrCO = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
-                        const willBottom = isBottomVisual || shouldPlaceVisualBottom(typeStrCO, perSlideRecipeHere);
+                        const willBottom = (typeStrCO === 'comparison') || isBottomVisual || shouldPlaceVisualBottom(typeStrCO, perSlideRecipeHere);
                         if (willBottom) {
                             textHContentOnly = Math.min(textHContentOnly, 2.6);
                         }
@@ -3496,28 +3570,34 @@ export const createPowerpointTool = createTool({
                     if (!(__hasTemplate_co && __hasBulletsEl_co) && !__templateHasVisualElForLayout) {
                     if (perSlideRecipeHere) {
                         const typeStrCO2 = String((perSlideRecipeHere as any)?.type || '').toLowerCase();
-                        const willBottom2 = isBottomVisual || shouldPlaceVisualBottom(typeStrCO2, perSlideRecipeHere);
+                        const willBottom2 = (typeStrCO2 === 'comparison') || isBottomVisual || shouldPlaceVisualBottom(typeStrCO2, perSlideRecipeHere);
                         // If the recipe should be placed at bottom, use full-width text; otherwise two-column
                         if (willBottom2) {
-                                slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                                slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         } else {
                             // Right-panel recipe → two-column
-                                slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: twoColTextW, h: twoColTextH, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                                slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: twoColTextW, h: twoColTextH, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         }
                     } else {
                         // No recipe → full-width text
-                            slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: 12, color: bgTextColor, autoFit: true, fill: bulletsBg ? buildFill(bulletsBg) : undefined, line: bulletsBg ? { color: normalizeColorToPptxHex(bulletsBg) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                            slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         }
                     }
                     break;
             }
 
             // If a per-slide visual recipe exists, choose optimal layout to avoid overlap
+            // content_only + checklist は描画しない（重複回避）
             if (perSlideRecipeHere && (layout === 'content_with_visual' || layout === 'content_only') && !visualRendered) {
+                const typeStrEarly = String(perSlideRecipeHere.type || '').toLowerCase();
+                if (layout === 'content_only' && typeStrEarly === 'checklist') {
+                    // Skip rendering any checklist visual on content_only slides
+                    try { logger.info({ layout, recipeType: typeStrEarly }, 'Skipping checklist rendering on content_only'); } catch {}
+                } else {
                 const typeStr = String(perSlideRecipeHere.type || '');
                 // Decide placement dynamically for content_only
                 if (layout === 'content_only') {
-                    const preferBottom = shouldPlaceVisualBottom(typeStr, perSlideRecipeHere);
+                    const preferBottom = (String(typeStr).toLowerCase() === 'comparison') || shouldPlaceVisualBottom(typeStr, perSlideRecipeHere);
                     layout = preferBottom ? 'content_with_bottom_visual' : 'content_with_visual';
                 }
                 const isBottom = (layout === 'content_with_bottom_visual') || isBottomVisual || typeStr === 'gantt' || typeStr === 'timeline';
@@ -3540,6 +3620,7 @@ export const createPowerpointTool = createTool({
                 }
                 logger.warn({ layout, area: region, recipeType: String(perSlideRecipeHere.type || '') }, 'Fallback visual rendering invoked');
                 await drawInfographic(slide as any, String(perSlideRecipeHere.type || ''), perSlideRecipeHere, region);
+                }
             }
             // Copyright (template-driven)
             try {

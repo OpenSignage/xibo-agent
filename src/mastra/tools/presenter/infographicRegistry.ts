@@ -57,6 +57,28 @@ export async function render(args: Parameters<Renderer>[0]): Promise<boolean> {
   const r = registry[args.type];
   try { logger.debug({ type: args.type }, 'infographicRegistry.render dispatch'); } catch {}
   if (!r) return false;
+  // Optional common title above visuals when context_for_visual is provided
+  try {
+    const titleCfg: any = (args.templateConfig?.visualStyles?.visual_title) || {};
+    // Prefer payload.context_for_visual; fall back to slide.__data.context_for_visual if needed
+    const pf = (args as any)?.payload;
+    const sd = (args as any)?.slide;
+    const ctx1 = (typeof pf?.context_for_visual === 'string' && pf.context_for_visual.trim()) ? String(pf.context_for_visual).trim() : undefined;
+    const ctx2 = (typeof sd?.__data?.context_for_visual === 'string' && sd.__data.context_for_visual.trim()) ? String(sd.__data.context_for_visual).trim() : undefined;
+    const titleText: string | undefined = ctx1 || ctx2;
+    if (titleText) {
+      const fs = Number(titleCfg.fontSize) || 16;
+      const color = (typeof titleCfg.color === 'string' && titleCfg.color.trim()) ? `#${normalizeHex(titleCfg.color)}` : '#111111';
+      const padY = Number(titleCfg.padY) || 0.10;
+      const bold = titleCfg.bold === true;
+      const area = args.region;
+      const titleH = Math.max(0.3, fs / 72 + 0.12);
+      const y = area.y + padY;
+      args.slide.addText(titleText, { x: area.x, y, w: area.w, h: titleH, fontSize: fs, bold, align: 'left', valign: 'top', fontFace: 'Noto Sans JP', color });
+      // shrink drawing region downward to make space for the title
+      args.region = { x: area.x, y: y + titleH + 0.04, w: area.w, h: Math.max(0.2, area.h - (titleH + 0.04 + padY)) } as any;
+    }
+  } catch {}
   return await r(args);
 }
 
@@ -267,8 +289,14 @@ register('waterfall', ({ slide, payload, region, templateConfig, helpers }) => {
     const isTotal = it.isTotal === true || it.setAsTotal === true || String(it.type || '').toLowerCase() === 'total';
     let end: number;
     if (isTotal) {
-      const totalVal = Number(it.total ?? it.delta ?? 0);
-      end = totalVal;
+      // Total bar: if explicit total is given, use it; else if delta is present, include it in the total; otherwise keep current start
+      if (it.total !== undefined && it.total !== null && !Number.isNaN(Number(it.total))) {
+        end = Number(it.total);
+      } else if (it.delta !== undefined && it.delta !== null && !Number.isNaN(Number(it.delta))) {
+        end = start + Number(it.delta);
+      } else {
+        end = start;
+      }
     } else {
       const deltaVal = Number(it.delta || 0);
       end = start + deltaVal;
@@ -278,7 +306,8 @@ register('waterfall', ({ slide, payload, region, templateConfig, helpers }) => {
   }
   const minCum = Math.min(...cum, 0);
   const maxCum = Math.max(...cum, 0);
-  const margin = Math.min(0.2, rh * 0.08);
+  // Add a bit more breathing room so the chart is not too close to the top/bottom
+  const margin = Math.max(0.28, rh * 0.12);
   const usableH = Math.max(0.4, rh - 2 * margin);
   const span = Math.max(1, maxCum - minCum);
   const yFor = (c: number) => ry + margin + (maxCum - c) * (usableH / span);
@@ -981,87 +1010,104 @@ register('area_chart', async ({ slide, payload, region, templateConfig }) => {
   return true;
 });
 
-// Comparison (two boxes)
+// Comparison (grid, horizontal-first, N cards)
 /**
- * Comparison (two boxes) renderer
- * Payload: { type: 'comparison', a: { label: string, value: string }, b: { label: string, value: string } }
- * Styles (visualStyles.comparison): labelColor, valueColor, leftFill, rightFill, alpha.barFill,
- *   labelHeight, labelFontSize, valueFontSize, layoutPolicy.{gapX,padX,padY}
+ * Comparison renderer (grid)
+ * Payload examples:
+ *  - { type: 'comparison', a: { label, value }, b: { label, value }, c?: {...}, ... }
+ *  - { type: 'comparison', items: [{ label, value }, ...] }
+ * Styles (visualStyles.comparison): labelColor, valueColor, boxLineColor, alpha.barFill,
+ *   labelHeight, labelFontSize, valueFontSize, layoutPolicy.{gapX,gapY,padX,padY,horizontalMinBoxWidth}
  */
 register('comparison', ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
-  const a = payload?.a || {}, b = payload?.b || {};
   const st = getVisualStyle(templateConfig, 'comparison');
   const labelColorTpl = normalizeHex(st.labelColor);
   const valueColorTpl = normalizeHex(st.valueColor);
   const labelFs = Number(st.labelFontSize);
   const valueFs = Number(st.valueFontSize);
   const gapX = Number(st.layoutPolicy?.gapX);
+  const gapY = Number((st.layoutPolicy as any)?.gapY ?? 0.16);
   const padX = Number(st.layoutPolicy?.padX);
   const padY = Number(st.layoutPolicy?.padY);
-  const leftFill = normalizeHex(st.leftFill);
-  const rightFill = normalizeHex(st.rightFill);
+  const minBoxW = Number(st.layoutPolicy?.horizontalMinBoxWidth) || 2.2;
   const boxLine = normalizeHex(st.boxLineColor);
   const labelHeight = Number(st.labelHeight);
+  const rawLabelBg: any = (st as any).labelBackground ?? (st as any).labelBg;
+  const labelBold = (st as any)?.labelBold === true;
   let labelAlign: 'left'|'right'|'center'|undefined;
   const la = typeof st.labelAlign === 'string' ? st.labelAlign.toLowerCase() : '';
   if (la === 'left' || la === 'right' || la === 'center') labelAlign = la as any;
-  const rawLabelBg: any = (st as any).labelBackground ?? (st as any).labelBg;
-  if (!Number.isFinite(labelFs) || !Number.isFinite(valueFs) || !Number.isFinite(gapX) || !Number.isFinite(padX) || !Number.isFinite(padY) || !leftFill || !rightFill || !boxLine) { try { console.warn('comparison: missing style values'); } catch {} return false; }
-  const boxW = (rw - gapX)/2; const boxH = rh;
-  // card underlay + pastel fill + solid border (match KPI)
+  if (!Number.isFinite(labelFs) || !Number.isFinite(valueFs) || !Number.isFinite(gapX) || !Number.isFinite(padX) || !Number.isFinite(padY) || !boxLine) { try { console.warn('comparison: missing style values'); } catch {} return false; }
+
+  // Collect cards (support a,b,c... or items[])
+  let items: Array<{ label: string; value?: string }> = [];
+  if (Array.isArray(payload?.items)) {
+    items = (payload.items as any[]).map((it: any) => ({ label: String(it?.label ?? ''), value: (it?.value != null ? String(it.value) : '') }));
+  } else {
+    const candidateKeys = Object.keys(payload || {}).filter(k => k.length === 1 && /[a-z]/i.test(k)).sort();
+    for (const k of candidateKeys) {
+      const v: any = (payload as any)[k];
+      if (v && (typeof v === 'object') && ('label' in v || 'value' in v)) items.push({ label: String(v?.label ?? ''), value: (v?.value != null ? String(v.value) : '') });
+    }
+  }
+  if (items.length === 0) return true;
+
+  // Determine grid (prefer horizontal). Try larger column counts while keeping minBoxW.
+  const outer = 0.08;
+  let columns = Math.min(items.length, 4);
+  while (columns > 1) {
+    const testW = (rw - outer * 2 - gapX * (columns - 1)) / columns;
+    if (testW >= minBoxW) break;
+    columns--;
+  }
+  if (columns < 1) columns = 1;
+  const rows = Math.ceil(items.length / columns);
+  const boxW = Math.max(0.8, (rw - outer * 2 - gapX * (columns - 1)) / columns);
+  const boxH = Math.max(0.8, (rh - outer * 2 - gapY * (rows - 1)) / rows);
+
+  // Alpha (semi-transparent pastel like KPI)
   const fallbackBarAlpha = Number((templateConfig?.visualStyles?.bar_chart?.alpha?.barFill)) || 0.2;
   const kpiAlpha = Number((templateConfig?.visualStyles?.kpi as any)?.alpha?.barFill);
   const cmpAlpha = Number((st as any)?.alpha?.barFill);
-  const fillAlpha = Number.isFinite(cmpAlpha)
-    ? (cmpAlpha as number)
-    : (Number.isFinite(kpiAlpha) ? (kpiAlpha as number) : fallbackBarAlpha);
+  const fillAlpha = Number.isFinite(cmpAlpha) ? (cmpAlpha as number) : (Number.isFinite(kpiAlpha) ? (kpiAlpha as number) : fallbackBarAlpha);
   const toTransp = (a:number) => Math.round((1 - Math.max(0, Math.min(1, a))) * 100);
-  // Left
-  slide.addShape('rect', { x: rx, y: ry, w: boxW, h: boxH, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 }, rectRadius: 6 });
-  slide.addShape('rect', { x: rx, y: ry, w: boxW, h: boxH, fill: { color: `#${leftFill}`, transparency: toTransp(fillAlpha) }, line: { color: `#${leftFill}`, width: 2 }, rectRadius: 6 });
-  const labelColorLeft = labelColorTpl ? `#${labelColorTpl}` : (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(`#${leftFill}`) : '#FFFFFF');
-  // Compute effective background (semi-transparent fill over white) for value text contrast
-  const leftR = parseInt(leftFill.slice(0,2),16), leftG = parseInt(leftFill.slice(2,4),16), leftB = parseInt(leftFill.slice(4,6),16);
-  const aLeft = Math.max(0, Math.min(1, fillAlpha));
-  const blendLeft = (c:number) => Math.round(aLeft*c + (1-aLeft)*255);
-  const effLeftHex = `#${[blendLeft(leftR), blendLeft(leftG), blendLeft(leftB)].map(n=>n.toString(16).padStart(2,'0').toUpperCase()).join('')}`;
-  const valueColorLeft = (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(effLeftHex) : '#111111');
-  if (rawLabelBg && Number.isFinite(labelHeight)) {
-    const parsed = parseColorWithAlpha(String(rawLabelBg));
-    if (parsed) {
-      const transparency = Math.round((1 - parsed.alpha) * 100);
-      slide.addShape('rect', { x: rx + padX, y: ry + padY, w: boxW - padX*2, h: labelHeight as number, fill: { color: parsed.hex, transparency }, line: { color: parsed.hex, width: 0 } } as any);
-    } else {
-      const hex = String(rawLabelBg).replace('#','');
-      slide.addShape('rect', { x: rx + padX, y: ry + padY, w: boxW - padX*2, h: labelHeight as number, fill: { color: hex }, line: { color: hex, width: 0 } } as any);
+
+  // Draw grid of cards
+  for (let i = 0; i < items.length; i++) {
+    const row = Math.floor(i / columns);
+    const col = i % columns;
+    const x = rx + outer + col * (boxW + gapX);
+    const y = ry + outer + row * (boxH + gapY);
+    const baseHex = helpers.getPaletteColor(i).replace('#','');
+    // Card background and border
+    slide.addShape('rect', { x, y, w: boxW, h: boxH, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 }, rectRadius: 6 });
+    slide.addShape('rect', { x, y, w: boxW, h: boxH, fill: { color: `#${baseHex}`, transparency: toTransp(fillAlpha) }, line: { color: `#${baseHex}`, width: 2 }, rectRadius: 6 });
+    // Effective background for value contrast
+    const rC = parseInt(baseHex.slice(0,2),16), gC = parseInt(baseHex.slice(2,4),16), bC = parseInt(baseHex.slice(4,6),16);
+    const aC = Math.max(0, Math.min(1, fillAlpha));
+    const blend = (c:number)=> Math.round(aC*c + (1-aC)*255);
+    const effHex = `#${[blend(rC),blend(gC),blend(bC)].map(n=>n.toString(16).padStart(2,'0').toUpperCase()).join('')}`;
+    const labelColor = labelColorTpl ? `#${labelColorTpl}` : (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(`#${baseHex}`) : '#111111');
+    const valueColor = valueColorTpl ? `#${valueColorTpl}` : (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(effHex) : '#111111');
+    // Optional label background band
+    if (rawLabelBg && Number.isFinite(labelHeight)) {
+      const parsed = parseColorWithAlpha(String(rawLabelBg));
+      if (parsed) {
+        const transparency = Math.round((1 - parsed.alpha) * 100);
+        slide.addShape('rect', { x: x + padX, y: y + padY, w: boxW - padX*2, h: labelHeight as number, fill: { color: parsed.hex, transparency }, line: { color: parsed.hex, width: 0 } } as any);
+      } else {
+        const hex = String(rawLabelBg).replace('#','');
+        slide.addShape('rect', { x: x + padX, y: y + padY, w: boxW - padX*2, h: labelHeight as number, fill: { color: hex }, line: { color: hex, width: 0 } } as any);
+      }
     }
+    // Texts
+    const bandH = (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36);
+    slide.addText(String(items[i]?.label ?? ''), { x: x + padX, y: y + padY, w: boxW - padX*2, h: bandH, fontSize: labelFs, bold: labelBold, color: labelColor, fontFace: 'Noto Sans JP', align: (labelAlign as any) || 'center', valign: 'middle' });
+    const valueAreaY = y + padY + bandH;
+    const valueAreaH = Math.max(0.2, boxH - (padY + bandH));
+    slide.addText(String(items[i]?.value ?? ''), { x: x + padX, y: valueAreaY, w: boxW - padX*2, h: valueAreaH, fontSize: valueFs, color: valueColor, fontFace: 'Noto Sans JP', align: 'center', valign: 'top' });
   }
-  const labelBold = (st as any)?.labelBold === true;
-  slide.addText(String(a?.label ?? ''), { x: rx + padX, y: ry + padY, w: boxW - padX*2, h: (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36), fontSize: labelFs, bold: labelBold, color: labelColorLeft, fontFace: 'Noto Sans JP', align: (labelAlign as any), valign: 'middle', shadow: undefined });
-  const valueOffsetY = Number((st as any).valueOffsetY);
-  slide.addText(String(a?.value ?? ''), { x: rx + padX, y: ry + padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36) + (Number.isFinite(valueOffsetY) ? valueOffsetY : 0), w: boxW - padX*2, h: boxH - (padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36)), fontSize: valueFs, color: valueColorLeft, fontFace: 'Noto Sans JP', align: 'center', valign: 'top' });
-  // Right
-  slide.addShape('rect', { x: rx + boxW + gapX, y: ry, w: boxW, h: boxH, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 }, rectRadius: 6 });
-  slide.addShape('rect', { x: rx + boxW + gapX, y: ry, w: boxW, h: boxH, fill: { color: `#${rightFill}`, transparency: toTransp(fillAlpha) }, line: { color: `#${rightFill}`, width: 2 }, rectRadius: 6 });
-  const labelColorRight = labelColorTpl ? `#${labelColorTpl}` : (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(`#${rightFill}`) : '#FFFFFF');
-  const rightR = parseInt(rightFill.slice(0,2),16), rightG = parseInt(rightFill.slice(2,4),16), rightB = parseInt(rightFill.slice(4,6),16);
-  const aRight = Math.max(0, Math.min(1, fillAlpha));
-  const blendRight = (c:number) => Math.round(aRight*c + (1-aRight)*255);
-  const effRightHex = `#${[blendRight(rightR), blendRight(rightG), blendRight(rightB)].map(n=>n.toString(16).padStart(2,'0').toUpperCase()).join('')}`;
-  const valueColorRight = (helpers.pickTextColorForBackground ? helpers.pickTextColorForBackground(effRightHex) : '#111111');
-  if (rawLabelBg && Number.isFinite(labelHeight)) {
-    const parsedR = parseColorWithAlpha(String(rawLabelBg));
-    if (parsedR) {
-      const transparency = Math.round((1 - parsedR.alpha) * 100);
-      slide.addShape('rect', { x: rx + boxW + gapX + padX, y: ry + padY, w: boxW - padX*2, h: labelHeight as number, fill: { color: parsedR.hex, transparency }, line: { color: parsedR.hex, width: 0 } } as any);
-    } else {
-      const hex = String(rawLabelBg).replace('#','');
-      slide.addShape('rect', { x: rx + boxW + gapX + padX, y: ry + padY, w: boxW - padX*2, h: labelHeight as number, fill: { color: hex }, line: { color: hex, width: 0 } } as any);
-    }
-  }
-  slide.addText(String(b?.label ?? ''), { x: rx + boxW + gapX + padX, y: ry + padY, w: boxW - padX*2, h: (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36), fontSize: labelFs, bold: labelBold, color: labelColorRight, fontFace: 'Noto Sans JP', align: (labelAlign as any), valign: 'middle', shadow: undefined });
-  slide.addText(String(b?.value ?? ''), { x: rx + boxW + gapX + padX, y: ry + padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36) + (Number.isFinite(valueOffsetY) ? valueOffsetY : 0), w: boxW - padX*2, h: boxH - (padY + (Number.isFinite(labelHeight)? (labelHeight as number) : 0.36)), fontSize: valueFs, color: valueColorRight, fontFace: 'Noto Sans JP', align: 'center', valign: 'top' });
   return true;
 });
 
@@ -1136,10 +1182,13 @@ register('callouts', async ({ slide, payload, region, templateConfig, helpers })
             const hash = (cryptoMod as any).createHash('sha1').update(key).digest('hex');
             const cachePath = pathMod.join(cacheDir, `icon-${hash}.png`);
             try {
+              try { logger.info({ type: 'callouts', rawIcon, hash, cachePath }, 'icon cache lookup'); } catch {}
               await fs.access(cachePath);
               iconPath = cachePath;
+              try { logger.info({ type: 'callouts', cachePath }, 'icon cache hit'); } catch {}
             } catch {
-              const prompt = `${rawIcon}, minimal ${styleHint} icon, monochrome, transparent background, centered, no text`;
+              try { logger.info({ type: 'callouts', rawIcon, hash }, 'icon cache miss; generating'); } catch {}
+              const prompt = `${rawIcon}, minimal ${styleHint} icon, monochrome, black glyph, black stroke lines, high-contrast, transparent background, centered, no text`;
               const out = await generateImage({ prompt, aspectRatio: '1:1' });
               if (out && out.success && out.path) {
                 try {
@@ -1151,7 +1200,10 @@ register('callouts', async ({ slide, payload, region, templateConfig, helpers })
                   ctx.drawImage(img as any, 0, 0, 256, 256);
                   const buf = canvas.toBuffer('image/png');
                   await fs.writeFile(cachePath, buf);
-                } catch { try { await fs.copyFile(out.path, cachePath); } catch {} }
+                  try { logger.info({ type: 'callouts', from: out.path, to: cachePath }, 'icon cached (resized)'); } catch {}
+                } catch {
+                  try { await fs.copyFile(out.path, cachePath); try { logger.info({ type: 'callouts', from: out.path, to: cachePath }, 'icon cached (copy)'); } catch {} } catch {}
+                }
                 iconPath = cachePath;
               }
             }
@@ -1206,7 +1258,17 @@ register('callouts', async ({ slide, payload, region, templateConfig, helpers })
       const cy = triY + (2 * accSize) / 3; // centroid y
       const iconX = cx - iconBox / 2;
       const iconY = cy - iconBox / 2;
-      slide.addImage({ path: iconPath, x: iconX, y: iconY, w: iconBox, h: iconBox, sizing: { type: 'contain', w: iconBox, h: iconBox } as any });
+      try {
+        const fsPr = await import('fs/promises');
+        const buf = await fsPr.readFile(iconPath);
+        
+        const dataUrl = `data:image/png;base64,${(buf as any as Buffer).toString('base64')}`;
+        slide.addImage({ data: dataUrl, x: iconX, y: iconY, w: iconBox, h: iconBox, sizing: { type: 'contain', w: iconBox, h: iconBox } as any });
+      } catch (e) {
+        
+      }
+    } else {
+      
     }
     // Body text area (full width minus margins). Use `value` for consistency across visuals.
     const bodyText = String((it as any)?.value ?? '');
@@ -1229,7 +1291,7 @@ register('callouts', async ({ slide, payload, region, templateConfig, helpers })
  * Payload: { type: 'kpi', items: Array<{ label: string; value: string; trend?: 'up'|'down' }> }
  * Styles (visualStyles.kpi): cardFill, cardLine, labelFontSize, valueFontSize, gapX, gapY, cornerRadius
  */
-register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
+register('kpi', async ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const items = Array.isArray(payload?.items) ? payload.items : [];
   const count = Math.min(6, items.length);
@@ -1262,9 +1324,12 @@ register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
     try { console.warn('kpi: missing layout/offset styles in template'); } catch {}
     return false;
   }
+  // Vertically center the grid inside the region to avoid being top-heavy
+  const totalGridH = rows * cardH + (rows - 1) * gap + outerMargin * 2;
+  const yStart = ry + Math.max(outerMargin, (rh - totalGridH) / 2);
   for (let idx = 0; idx < count; idx++) {
     const it = items[idx] || {}; const row = Math.floor(idx / columns); const col = idx % columns;
-    const x = rx + outerMargin + col * (cardW + gap); const y = ry + outerMargin + row * (cardH + gap);
+    const x = rx + outerMargin + col * (cardW + gap); const y = yStart + row * (cardH + gap);
     // Generate pastel fill and solid border like bar_chart
     const baseHex = helpers.getPaletteColor(idx).replace('#','');
     const transparency = Math.round((1 - Math.max(0, Math.min(1, fillAlpha))) * 100);
@@ -1290,7 +1355,7 @@ register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
           iconPath = rawIcon;
         }
       }
-      (async () => {
+      {
         try {
           if (!iconPath && rawIcon) {
             // cache-aware generation
@@ -1307,10 +1372,13 @@ register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
             const hash = (cryptoMod as any).createHash('sha1').update(key).digest('hex');
             const cachePath = pathMod.join(cacheDir, `icon-${hash}.png`);
             try {
+              try { logger.info({ type: 'kpi', rawIcon, hash, cachePath }, 'icon cache lookup'); } catch {}
               await fs.access(cachePath);
               iconPath = cachePath;
+              try { logger.info({ type: 'kpi', cachePath }, 'icon cache hit'); } catch {}
             } catch {
-              const prompt = `${rawIcon}, minimal ${styleHint} icon${monochrome? ', monochrome':''}, transparent background, centered, no text`;
+              try { logger.info({ type: 'kpi', rawIcon, hash }, 'icon cache miss; generating'); } catch {}
+              const prompt = `${rawIcon}, minimal ${styleHint} icon${monochrome? ', monochrome':''}, black glyph, black stroke lines, high-contrast, transparent background, centered, no text`;
               const out = await generateImage({ prompt, aspectRatio: '1:1' });
               if (out && out.success && out.path) {
                 try {
@@ -1322,7 +1390,10 @@ register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
                   ctx.drawImage(img as any, 0, 0, 256, 256);
                   const buf = canvas.toBuffer('image/png');
                   await fs.writeFile(cachePath, buf);
-                } catch { try { await fs.copyFile(out.path, cachePath); } catch {} }
+                  try { logger.info({ type: 'kpi', from: out.path, to: cachePath }, 'icon cached (resized)'); } catch {}
+                } catch {
+                  try { await fs.copyFile(out.path, cachePath); try { logger.info({ type: 'kpi', from: out.path, to: cachePath }, 'icon cached (copy)'); } catch {} } catch {}
+                }
                 iconPath = cachePath;
               }
             }
@@ -1335,15 +1406,36 @@ register('kpi', ({ slide, payload, region, templateConfig, helpers }) => {
             const ix = x - iw * 0.5;
             const iy = y - ih * 0.5;
             slide.addShape('rect', { x: ix, y: iy, w: iw, h: ih, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF', width: 0 } });
-            slide.addImage({ path: iconPath, x: ix, y: iy, w: iw, h: ih, sizing: { type: 'contain', w: iw, h: ih } as any });
+            try {
+            const fsPr = await import('fs/promises');
+            const buf = await fsPr.readFile(iconPath);
+            
+            const dataUrl = `data:image/png;base64,${(buf as any as Buffer).toString('base64')}`;
+            slide.addImage({ data: dataUrl, x: ix, y: iy, w: iw, h: ih, sizing: { type: 'contain', w: iw, h: ih } as any });
+            } catch (e) {
+            
+            }
             iconRendered = true;
+          } else {
+          
           }
         } catch {}
-      })();
+      }
     }
     const safeLabelTop = iconRendered ? Math.max(labelTopOffset as number, iconPad + iconSize + 0.06) : (labelTopOffset as number);
-    slide.addText(label, { x: txtX, y: y + safeLabelTop, w: txtW, h: labelHeight, fontSize: labelFs, bold: true, color: autoTxt, align: 'center', fontFace: 'Noto Sans JP', valign: 'top' });
-    slide.addText(value, { x: txtX, y: y + valueTopOffset, w: txtW, h: Math.max(0.2, cardH - (valueTopOffset + valueBottomPad)), fontSize: valueFs, color: autoTxt, align: 'center', fontFace: 'Noto Sans JP', valign: 'top' });
+    const hasValue = typeof value === 'string' && value.trim().length > 0;
+    if (!hasValue) {
+      // Label only: 縦中央に配置して視認性を確保
+      const singleY = y + Math.max(0.06, (cardH - labelHeight) / 2);
+      slide.addText(label, { x: txtX, y: singleY, w: txtW, h: labelHeight, fontSize: labelFs, bold: true, color: autoTxt, align: 'center', fontFace: 'Noto Sans JP', valign: 'middle' });
+    } else {
+      // Label+Value: 最低ギャップを確保して重なりを防止
+      const minGapY = 0.06;
+      const computedValueTop = Math.max(valueTopOffset as number, safeLabelTop + labelHeight + minGapY);
+      const adjLabelH = Math.min(labelHeight, Math.max(0.2, computedValueTop - safeLabelTop - 0.02));
+      slide.addText(label, { x: txtX, y: y + safeLabelTop, w: txtW, h: adjLabelH, fontSize: labelFs, bold: true, color: autoTxt, align: 'center', fontFace: 'Noto Sans JP', valign: 'top' });
+      slide.addText(value, { x: txtX, y: y + computedValueTop, w: txtW, h: Math.max(0.2, cardH - (computedValueTop + valueBottomPad)), fontSize: valueFs, color: autoTxt, align: 'center', fontFace: 'Noto Sans JP', valign: 'top' });
+    }
   }
   return true;
 });
@@ -1527,6 +1619,7 @@ register('process', ({ slide, payload, region, templateConfig, helpers }) => {
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
   const steps = Array.isArray(payload?.steps) ? payload.steps : [];
   const st = getVisualStyle(templateConfig, 'process');
+  // Read optional style hints; gracefully fallback when omitted
   const maxSteps = Number(st.maxSteps);
   const gap = Number(st.gapX);
   const stepWMax = Number(st.stepWidthMax);
@@ -1536,21 +1629,27 @@ register('process', ({ slide, payload, region, templateConfig, helpers }) => {
   const labelColorSpec = (st as any)?.labelColor;
   const arrowColor = normalizeHex(st.arrowColor);
   if (![maxSteps, gap, stepWMax, stepHMax, startYRatio, labelFs].every(Number.isFinite) || !arrowColor) { try { console.warn('process: missing style values'); } catch {} return false; }
-  const totalGap = gap * Math.max(0, maxSteps - 1);
-  const stepW = Math.min(stepWMax, (rw - totalGap) / Math.max(1, maxSteps));
-  const stepH = Math.min(rh * 0.6, stepHMax); const startY = ry + rh * startYRatio;
-  for (let i = 0; i < Math.min(maxSteps, steps.length || maxSteps); i++) {
+  // Determine the actual number of steps to draw and auto-size by slide width.
+  // Prefer using the payload size directly; cap only when maxSteps is explicitly provided.
+  const n = Array.isArray(steps) ? steps.length : 0;
+  const count = Number.isFinite(maxSteps) ? Math.min(Math.max(0, maxSteps), n || maxSteps) : n;
+  const totalGap = gap * Math.max(0, count - 1);
+  // Fill the available width across all steps. Ignore stepWidthMax caps to honor slide-driven auto layout.
+  const stepW = Math.max(0.4, (rw - totalGap) / Math.max(1, count));
+  const stepH = Math.min(rh * 0.6, Number.isFinite(stepHMax) ? stepHMax : rh * 0.6);
+  // Place boxes near the vertical center of the provided region. If a ratio exists, use it as a hint only.
+  const startY = ((): number => {
+    if (Number.isFinite(startYRatio)) return ry + rh * startYRatio;
+    const boxH = Math.min(rh * 0.6, stepH);
+    return ry + (rh - boxH) / 2;
+  })();
+  for (let i = 0; i < count; i++) {
     const x = rx + i * (stepW + gap); const col = helpers.getPaletteColor(i).replace('#','');
     slide.addShape('rect', { x, y: startY, w: stepW, h: stepH, fill: { color: col }, line: { color: '#FFFFFF', width: 0.5 } });
-    const procLabelColor = ((): string => {
-      if (typeof labelColorSpec === 'string' && labelColorSpec.trim().toLowerCase() !== 'auto') {
-        const hex = normalizeHex(labelColorSpec);
-        if (hex) return `#${hex}`;
-      }
-      return '#111111';
-    })();
+    // Force high-contrast label color (black) for readability regardless of background.
+    const procLabelColor = '#000000';
     slide.addText(String(steps[i]?.label ?? ''), { x: x + 0.08, y: startY + 0.14, w: stepW - 0.16, h: stepH - 0.28, fontSize: labelFs, color: procLabelColor, align: 'center', valign: 'middle', fontFace: 'Noto Sans JP' });
-    if (i < Math.min(maxSteps, steps.length || maxSteps) - 1) slide.addShape('chevron', { x: x + stepW + (gap - 0.4)/2, y: startY + (stepH - 0.4)/2, w: 0.4, h: 0.4, fill: { color: `#${arrowColor}` }, line: { color: `#${arrowColor}`, width: 0 } } as any);
+    if (i < count - 1) slide.addShape('chevron', { x: x + stepW + (gap - 0.4)/2, y: startY + (stepH - 0.4)/2, w: 0.4, h: 0.4, fill: { color: `#${arrowColor}` }, line: { color: `#${arrowColor}`, width: 0 } } as any);
   }
   return true;
 });
@@ -1564,60 +1663,129 @@ register('process', ({ slide, payload, region, templateConfig, helpers }) => {
 register('roadmap', ({ slide, payload, region, templateConfig, helpers }) => {
   try { logger.info('roadmap: start'); } catch {}
   const rx = region.x, ry = region.y, rw = region.w, rh = region.h;
-  const milestones = (Array.isArray(payload?.milestones) ? payload.milestones : []).slice(0, 8);
+  const milestones = (Array.isArray(payload?.milestones) ? payload.milestones : []).slice(0, 10);
   if (!milestones.length) return true;
   const st = getVisualStyle(templateConfig, 'roadmap');
-  const labelFs = Number(st.labelFontSize) || 16;
-  const subFs = Number(st.dateFontSize) || 11;
-  const gap = Number.isFinite(Number((st as any)?.gapX)) ? Number((st as any)?.gapX) : 0.0; // in
+  const baseLabelFs = Number(st.labelFontSize) || 16;
+  const baseSubFs = Number(st.dateFontSize) || 11;
+  // ノッチの水平幅は高さの 1/2（90° ノッチの幾何学）とする。
+  // 高さに依存して決まるため、計算は常に rowH から導出する。
+  // Base visual gap between chevron bodies (inches), specified by template as "gapX".
+  // This is the perceived clear space between bodies (NOT the overlap width).
+  // Default is 0.0 (touching/interlocking with no visible gap).
+  const gapVisBase = Number.isFinite(Number((st as any)?.gapX)) ? Number((st as any)?.gapX) : 0.0; // in
+  const gapRow = 0.22;
   const outerPad = 0.10; // fixed outer padding
   const chevronAlpha = (() => { const a = Number((st as any)?.alpha?.barFill); return Number.isFinite(a) ? Math.max(0, Math.min(1, a)) : 0.2; })();
+  const borderWidth = (() => { const b = Number((st as any)?.borderWidth); return Number.isFinite(b) ? b : 1.8; })();
+  const interlockStrength = (() => { const s = Number((st as any)?.interlockStrength); return Number.isFinite(s) ? Math.max(0, Math.min(1, s)) : 0.7; })();
   const toTransp = (a:number) => Math.round((1 - a) * 100);
-  const boxH = Math.max(0.4, rh * 0.60);
-  const y = ry + (rh - boxH) / 2;
   const n = milestones.length;
-  // Fixed tip overlap ratio; gapのみで間隔を制御
-  const tipRatio = 0.35;
-  const avail = rw - outerPad * 2;
-  // totalW = n*segW - (n-1)*(tipRatio*segW) + gap*(n-1)
-  const denom = Math.max(0.1, n - tipRatio * (n - 1));
-  const segW = Math.max(0.6, (avail - gap * (n - 1)) / denom);
-  // 小さな見かけの隙間を吸収するため、gapX=0（または極小）のときは微小オーバーラップを入れる
-  const epsilon = (gap <= 0.0001) ? Math.max(0.06, segW * 0.02) : 0; // in
-  const step = segW * (1 - tipRatio) + gap - epsilon;
-  // Precompute layout for all chevrons
-  const items: Array<{ x: number; w: number; baseHex: string; txtColor: string; head: string; tail: string }>=[];
-  for (let i = 0; i < n; i++) {
-    const m: any = milestones[i] || {};
-    const x = rx + outerPad + i * step;
-    const baseHex = helpers.getPaletteColor(i).replace('#','');
-    const rC = parseInt(baseHex.slice(0,2),16), gC = parseInt(baseHex.slice(2,4),16), bC = parseInt(baseHex.slice(4,6),16);
-    const aC = Math.max(0, Math.min(1, chevronAlpha));
-    const blend = (c:number)=> Math.round(aC*c + (1-aC)*255);
-    const effHex = `#${[blend(rC),blend(gC),blend(bC)].map(n=>n.toString(16).padStart(2,'0').toUpperCase()).join('')}`;
-    const txtColor = (helpers && helpers.pickTextColorForBackground) ? helpers.pickTextColorForBackground(effHex) : '#111111';
-    const head = String(m?.label ?? '');
-    const tail = ((): string => {
-      if (m?.detail) return String(m.detail);
-      if (m?.value) return String(m.value);
-      if (m?.date) return String(m.date);
-      return '';
-    })();
-    items.push({ x, w: segW, baseHex, txtColor, head, tail });
-  }
-  // 1st pass: draw all chevrons (bottom layer)
-  for (const it of items) {
-    slide.addShape('chevron', { x: it.x, y, w: it.w, h: boxH, fill: { color: `#${it.baseHex}`, transparency: toTransp(chevronAlpha) }, line: { color: `#${it.baseHex}`, width: 0 } });
-  }
-  // 2nd pass: draw all texts on top
-  for (const it of items) {
-    const headX = it.x + it.w * 0.46;
-    const headW = Math.max(0.2, it.w - (headX - it.x) - 0.12);
-    slide.addText(it.head, { x: headX, y: y + boxH * 0.26 - 0.1, w: headW, h: boxH * 0.36, fontSize: labelFs, bold: true, align: 'left', valign: 'middle', color: it.txtColor, fontFace: 'Noto Sans JP' });
-    if (it.tail) {
-      const tailX = it.x + it.w * 0.38;
-      const tailW = Math.max(0.2, it.w - (tailX - it.x) - 0.12);
-      slide.addText(it.tail, { x: tailX, y: y + boxH * 0.62 - 0.06, w: tailW, h: boxH * 0.28, fontSize: subFs, align: 'left', valign: 'top', color: it.txtColor, fontFace: 'Noto Sans JP' });
+  // Decide rows by available width; prefer single row when width is sufficient.
+  // Only split to 2 rows when there are many items AND each segment would be narrow.
+  const minSegW = 1.8; // more permissive: 5項目程度は1行で表示
+  const availW = rw - outerPad * 2;
+  const estSegW = availW / Math.max(1, n);
+  const rows = (n >= 8 && estSegW < minSegW) ? 2 : 1;
+  const perRow = rows === 1 ? [n] : [Math.ceil(n / 2), n - Math.ceil(n / 2)];
+  // Make arrow blocks a bit slimmer to avoid a heavy look and reduce visual overlap
+  const rowH = rows === 1 ? Math.max(0.34, rh * 0.48) : Math.max(0.32, (rh - gapRow - outerPad * 2) / 2 * 0.88);
+  const startY = rows === 1 ? ry + (rh - rowH) / 2 : (ry + outerPad);
+  let idx = 0;
+  for (let r = 0; r < rows; r++) {
+    const count = Math.max(0, perRow[r]);
+    if (count <= 0) continue;
+    // tipRatio はテキストの安全領域算出のみに使用（従来値を維持）。
+    const tipRatio = 0.22;
+    const avail = rw - outerPad * 2;
+    // Interlock configuration: allow the right tip to slide under the next left notch
+    const approxSeg = avail / Math.max(1, count);
+    // Interlock is implicit in the geometry (right-angle notch). We derive overlap from notch width, not a free parameter.
+    const interlockPad = 0; // derive overlap purely from notchW; gap is controlled solely by gapVis
+    // Geometric compensation: A chevron has a left notch whose horizontal depth grows with height.
+    // Let notchW ≈ rowH * tipRatio. To keep a constant perceived gap (gapVis), the advance step must be:
+    //   step = segW + gapVis + interlockPad - notchW
+    // Total extent across count chevrons: extent = count*segW + (count-1)*(gapVis + interlockPad - notchW)
+    // Solve segW so that extent == avail, then clamp by minimal width and recompute gapVis if needed.
+    // 右角ノッチ: 水平のノッチ深さ = rowH * 0.5 （高さの1/2）。
+    const notchW = Math.max(0, rowH * 0.5);
+    const minSegW = 0.8;
+    const denom = Math.max(1, count);
+    // First solve with desired visual gap
+    let gapVis = Math.max(0.0, gapVisBase);
+    // Bleed a tiny negative gap to guarantee contact (covers aliasing/rounding)
+    const bleed = 0.06;   // how much to force overlap when gapVis=0 (in)
+    const contactFudge = 0.00; // retain as 0; we use bleed instead
+    const effGap = Math.max(-bleed, gapVis - contactFudge);
+    // Extent = N*segW + (N-1)*(effGap - notchW)
+    let segW = (avail - (count - 1) * (effGap - notchW)) / denom;
+    if (segW < minSegW) {
+      // Enforce minimal segment width and re-solve for visual gap to fit exactly
+      segW = minSegW;
+      const rem = avail - denom * segW;
+      gapVis = (rem / Math.max(1, count - 1)) + notchW;
+      // Visual gap cannot be negative; clamp at zero. Upper bound is just a safety cap.
+      gapVis = Math.max(0.0, Math.min(0.4, gapVis));
+      // Recompute effective gap after clamping (still allow slight negative bleed)
+      const effGap2 = Math.max(-bleed, gapVis - contactFudge);
+      segW = (avail - (count - 1) * (effGap2 - notchW)) / denom;
+    }
+    const step = segW + Math.max(-bleed, gapVis - contactFudge) - notchW;
+    const y = startY + (rows === 1 ? 0 : (r * (rowH + gapRow)));
+    // precompute and draw chevrons
+    const items: Array<{ x: number; w: number; baseHex: string; txtColor: string; head: string; tail: string }> = [];
+    for (let i = 0; i < count; i++) {
+      const m: any = milestones[idx++] || {};
+      const x = rx + outerPad + i * step;
+      const baseHex = helpers.getPaletteColor(i + r * 5).replace('#','');
+      const rC = parseInt(baseHex.slice(0,2),16), gC = parseInt(baseHex.slice(2,4),16), bC = parseInt(baseHex.slice(4,6),16);
+      const aC = Math.max(0, Math.min(1, chevronAlpha));
+      const blend = (c:number)=> Math.round(aC*c + (1-aC)*255);
+      const effHex = `#${[blend(rC),blend(gC),blend(bC)].map(n=>n.toString(16).padStart(2,'0').toUpperCase()).join('')}`;
+      const txtColor = (helpers && helpers.pickTextColorForBackground) ? helpers.pickTextColorForBackground(effHex) : '#111111';
+      const head = String(m?.label ?? '');
+      const tail = ((): string => {
+        if (m?.detail) return String(m.detail);
+        if (m?.value) return String(m.value);
+        if (m?.date) return String(m.date);
+        return '';
+      })();
+      items.push({ x, w: segW, baseHex, txtColor, head, tail });
+    }
+    for (const it of items) {
+      // First pass: fill only (semi-transparent) so overlap blends nicely
+      slide.addShape('chevron', { x: it.x, y, w: it.w, h: rowH, fill: { color: `#${it.baseHex}`, transparency: toTransp(chevronAlpha) }, line: { color: `#${it.baseHex}`, width: 0 } });
+    }
+    // Second pass: outline only on top so borders stay visible even with overlaps
+    for (const it of items) {
+      slide.addShape('chevron', { x: it.x, y, w: it.w, h: rowH, fill: { color: 'FFFFFF', transparency: 100 }, line: { color: `#${it.baseHex}`, width: borderWidth } });
+    }
+    // draw texts with dynamic fitting
+    const approxCharIn = 0.07; // in/char at 10pt (heuristic)
+    for (const it of items) {
+      // Reserve space near the notch and tip; use symmetric side cut so the text box is centered in the chevron
+      const safeRightCut = Math.max(0.34, it.w * (tipRatio + 0.08));
+      const leftSafeCut = Math.max(0.18, Math.min(0.30, it.w * 0.18));
+      const sideCut = Math.min(leftSafeCut, safeRightCut);
+      const bodyX = it.x + sideCut;
+      const bodyW = Math.max(0.2, it.w - sideCut * 2);
+      const hasTail = !!(it.tail && String(it.tail).trim());
+      // Center the group (head + optional tail) vertically within the chevron
+      const headH = hasTail ? rowH * 0.40 : rowH * 0.56;
+      const tailH = hasTail ? rowH * 0.26 : 0;
+      const gapH  = hasTail ? rowH * 0.04 : 0;
+      const totalH = headH + gapH + tailH;
+      const topY = y + (rowH - totalH) / 2;
+      // Head (title)
+      const effLen = estimateEffectiveTextLength(it.head || '');
+      const fitHeadFs = Math.max(10, Math.min(baseLabelFs, (bodyW / Math.max(1, effLen * approxCharIn)) * 10));
+      slide.addText(it.head, { x: bodyX, y: topY, w: bodyW, h: headH, fontSize: fitHeadFs, bold: true, align: 'center', valign: 'middle', color: it.txtColor, fontFace: 'Noto Sans JP', fit: 'resize', wrap: false });
+      // Tail (sub)
+      if (hasTail) {
+        const effTail = estimateEffectiveTextLength(it.tail || '');
+        const fitTailFs = Math.max(9, Math.min(baseSubFs, (bodyW / Math.max(1, effTail * approxCharIn)) * 10));
+        slide.addText(it.tail, { x: bodyX, y: topY + headH + gapH, w: bodyW, h: tailH, fontSize: fitTailFs, align: 'center', valign: 'middle', color: it.txtColor, fontFace: 'Noto Sans JP', fit: 'resize', wrap: false });
+      }
     }
   }
   try { logger.info('roadmap: done'); } catch {}

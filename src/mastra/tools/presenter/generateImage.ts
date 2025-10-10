@@ -25,7 +25,7 @@ const aspectToDims: Record<Aspect, { width: number; height: number }> = {
   '1:1': { width: 1024, height: 1024 },
   '3:4': { width: 768, height: 1024 },
   '4:3': { width: 1024, height: 768 },
-  '16:9': { width: 1024, height: 576 },
+  '16:9': { width: 1280, height: 720 },
   '9:16': { width: 576, height: 1024 },
 };
 
@@ -45,6 +45,9 @@ async function cropToAspect(buffer: Buffer, target: Aspect): Promise<Buffer> {
     const dy = Math.round((outH - drawH) / 2);
     const canvas = createCanvas(outW, outH);
     const ctx = canvas.getContext('2d');
+    // Always render over an opaque white underlay to avoid any transparency in outputs
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, outW, outH);
     ctx.drawImage(img as any, dx, dy, drawW, drawH);
     return canvas.toBuffer('image/png');
   } catch {
@@ -78,7 +81,8 @@ export async function generateImage(params: {
     }
 
     const dims = aspectToDims[params.aspectRatio];
-    let enhanced = `${params.prompt} (Aspect ratio: ${params.aspectRatio}, Dimensions: ${dims.width}x${dims.height})`;
+    // Model hint: PNG format and explicit size. Background policy is not fixed here.
+    let enhanced = `${params.prompt} --format png --size ${dims.width}x${dims.height} (Aspect ratio: ${params.aspectRatio}, Dimensions: ${dims.width}x${dims.height})`;
     if (params.negativePrompt) enhanced += ` --no ${params.negativePrompt}`;
 
     const ai = new GoogleGenAI({ apiKey: geminiApiKey });
