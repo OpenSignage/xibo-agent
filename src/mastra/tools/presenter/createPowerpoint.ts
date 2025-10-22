@@ -233,7 +233,10 @@ function parseColorWithAlpha(input?: string): { hex: string; alpha: number } | u
 function buildFill(input?: any): any {
   if (!input) return undefined;
   if (typeof input === 'object') return input;
-  const parsed = parseColorWithAlpha(String(input));
+  const s = String(input).trim();
+  // Treat transparent/none/empty as no fill
+  if (!s || s.toLowerCase() === 'transparent' || s.toLowerCase() === 'none') return undefined;
+  const parsed = parseColorWithAlpha(s);
   if (!parsed) return input ? { color: String(input).replace('#','').toUpperCase() } : undefined;
   const transparency = Math.round((1 - parsed.alpha) * 100);
   if (transparency > 0) return { color: parsed.hex, transparency } as any;
@@ -324,7 +327,6 @@ function bufferToDataUrl(buf: Buffer): string {
   bufferToDataUrlMemo.set(buf, url);
   return url;
 }
-
 /**
  * Format a single bullet that may contain a title and content separated by '：' or ':'.
  * Content part is wrapped and subsequent lines are indented to align after the colon.
@@ -787,6 +789,7 @@ export const createPowerpointTool = createTool({
     })();
     const primary = allowOverride && typeof themeColor1 === 'string' && themeColor1 ? themeColor1 : resolvedPrimary;
     const secondary = allowOverride && typeof themeColor2 === 'string' && themeColor2 ? themeColor2 : resolvedSecondary;
+    
     const accent = typeof tk.accent === 'string' ? tk.accent : (typeof styleTokens.accent === 'string' ? styleTokens.accent : '#FFC107');
     const cornerRadius = typeof tk.cornerRadius === 'number' ? Math.max(0, Math.min(16, tk.cornerRadius)) : (typeof styleTokens.cornerRadius === 'number' ? Math.max(0, Math.min(16, styleTokens.cornerRadius)) : 12);
     const outlineColor = typeof tk.outlineColor === 'string' ? tk.outlineColor : (typeof styleTokens.outlineColor === 'string' ? styleTokens.outlineColor : '#FFFFFF');
@@ -843,36 +846,7 @@ export const createPowerpointTool = createTool({
           return { success: false, message: line } as const;
         }
         await fs.mkdir(presenterDir, { recursive: true });
-        // Ensure charts support by preferring a build that includes Charts
         let Pptx: any = PptxGenJS;
-        let chartsBuild: string | null = null;
-        const importCandidates: string[] = [];
-        // Prefer bundle builds first to enable extended shape types like customGeometry
-        importCandidates.push('pptxgenjs/dist/pptxgen.bundle.js');
-        importCandidates.push('pptxgenjs/dist/pptxgen.bundle.min.js');
-        importCandidates.push('pptxgenjs/dist/pptxgen.es.js');
-        // Fallback to root default import (some builds expose shapes on default)
-        importCandidates.push('pptxgenjs');
-        try {
-          const cjsPath = require.resolve('pptxgenjs/dist/pptxgen.cjs.js');
-          importCandidates.push(cjsPath);
-        } catch {}
-        try {
-          if (!(Pptx as any).ChartType) {
-            for (const spec of importCandidates) {
-              try {
-                const mod: any = await import(spec);
-                const cls = (mod && (mod.default || mod));
-                if (cls) {
-                  Pptx = cls;
-                  chartsBuild = spec;
-                }
-                if ((Pptx as any).ChartType) break;
-              } catch {}
-            }
-            // No further side-load. v4.0.1 places ChartType on instance, not class.
-          }
-        } catch {}
         const pres = new Pptx();
         
         // Ensure 16:9 slide size
@@ -1210,7 +1184,13 @@ export const createPowerpointTool = createTool({
                 const local = await downloadImageIfUrl(String((slideObj as any).__data.imagePath));
                 slideObj.addImage({ path: local, x, y, w, h, sizing: { type: style?.sizing || 'contain', w, h } as any, shadow: shadowOf(style?.shadow, shadowPreset) });
               } else {
-                try { logger.warn({ layout: layoutKey, area: areaName, recipeRef }, 'render:visual:missing recipe - skipping'); } catch {}
+                // Only warn when the layout is expected to have a visual region.
+                const layoutsExpectingVisual = new Set(['content_with_visual','content_with_bottom_visual','content_with_image','visual_only','visual_hero_split','comparison_cards','checklist_top_bullets_bottom']);
+                if (layoutsExpectingVisual.has(String(layoutKey))) {
+                  try { logger.warn({ layout: layoutKey, area: areaName, recipeRef }, 'render:visual:missing recipe - skipping'); } catch {}
+                } else {
+                  try { logger.debug({ layout: layoutKey, area: areaName, recipeRef }, 'render:visual:area present but recipe intentionally omitted'); } catch {}
+                }
               }
               continue;
             }
@@ -1242,6 +1222,12 @@ export const createPowerpointTool = createTool({
       try { logger.debug({ layoutKey, contentPath, sample: textVal.slice(0,64), length: textVal.length }, 'render:text:prepare'); } catch {}
               // If bullets area, merge default bullets style from components as a safety net
               if (contentPath === 'bullets' || areaName === 'panelBullets') {
+                // Merge common bullets config first (e.g., bulletType)
+                const bulletsCommon = (templateConfig?.components as any)?.bullets;
+                if (bulletsCommon && typeof bulletsCommon === 'object') {
+                  style = resolveStyle(bulletsCommon, style);
+                }
+                // Then merge visual text defaults for bullets (colors, spacing, etc.)
                 const bulletsDefault = (templateConfig?.components as any)?.bulletsText;
                 if (bulletsDefault && typeof bulletsDefault === 'object') {
                   style = resolveStyle(bulletsDefault, style);
@@ -1263,33 +1249,91 @@ export const createPowerpointTool = createTool({
                   (slideObj as any).__renderedFlags[`comparison_cards_${contentPath}`] = true;
                 } catch {}
               }
-              // bullets
+              // bullets: ALWAYS render bullets for bullets fields regardless of style/layout
               const isCompCardsBullets = (layoutKey === 'comparison_cards' && (contentPath === 'bulletsA' || contentPath === 'bulletsB'));
-              const wantsBullets = !!(style && (style.bullet === true || typeof style.bulletType === 'string'));
-              if (wantsBullets && !isCompCardsBullets) {
-                textOptions.bullet = style.bullet === true ? true : { type: String(style.bulletType) };
-                if (style.autoFit !== undefined) textOptions.autoFit = !!style.autoFit; else textOptions.autoFit = true;
+              // checklist は専用描画、comparison_cards は従来通り（スタイル次第）。
+              const isBulletsField = (contentPath === 'bullets' || areaName === 'panelBullets');
+              const bulletTypeStr = (typeof style?.bulletType === 'string') ? String(style?.bulletType) : undefined;
+              const bulletTypeNorm = bulletTypeStr !== undefined ? bulletTypeStr.toLowerCase().trim() : undefined;
+              const explicitDisableBullets = (style?.bullet === false) || (bulletTypeNorm === '' || bulletTypeNorm === 'none' || bulletTypeNorm === 'off' || bulletTypeNorm === 'false');
+              const wantsBulletsStyle = !!(style && (style.bullet === true || (typeof style.bulletType === 'string' && style.bulletType.trim().length > 0)));
+              const wantBullets = !explicitDisableBullets && (isBulletsField || wantsBulletsStyle);
+              if (wantBullets) {
+                // Normalize bullet type across template synonyms
+                const rawBulletType = bulletTypeNorm;
+                let bulletSpec: any;
+                switch (rawBulletType) {
+                  case '':
+                  case 'none':
+                  case 'off':
+                  case 'false':
+                    bulletSpec = false; break;
+                  case 'number':
+                  case 'numeric':
+                    bulletSpec = { type: 'number' }; break;
+                  case 'alpha':
+                  case 'alphabetic':
+                    bulletSpec = { type: 'alpha' }; break;
+                  case 'roman':
+                    bulletSpec = { type: 'roman' }; break;
+                  case 'disc':
+                  case 'circle':
+                  case 'bullet':
+                  case undefined:
+                    bulletSpec = true; break; // default dot bullet reliably
+                  case 'square':
+                    bulletSpec = { type: 'char', char: '■' }; break;
+                  case 'dash':
+                    bulletSpec = { type: 'char', char: '–' }; break;
+                  case 'check':
+                  case 'tick':
+                    bulletSpec = { type: 'char', char: '✓' }; break;
+                  default:
+                    bulletSpec = true; break;
+                }
+                textOptions.bullet = bulletSpec;
+                if (style?.autoFit !== undefined) textOptions.autoFit = !!style.autoFit; else textOptions.autoFit = true;
               } else if (style && style.autoFit !== undefined) {
                 textOptions.autoFit = !!style.autoFit;
+              }
+              // Safety: if this is the bullets field and for some reason bullet spec is missing, default to dot bullets
+              if ((contentPath === 'bullets' || areaName === 'panelBullets') && !textOptions.bullet && !( (style?.bullet === false) || (typeof style?.bulletType === 'string' && !String(style.bulletType).trim()) || (String(style?.bulletType || '').toLowerCase().trim() === 'none') || (String(style?.bulletType || '').toLowerCase().trim() === 'off') || (String(style?.bulletType || '').toLowerCase().trim() === 'false') )) {
+                textOptions.bullet = true;
               }
               if (Number.isFinite(style?.paraSpaceAfter)) textOptions.paraSpaceAfter = Number(style.paraSpaceAfter);
               // background and outline
               if (style?.fill) textOptions.fill = buildFill(style.fill);
-              // If this is the bullets area, prefer areaStyles.bullets.bg (template-driven override)
+              // If this is the bullets area, use areaStyles.bullets.bg only as a fallback when no explicit fill is set on the element
               if (areaName === 'bullets') {
                 const areaBulletsBg = (templateConfig?.areaStyles?.bullets?.bg);
-                if (typeof areaBulletsBg === 'string' && areaBulletsBg.trim()) {
+                if (!textOptions.fill && typeof areaBulletsBg === 'string' && areaBulletsBg.trim()) {
                   textOptions.fill = buildFill(areaBulletsBg);
+                }
+                // Prefer areaStyles.bullets.shadow if provided to avoid unintended outline-like effect
+                const areaBulletsShadow = (templateConfig?.areaStyles?.bullets?.shadow);
+                if (areaBulletsShadow !== undefined) {
+                  textOptions.shadow = shadowOf(areaBulletsShadow, shadowPreset);
                 }
                 // Ensure bullets background is set even if template areaStyles.bullets.bg is missing
                 if (!textOptions.fill) {
                   const bulletsDefault = (templateConfig?.components as any)?.bulletsText;
                   if (bulletsDefault?.fill) textOptions.fill = buildFill(bulletsDefault.fill);
                 }
+                // If no explicit outline is requested, force width:0 to avoid viewer default borders
+                const explicitLineColor = normalizeColorToPptxHex(style?.lineColor);
+                const explicitLineWidth = Number(style?.lineWidth);
+                if (!(explicitLineColor && explicitLineWidth > 0)) {
+                  textOptions.line = { width: 0 } as any;
+                }
               }
-              if (style?.lineColor || Number.isFinite(style?.lineWidth)) textOptions.line = { color: normalizeColorToPptxHex(style?.lineColor) || (normalizeColorToPptxHex(style?.fill) || 'FFFFFF'), width: Number(style?.lineWidth) || 0 };
-              // When bullets are requested, pass plain string; for comparison_cards bullets force plain (no bullet dots)
-              if (wantsBullets && !isCompCardsBullets) {
+              // Outline: only set when both a valid color and width>0 are provided
+              const lineColorHex = normalizeColorToPptxHex(style?.lineColor);
+              const lineWidthNum = Number(style?.lineWidth);
+              if (lineColorHex && lineWidthNum > 0) {
+                textOptions.line = { color: lineColorHex, width: lineWidthNum };
+              }
+              // When bullets are requested, pass plain string (one item per line)
+              if (wantBullets) {
               try { logger.debug({ contentPath, options: { x: textOptions.x, y: textOptions.y, w: textOptions.w, h: textOptions.h, fontSize: textOptions.fontSize } }, 'render:text:addText:bullets'); } catch {}
                 slideObj.addText(textVal, textOptions);
               } else {
@@ -1318,8 +1362,28 @@ export const createPowerpointTool = createTool({
                 slideObj.addImage({ path: local, x, y, w, h, sizing: { type: style?.sizing || 'contain', w, h } as any, shadow: shadowOf(shadowSpec, shadowPreset) });
                 continue;
               }
-              // Fallback: recipe or context_for_visual
-              let recipeImg: any = (slideObj as any).__data?.visual_recipe;
+              // Fallback: prefer template element's AI source, then slide-provided recipe, then context
+              let recipeImg: any = undefined;
+              // 1) Template element-defined AI image source takes precedence
+              if (el && (el as any).source && typeof (el as any).source === 'object') {
+                const src: any = (el as any).source;
+                const srcType = String(src?.type || '').trim();
+                if (srcType === 'ai') {
+                  const promptFromTpl = typeof src?.prompt === 'string' && src.prompt.trim() ? String(src.prompt).trim() : undefined;
+                  const negativeFromTpl = typeof src?.negativePrompt === 'string' && src.negativePrompt.trim() ? String(src.negativePrompt).trim() : undefined;
+                  const fallbackPrompt = (slideObj as any).__data?.context_for_visual ? String((slideObj as any).__data.context_for_visual) : '';
+                  const finalPrompt = promptFromTpl || fallbackPrompt;
+                  if (finalPrompt) {
+                    recipeImg = { type: 'image', prompt: finalPrompt };
+                    if (negativeFromTpl) recipeImg.negativePrompt = negativeFromTpl;
+                  }
+                }
+              }
+              // 2) If still empty, use slide-provided recipe
+              if (!recipeImg && (slideObj as any).__data?.visual_recipe) {
+                recipeImg = (slideObj as any).__data?.visual_recipe;
+              }
+              // 3) Finally, use context_for_visual fallback
               if (!recipeImg && (slideObj as any).__data?.context_for_visual) {
                 recipeImg = { type: 'image', prompt: String((slideObj as any).__data.context_for_visual) };
               }
@@ -1584,9 +1648,31 @@ export const createPowerpointTool = createTool({
                 }
                 case 'line_chart': {
                     try {
-                        const labels: string[] = Array.isArray(payload?.labels) ? payload.labels : ['A','B','C','D'];
                         const seriesArr: any[] = Array.isArray(payload?.series) ? payload.series : [];
-                        const values: number[] = seriesArr.length > 0 ? (Array.isArray(seriesArr[0]?.data) ? seriesArr[0].data.map((n:any)=>Number(n)||0) : []) : [10,20,15,25];
+                        let labels: string[] = [];
+                        let values: number[] = [];
+                        if (seriesArr.length > 0 && Array.isArray(seriesArr[0]?.data)) {
+                            const data0: any[] = seriesArr[0].data as any[];
+                            if (data0.length && typeof data0[0] === 'object' && data0[0] !== null) {
+                                labels = data0.map((d:any)=> String((d?.x ?? d?.label ?? '')));
+                                values = data0.map((d:any)=> Number(d?.y ?? d?.value ?? 0) || 0);
+                            } else {
+                                values = data0.map((n:any)=> Number(n) || 0);
+                                labels = Array.isArray(payload?.labels) ? (payload.labels as string[]) : Array.from({ length: values.length }, (_,i)=> String(i+1));
+                            }
+                        } else if (Array.isArray(payload?.labels) && Array.isArray((payload as any)?.values)) {
+                            labels = (payload.labels as string[]);
+                            values = ((payload as any).values as any[]).map((n:any)=> Number(n) || 0);
+                        } else {
+                            labels = Array.isArray(payload?.labels) ? (payload.labels as string[]) : ['A','B','C','D'];
+                            values = [10,20,15,25];
+                        }
+                        if (labels.length !== values.length) {
+                            const m = Math.min(labels.length, values.length);
+                            labels = labels.slice(0, m);
+                            values = values.slice(0, m);
+                            try { logger.warn({ labelsLen: labels.length, valuesLen: values.length }, 'line_chart: reconciled labels/values length'); } catch {}
+                        }
                         if (seriesArr.length > 1) { try { logger.warn({ seriesCount: seriesArr.length }, 'Multiple series detected in line_chart; using the first series for PNG generation'); } catch {} }
                         const imgPath = await renderChartImage('line', labels, values, payload?.title);
                         if (imgPath) {
@@ -1635,35 +1721,20 @@ export const createPowerpointTool = createTool({
                     const values = items.map((it: any) => Number(it?.value ?? 0)).map((v: number) => Math.max(0, Math.min(100, v)));
                     const total = values.reduce((a: number, b: number) => a + b, 0) || 1;
                     const kdStyle: any = (templateConfig?.visualStyles?.kpi_donut) || {};
-                    // Layout: donut chart on top, legend below
+                    // Always render doughnut via Chart.js image for cross-platform compatibility
                     const chartH = Math.min(rh * 0.65, 1.6);
-                    const legendH = Math.max(0.4, rh - chartH - 0.1);
                     let chartRendered = false;
                     try {
-                        if ((ChartType as any) && (ChartType as any).doughnut && typeof (targetSlide as any).addChart === 'function') {
-                            const doughnutType = (ChartType as any).doughnut;
-                            const data = [{ name: 'CAGR', labels, values }];
-                            const chartColors = labels.map((_: string, i: number) => getPaletteColor(i)).map((c: string)=>c.replace('#',''));
-                            (targetSlide as any).addChart(doughnutType, data, { x: rx, y: ry, w: rw, h: chartH, showLegend: false, chartColors } as any);
+                        const imgPath = await (async () => {
+                            try { return await renderChartImage('pie', labels, values, payload?.title || ''); } catch { return null; }
+                        })();
+                        if (imgPath) {
+                            targetSlide.addImage({ path: imgPath, x: rx, y: ry, w: rw, h: chartH, sizing: { type: 'contain', w: rw, h: chartH } as any, shadow: shadowOf(resolveVisualShadow('image')) });
+                            try { imagePathsToDelete.add(imgPath); } catch {}
                             chartRendered = true;
-                            try { logger.debug('kpi_donut: charts'); } catch {}
                         }
                     } catch {}
-                    if (!chartRendered) {
-                        // Fallback: render pie chart image via generateChart tool
-                        try {
-                            const imgPath = await (async () => {
-                                try { return await renderChartImage('pie', labels, values, payload?.title || ''); } catch { return null; }
-                            })();
-                            if (imgPath) {
-                                targetSlide.addImage({ path: imgPath, x: rx, y: ry, w: rw, h: chartH, sizing: { type: 'contain', w: rw, h: chartH } as any, shadow: shadowOf(resolveVisualShadow('image')) });
-                                try { imagePathsToDelete.add(imgPath); } catch {}
-                                chartRendered = true;
-                                try { logger.debug('kpi_donut: image-fallback'); } catch {}
-                            }
-                        } catch {}
-                    }
-                    if (!chartRendered) {
+                    {
                         // Fallback 2: draw donut using shapes (pie wedges + inner hole)
                         const cx = rx + rw / 2;
                         const cy = ry + chartH / 2;
@@ -2593,7 +2664,6 @@ export const createPowerpointTool = createTool({
                     ) || (
                       bValueHFit.fontSize <= 12 && bValueHLines >= 3
                     ) || (horizontalBoxW < horizontalMinBoxWidth && (aValue.length + bValue.length) > 40));
-                    
                     const useVertical = horizontalCrowded;
                     
                     if (!useVertical) {
@@ -2702,17 +2772,23 @@ export const createPowerpointTool = createTool({
 
         // 2. Create slides using the Master Slide
         let appliedLogoCount = 0;
+        // Background image caching: root-level AI background reuses one image for all slides,
+        // layout-level AI background reuses per layout key
+        let cachedRootAiBgPath: string | undefined;
+        const cachedLayoutAiBgPath: Record<string, string> = Object.create(null);
         let appliedCopyrightCount = 0;
         for (const [index, slideData] of slides.entries()) {
             const slide = pres.addSlide();
             let visualRendered = false;
 
-            // Background: prioritize title image; otherwise themed flat color.
+            // Background: resolve per-layout or defaults (color / image path / AI), with legacy fallbacks.
             if (index === 0) {
                 const isTitleSlide = String((slideData as any)?.layout || '') === 'title_slide';
                 if (isTitleSlide && titleSlideImagePath) {
                     try {
                     await fs.access(titleSlideImagePath);
+                    const pageW = Number(templateConfig?.geometry?.page?.width) || 13.33;
+                    const pageH = Number(templateConfig?.geometry?.page?.height) || 7.5;
                     slide.background = { path: titleSlideImagePath } as any;
                         
                 } catch (error) {
@@ -2720,25 +2796,48 @@ export const createPowerpointTool = createTool({
                         slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
                     }
                 } else if (isTitleSlide && ((slides[0] as any)?.titleSlideImagePrompt || templateConfig?.layouts?.title_slide?.background?.source?.type === 'ai')) {
-                    // Generate title background via new generateImage using slide title and executive summary context; respect negativePrompt
+                    // Generate title background via new generateImage; allow token expansion in prompt
                     try {
                         const { generateImage } = await import('./generateImage');
                         const tplBgSrc: any = templateConfig?.layouts?.title_slide?.background?.source || {};
                         const slide0: any = (slides[0] as any) || {};
-                        // Abstract, textless background prompt (no raw title/keywords)
+                        const titleToken = (typeof slide0.title === 'string' && slide0.title.trim()) ? String(slide0.title).trim() : undefined;
+                        const contextToken = (typeof slide0.context_for_visual === 'string' && slide0.context_for_visual.trim()) ? String(slide0.context_for_visual).trim() : titleToken;
+                        const expandTokens = (s: string): string => {
+                            let out = s;
+                            if (titleToken) out = out.replace(/\$\{?title\}?\b/g, titleToken);
+                            if (contextToken) out = out.replace(/\$\{?(context|context_for_visual)\}?\b/g, contextToken);
+                            const paletteHintToken = (primary && secondary) ? `palette: primary=${primary}, secondary=${secondary}` : '';
+                            if (paletteHintToken) out = out.replace(/\$\{?(paletteHint|palette)\}?\b/gi, paletteHintToken);
+                            out = out.replace(/\$\{?title\}?\b/g, '').replace(/\$\{?(context|context_for_visual)\}?\b/g, '');
+                            out = out.replace(/\$\{?(paletteHint|palette)\}?\b/gi, '');
+                            return out;
+                        };
+                        const promptFromSlide = String(slide0.titleSlideImagePrompt || '').trim();
+                        const promptFromTpl = String(tplBgSrc.prompt || '').trim();
                         const paletteHint = (primary && secondary) ? `palette: primary=${primary}, secondary=${secondary}` : '';
-                        const composedPrompt = [
-                            'Abstract corporate background. Do not render any words, letters, numbers, symbols, or logos.',
-                            'Express the slide theme as visual metaphors using shapes, gradients, light, depth, and rhythm — not text.',
-                            'Design cues: clean geometric patterns, subtle gradient layers, soft light streaks, particle networks, depth-of-field bokeh, tasteful contrast.',
-                            paletteHint,
-                            'Minimal, elegant, high-resolution, professional. No text overlay.',
-                            'Prohibit transparency or alpha in the artwork. Use fully opaque pixels over the entire canvas.'
-                        ].filter(Boolean).join(' ');
-                        const negativePrompt: string | undefined = String(slide0.titleSlideImageNegativePrompt || tplBgSrc.negativePrompt || '').trim() || undefined;
+                        let composedPrompt: string;
+                        if (promptFromSlide || promptFromTpl) {
+                            const base = promptFromSlide || promptFromTpl;
+                            composedPrompt = expandTokens(base);
+                        } else {
+                            // Default abstract, textless background
+                            composedPrompt = [
+                                'Abstract corporate background. Do not render any words, letters, numbers, symbols, or logos.',
+                                'Express the slide theme as visual metaphors using shapes, gradients, light, depth, and rhythm — not text.',
+                                'Design cues: clean geometric patterns, subtle gradient layers, soft light streaks, particle networks, depth-of-field bokeh, tasteful contrast.',
+                                paletteHint,
+                                'Minimal, elegant, high-resolution, professional. No text overlay.',
+                                'Prohibit transparency or alpha in the artwork. Use fully opaque pixels over the entire canvas.'
+                            ].filter(Boolean).join(' ');
+                        }
+                        const negativeRaw = String(slide0.titleSlideImageNegativePrompt || tplBgSrc.negativePrompt || '').trim();
+                        const negativePrompt: string | undefined = negativeRaw ? expandTokens(negativeRaw) : undefined;
                         try { logger.debug({ prompt: composedPrompt, negativePrompt }, 'Title background image: sending prompt to generator'); } catch {}
                         const out = await generateImage({ prompt: composedPrompt, negativePrompt, aspectRatio: '16:9' });
                         if (out.success && out.path) {
+                            const pageW = Number(templateConfig?.geometry?.page?.width) || 13.33;
+                            const pageH = Number(templateConfig?.geometry?.page?.height) || 7.5;
                             slide.background = { path: out.path } as any;
                             (slide as any).__tempImages = (slide as any).__tempImages || [];
                             (slide as any).__tempImages.push(out.path);
@@ -2750,14 +2849,163 @@ export const createPowerpointTool = createTool({
                         logger.warn({ error: e }, 'Failed to generate title background. Falling back to color.');
                         slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
                     }
-                } else if (isTitleSlide) {
-                    slide.background = { color: lightenHex(primary, 80).replace('#', '') } as any;
                 } else {
-                    // Non-title first slide: use normal non-title background policy
-                    slide.background = { color: lightenHex(secondary, 80).replace('#', '') } as any;
+                    // Non-title or title without specific overrides: try template-driven backgrounds first
+                    const layoutKey = String((slideData as any)?.layout || '');
+                    const layoutBg: any = (templateConfig?.layouts as any)?.[layoutKey]?.background;
+                    const rootBg: any = (templateConfig as any)?.background;
+                    const bgSpec: any = layoutBg || rootBg;
+                    const titleLike = isTitleSlide; // keep legacy color fallback behavior for title
+                    const fallbackColor = (titleLike ? lightenHex(primary, 80) : lightenHex(secondary, 80)).replace('#','');
+                    if (bgSpec && typeof bgSpec === 'object') {
+                        try {
+                            const preferImage = !!bgSpec.preferImage;
+                            const pathStr = (typeof bgSpec.path === 'string' && bgSpec.path.trim()) ? String(bgSpec.path).trim() : '';
+                            const colorStr = (typeof bgSpec.color === 'string' && bgSpec.color.trim()) ? String(bgSpec.color).trim() : '';
+                            const srcObj: any = (bgSpec.source && typeof bgSpec.source === 'object') ? bgSpec.source : undefined;
+                            // Priority inside background spec: path (if provided), then AI source, then color
+                            if (preferImage && pathStr) {
+                                try { await fs.access(pathStr); slide.background = { path: pathStr } as any; }
+                                catch { slide.background = { color: fallbackColor } as any; }
+                            } else if (preferImage && srcObj?.type === 'ai') {
+                                try {
+                                    const isRootSpec = !layoutBg && !!rootBg;
+                                    const cacheKey = layoutKey;
+                                    const cachedPath = isRootSpec ? cachedRootAiBgPath : cachedLayoutAiBgPath[cacheKey];
+                                    if (cachedPath) {
+                                        slide.background = { path: cachedPath } as any;
+                                    } else {
+                                        const { generateImage } = await import('./generateImage');
+                                        const titleToken = (typeof (slideData as any)?.title === 'string' && (slideData as any).title.trim()) ? String((slideData as any).title).trim() : undefined;
+                                        const contextToken = (typeof (slideData as any)?.context_for_visual === 'string' && (slideData as any).context_for_visual.trim()) ? String((slideData as any).context_for_visual).trim() : titleToken;
+                                        const expandTokens = (s: string): string => {
+                                            let out = s || '';
+                                            if (titleToken) out = out.replace(/\$\{?title\}?\b/g, titleToken);
+                                            if (contextToken) out = out.replace(/\$\{?(context|context_for_visual)\}?\b/g, contextToken);
+                                            const paletteHintToken = (primary && secondary) ? `palette: primary=${primary}, secondary=${secondary}` : '';
+                                            if (paletteHintToken) out = out.replace(/\$\{?(paletteHint|palette)\}?\b/gi, paletteHintToken);
+                                            out = out.replace(/\$\{?title\}?\b/g, '').replace(/\$\{?(context|context_for_visual)\}?\b/g, '');
+                                            out = out.replace(/\$\{?(paletteHint|palette)\}?\b/gi, '');
+                                            return out;
+                                        };
+                                        const promptRaw = String(srcObj?.prompt || '').trim();
+                                        const negativeRaw = String(srcObj?.negativePrompt || '').trim();
+                                        const prompt = promptRaw ? expandTokens(promptRaw) : '';
+                                        const negativePrompt = negativeRaw ? expandTokens(negativeRaw) : undefined;
+                                        if (prompt) {
+                                            const out = await generateImage({ prompt, negativePrompt, aspectRatio: '16:9' });
+                                            if (out.success && out.path) {
+                                                slide.background = { path: out.path } as any;
+                                                (slide as any).__tempImages = (slide as any).__tempImages || [];
+                                                (slide as any).__tempImages.push(out.path);
+                                                try { imagePathsToDelete.add(out.path); } catch {}
+                                                if (isRootSpec) cachedRootAiBgPath = out.path; else cachedLayoutAiBgPath[cacheKey] = out.path;
+                                            } else {
+                                                slide.background = { color: fallbackColor } as any;
+                                            }
+                                        } else if (colorStr) {
+                                            const parsed = parseColorWithAlpha(colorStr);
+                                            slide.background = { color: (parsed ? parsed.hex : colorStr.replace('#','')).toUpperCase() } as any;
+                                        } else if (pathStr) {
+                                            try { await fs.access(pathStr); slide.background = { path: pathStr } as any; }
+                                            catch { slide.background = { color: fallbackColor } as any; }
+                                        } else {
+                                            slide.background = { color: fallbackColor } as any;
+                                        }
+                                    }
+                                } catch {
+                                    slide.background = { color: fallbackColor } as any;
+                                }
+                            } else if (pathStr) {
+                                try { await fs.access(pathStr); slide.background = { path: pathStr } as any; }
+                                catch { slide.background = { color: fallbackColor } as any; }
+                            } else if (colorStr) {
+                                const parsed = parseColorWithAlpha(colorStr);
+                                slide.background = { color: (parsed ? parsed.hex : colorStr.replace('#','')).toUpperCase() } as any;
+                            } else {
+                                slide.background = { color: fallbackColor } as any;
+                            }
+                        } catch {
+                            slide.background = { color: fallbackColor } as any;
+                        }
+                    } else {
+                        slide.background = { color: fallbackColor } as any;
+                    }
                 }
             } else {
-                slide.background = { color: lightenHex(secondary, 80).replace('#', '') } as any;
+                // Non-first slides: resolve from layout/defaults as well
+                const layoutKey = String((slideData as any)?.layout || '');
+                const layoutBg: any = (templateConfig?.layouts as any)?.[layoutKey]?.background;
+                const rootBg: any = (templateConfig as any)?.background;
+                const bgSpec: any = layoutBg || rootBg;
+                const fallbackColor = lightenHex(secondary, 80).replace('#','');
+                if (bgSpec && typeof bgSpec === 'object') {
+                    try {
+                        const preferImage = !!bgSpec.preferImage;
+                        const pathStr = (typeof bgSpec.path === 'string' && bgSpec.path.trim()) ? String(bgSpec.path).trim() : '';
+                        const colorStr = (typeof bgSpec.color === 'string' && bgSpec.color.trim()) ? String(bgSpec.color).trim() : '';
+                        const srcObj: any = (bgSpec.source && typeof bgSpec.source === 'object') ? bgSpec.source : undefined;
+                        if (preferImage && pathStr) {
+                            try { await fs.access(pathStr); slide.background = { path: pathStr } as any; }
+                            catch { slide.background = { color: fallbackColor } as any; }
+                        } else if (preferImage && srcObj?.type === 'ai') {
+                            try {
+                                const isRootSpec = !layoutBg && !!rootBg;
+                                const cacheKey = layoutKey;
+                                const cachedPath = isRootSpec ? cachedRootAiBgPath : cachedLayoutAiBgPath[cacheKey];
+                                if (cachedPath) {
+                                    slide.background = { path: cachedPath } as any;
+                                } else {
+                                    const { generateImage } = await import('./generateImage');
+                                    const titleToken = (typeof (slideData as any)?.title === 'string' && (slideData as any).title.trim()) ? String((slideData as any).title).trim() : undefined;
+                                    const contextToken = (typeof (slideData as any)?.context_for_visual === 'string' && (slideData as any).context_for_visual.trim()) ? String((slideData as any).context_for_visual).trim() : titleToken;
+                                    const expandTokens = (s: string): string => {
+                                        let out = s || '';
+                                        if (titleToken) out = out.replace(/\$\{?title\}?\b/g, titleToken);
+                                        if (contextToken) out = out.replace(/\$\{?(context|context_for_visual)\}?\b/g, contextToken);
+                                        const paletteHintToken = (primary && secondary) ? `palette: primary=${primary}, secondary=${secondary}` : '';
+                                        if (paletteHintToken) out = out.replace(/\$\{?(paletteHint|palette)\}?\b/gi, paletteHintToken);
+                                        out = out.replace(/\$\{?title\}?\b/g, '').replace(/\$\{?(context|context_for_visual)\}?\b/g, '');
+                                        out = out.replace(/\$\{?(paletteHint|palette)\}?\b/gi, '');
+                                        return out;
+                                    };
+                                    const promptRaw = String(srcObj?.prompt || '').trim();
+                                    const negativeRaw = String(srcObj?.negativePrompt || '').trim();
+                                    const prompt = promptRaw ? expandTokens(promptRaw) : '';
+                                    const negativePrompt = negativeRaw ? expandTokens(negativeRaw) : undefined;
+                                    if (prompt) {
+                                        const out = await generateImage({ prompt, negativePrompt, aspectRatio: '16:9' });
+                                        if (out.success && out.path) {
+                                            slide.background = { path: out.path } as any;
+                                            (slide as any).__tempImages = (slide as any).__tempImages || [];
+                                            (slide as any).__tempImages.push(out.path);
+                                            try { imagePathsToDelete.add(out.path); } catch {}
+                                            if (isRootSpec) cachedRootAiBgPath = out.path; else cachedLayoutAiBgPath[cacheKey] = out.path;
+                                        } else {
+                                            slide.background = { color: fallbackColor } as any;
+                                        }
+                                    } else {
+                                        slide.background = { color: fallbackColor } as any;
+                                    }
+                                }
+                            } catch {
+                                slide.background = { color: fallbackColor } as any;
+                            }
+                        } else if (pathStr) {
+                            try { await fs.access(pathStr); slide.background = { path: pathStr } as any; }
+                            catch { slide.background = { color: fallbackColor } as any; }
+                        } else if (colorStr) {
+                            const parsed = parseColorWithAlpha(colorStr);
+                            slide.background = { color: (parsed ? parsed.hex : colorStr.replace('#','')).toUpperCase() } as any;
+                        } else {
+                            slide.background = { color: fallbackColor } as any;
+                        }
+                    } catch {
+                        slide.background = { color: fallbackColor } as any;
+                    }
+                } else {
+                    slide.background = { color: fallbackColor } as any;
+                }
             }
 
             // Determine background-based text color for bullets
@@ -2805,7 +3053,6 @@ export const createPowerpointTool = createTool({
             }
 
             // (top-right logo removed)
-
             const ctxRecipe = Array.isArray((context as any).visualRecipes) ? (context as any).visualRecipes[index] : null;
             const perSlideRecipeHere = (slideData as any).visual_recipe || ctxRecipe || null;
             const isBottomVisual = perSlideRecipeHere && (['process','roadmap','gantt','timeline'].includes(String(perSlideRecipeHere.type)));
@@ -2889,7 +3136,14 @@ export const createPowerpointTool = createTool({
                         if (Array.isArray(tmplElements) && tmplElements.length) {
                             __templateHasElementsForLayout = true;
                             try { logger.debug({ layout: 'section_header' }, 'Template elements present: skipping code-rendered defaults for section_header'); } catch {}
-                            (slide as any).__data = { title: slideData.title, bullets: slideData.bullets };
+                            // Provide context for image element fallback; do not force a recipe here so template's source.prompt can take precedence
+                            const ctxForImage = (slideData as any)?.context_for_visual || slideData.title || '';
+                            (slide as any).__data = {
+                              title: slideData.title,
+                              bullets: slideData.bullets,
+                              context_for_visual: ctxForImage,
+                              suppress_visual_title: true
+                            };
                             await renderElementsFromTemplate(slide as any, 'section_header', tmplElements);
                             delete (slide as any).__data;
                             break;
@@ -2974,7 +3228,7 @@ export const createPowerpointTool = createTool({
                                     const bx = preferBottomChecklist ? marginX : twoColTextX;
                                     const bw = preferBottomChecklist ? contentW : twoColTextW;
                                     const bh = Math.max(2.5, twoColTextH - 0.5);
-                                    slide.addText(bulletsTextCv, { x: bx, y: contentTopY + 0.5, w: bw, h: bh, fontSize: 18, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                                    slide.addText(bulletsTextCv, { x: bx, y: contentTopY + 0.5, w: bw, h: bh, fontSize: 18, bullet: true, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                                 }
                             }
                             delete (slide as any).__data;
@@ -3024,7 +3278,7 @@ export const createPowerpointTool = createTool({
                             const bulletsArr2 = Array.isArray(slideData.bullets) ? slideData.bullets.map((b:any)=>String(b||'').trim()).filter(Boolean) : [];
                             if (bulletsArr2.length) {
                                 const bulletsText2 = bulletsArr2.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
-                                slide.addText(bulletsText2, { x: marginX, y: contentTopY + 0.5, w: contentW, h: Math.max(2.5, twoColTextH - 0.5), fontSize: 18, bullet: { type: 'bullet' }, fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                                slide.addText(bulletsText2, { x: marginX, y: contentTopY + 0.5, w: contentW, h: Math.max(2.5, twoColTextH - 0.5), fontSize: 18, bullet: true, fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                             }
                                 } else {
                                     // Fallback visual only when not checklist; otherwise ensure bullets are shown and skip visual
@@ -3067,7 +3321,7 @@ export const createPowerpointTool = createTool({
                         const bArea = resolveArea('bullets', bX, contentTopY + 0.5, bW, Math.max(2.5, twoColTextH - 0.5));
                     const cleanedBulletsCv = (slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim());
                     const bulletTextCv = cleanedBulletsCv.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
-                        slide.addText(bulletTextCv, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: 18, bullet: { type: 'bullet' }, fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                        slide.addText(bulletTextCv, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: 18, bullet: true, fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                     }
                     // Non-template path: if visual exists and is crowded for right-panel, draw into bottom band instead
                     if (perSlideRecipeHere) {
@@ -3220,7 +3474,7 @@ export const createPowerpointTool = createTool({
                         const cleanedBullets = mergeQuotedContinuations((slideData.bullets || []).map((b: any) => String(b || '').replace(/\n[ \t　]*/g, ' ').trim()));
                         const bulletText = cleanedBullets.join('\n').replace(/\*\*([^*]+)\*\*/g, '$1');
                         const bulletFontPt = 20; const paraAfterPt = (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6);
-                        slide.addText(bulletText, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: bulletFontPt, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: paraAfterPt, color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                        slide.addText(bulletText, { x: bArea.x, y: bArea.y, w: bArea.w, h: bArea.h, fontSize: bulletFontPt, bullet: true, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: paraAfterPt, color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         // Estimate rendered bullet height to maximize visual area below
                         const estimateBulletsHeightInches = (items: string[], widthIn: number, fontPt: number, paraAfterPtLocal: number): number => {
                             if (!items || !items.length) return 0;
@@ -3302,7 +3556,7 @@ export const createPowerpointTool = createTool({
                         }
                         // Bullets on the right
                         const bulletsText = (slideData.bullets || []).map((b:any)=>String(b||'').replace(/\n[ \t　]*/g,' ').trim()).join('\n').replace(/\*\*([^*]+)\*\*/g,'$1');
-                        slide.addText(bulletsText, { x: bulletsArea.x, y: bulletsArea.y, w: bulletsArea.w, h: bulletsArea.h, fontSize: 18, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                        slide.addText(bulletsText, { x: bulletsArea.x, y: bulletsArea.y, w: bulletsArea.w, h: bulletsArea.h, fontSize: 18, bullet: true, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                     }
                     break;
                 case 'visual_only':
@@ -3471,7 +3725,7 @@ export const createPowerpointTool = createTool({
                           const blend = (cc:number) => Math.round(a*cc + (1-a)*255);
                           const effHex = `#${[blend(rgb.r), blend(rgb.g), blend(rgb.b)].map(n=>n.toString(16).padStart(2,'0')).join('')}`;
                           const textColor = pickTextColorForBackground(effHex);
-                          slide.addText(bulletsText, { x: textX, y: textY, w: textW, h: textH, fontSize: 16, bullet: { type: 'bullet' }, align: 'left', fontFace: JPN_FONT, valign: 'top', color: textColor, paraSpaceAfter: 10, autoFit: true });
+                          slide.addText(bulletsText, { x: textX, y: textY, w: textW, h: textH, fontSize: 16, bullet: true, align: 'left', fontFace: JPN_FONT, valign: 'top', color: textColor, paraSpaceAfter: 10, autoFit: true });
                           // badge: A/B/C/D... at bottom-right
                           try {
                             const badgeCfg: any = (templateConfig?.visualStyles?.comparison_cards) || {};
@@ -3573,14 +3827,14 @@ export const createPowerpointTool = createTool({
                         const willBottom2 = (typeStrCO2 === 'comparison') || isBottomVisual || shouldPlaceVisualBottom(typeStrCO2, perSlideRecipeHere);
                         // If the recipe should be placed at bottom, use full-width text; otherwise two-column
                         if (willBottom2) {
-                                slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                                slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: true, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         } else {
                             // Right-panel recipe → two-column
-                                slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: twoColTextW, h: twoColTextH, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                                slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: twoColTextW, h: twoColTextH, fontSize: 20, bullet: true, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         }
                     } else {
                         // No recipe → full-width text
-                            slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: { type: 'bullet' }, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, line: bulletsBgFinal ? { color: normalizeColorToPptxHex(bulletsBgFinal) || 'FFFFFF', width: 0 } : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
+                            slide.addText(bulletTextCo, { x: twoColTextX, y: textYContentOnly, w: contentW, h: textHContentOnly, fontSize: 20, bullet: true, align: 'left', fontFace: bodyFont, valign: 'top', paraSpaceAfter: (Number.isFinite(bulletsParaAfterTpl) ? (bulletsParaAfterTpl as number) : 6), color: bgTextColor, autoFit: true, fill: bulletsBgFinal ? buildFill(bulletsBgFinal) : undefined, shadow: shadowOf(bulletsShadowValue, shadowPreset) });
                         }
                     }
                     break;
@@ -3716,9 +3970,7 @@ export const createPowerpointTool = createTool({
             }
         }
         try { logger.info({ appliedLogoCount, appliedCopyrightCount }, 'CreatePowerPoint: branding applied'); } catch {}
-        
         // Charts diagnostics page has been removed per requirements.
-
         // Add company about slide at the end if available (render using pptxgenjs table)
         if (companyAbout || (context as any).companyOverview) {
             try {

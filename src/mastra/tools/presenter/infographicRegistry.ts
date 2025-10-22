@@ -66,7 +66,10 @@ export async function render(args: Parameters<Renderer>[0]): Promise<boolean> {
     const ctx1 = (typeof pf?.context_for_visual === 'string' && pf.context_for_visual.trim()) ? String(pf.context_for_visual).trim() : undefined;
     const ctx2 = (typeof sd?.__data?.context_for_visual === 'string' && sd.__data.context_for_visual.trim()) ? String(sd.__data.context_for_visual).trim() : undefined;
     const titleText: string | undefined = ctx1 || ctx2;
-    if (titleText) {
+    const suppressedByPayload = !!(pf && (pf.suppress_visual_title === true || pf.visual_title === false));
+    const suppressedBySlide = !!(sd && sd.__data && (sd.__data.suppress_visual_title === true || sd.__data.visual_title === false));
+    const enabledByConfig = (titleCfg?.enabled === false) ? false : true;
+    if (titleText && enabledByConfig && !(suppressedByPayload || suppressedBySlide)) {
       const fs = Number(titleCfg.fontSize) || 16;
       const color = (typeof titleCfg.color === 'string' && titleCfg.color.trim()) ? `#${normalizeHex(titleCfg.color)}` : '#111111';
       const padY = Number(titleCfg.padY) || 0.10;
@@ -927,10 +930,46 @@ register('pie_chart', async ({ slide, payload, region, templateConfig }) => {
 });
 
 register('line_chart', async ({ slide, payload, region, templateConfig }) => {
-  const labels: string[] = Array.isArray(payload?.labels) ? payload.labels : (Array.isArray(payload?.items) ? payload.items.map((it: any)=>String(it?.label||'')) : []);
-  const values: number[] = Array.isArray(payload?.values) ? payload.values.map((n:any)=>Number(n)||0) : (Array.isArray(payload?.items) ? payload.items.map((it:any)=>Number(it?.value||0)) : []);
+  let labels: string[] = [];
+  let values: number[] = [];
+  const seriesArr: any[] = Array.isArray(payload?.series) ? payload.series : [];
+  if (seriesArr.length > 0 && Array.isArray(seriesArr[0]?.data)) {
+    const data0: any[] = seriesArr[0].data as any[];
+    if (data0.length && typeof data0[0] === 'object' && data0[0] !== null) {
+      labels = data0.map((d:any)=> String((d?.x ?? d?.label ?? '')));
+      values = data0.map((d:any)=> Number(d?.y ?? d?.value ?? 0) || 0);
+    } else {
+      values = data0.map((n:any)=> Number(n) || 0);
+      labels = Array.isArray(payload?.labels) ? (payload.labels as string[]) : Array.from({ length: values.length }, (_,i)=> String(i+1));
+    }
+  } else if (Array.isArray(payload?.labels) && Array.isArray((payload as any)?.values)) {
+    labels = (payload.labels as string[]);
+    values = ((payload as any).values as any[]).map((n:any)=> Number(n) || 0);
+  } else if (Array.isArray(payload?.items)) {
+    labels = (payload.items as any[]).map((it:any)=> String(it?.label || ''));
+    values = (payload.items as any[]).map((it:any)=> Number(it?.value || 0) || 0);
+  } else {
+    labels = Array.isArray(payload?.labels) ? (payload.labels as string[]) : [];
+    values = Array.isArray((payload as any)?.values) ? ((payload as any).values as any[]).map((n:any)=> Number(n) || 0) : [];
+  }
+  if (labels.length !== values.length) {
+    const m = Math.min(labels.length, values.length);
+    labels = labels.slice(0, m);
+    values = values.slice(0, m);
+  }
   const chartsStyle = (templateConfig?.visualStyles?.line_chart) || {};
-  const img = await renderChartImage('line', labels, values, payload?.title, chartsStyle);
+  const xAxisTitle = String(payload?.x_axis_label || payload?.xAxisLabel || '').trim();
+  const yAxisTitle = String(payload?.y_axis_label || payload?.yAxisLabel || '').trim();
+  const img = await (async () => {
+    try {
+      const mod: any = await import('./generateChart');
+      const tool: any = (mod && (mod.generateChartTool || mod.default));
+      if (!tool || typeof tool.execute !== 'function') return await renderChartImage('line', labels, values, payload?.title, chartsStyle);
+      const safeName = `pptchart-${Date.now()}-${Math.floor(Math.random()*1e6)}`;
+      const res = await tool.execute({ context: { chartType: 'line', title: String(payload?.title || ''), labels, data: values, fileName: safeName, chartsStyle, xAxisTitle, yAxisTitle } });
+      return (res && res.success === true && res.data && res.data.imagePath) ? String(res.data.imagePath) : null;
+    } catch { return await renderChartImage('line', labels, values, payload?.title, chartsStyle); }
+  })();
   if (img) addImageContain(slide, img, region, 'line', (chartsStyle.shadow ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined), true);
   return true;
 });
@@ -1425,16 +1464,22 @@ register('kpi', async ({ slide, payload, region, templateConfig, helpers }) => {
     const safeLabelTop = iconRendered ? Math.max(labelTopOffset as number, iconPad + iconSize + 0.06) : (labelTopOffset as number);
     const hasValue = typeof value === 'string' && value.trim().length > 0;
     if (!hasValue) {
-      // Label only: 縦中央に配置して視認性を確保
-      const singleY = y + Math.max(0.06, (cardH - labelHeight) / 2);
-      slide.addText(label, { x: txtX, y: singleY, w: txtW, h: labelHeight, fontSize: labelFs, bold: true, color: autoTxt, align: 'center', fontFace: 'Noto Sans JP', valign: 'middle' });
+      // labelのみ: フォント高さから必要ボックス高を見積り、上下中央に配置
+      const lineH = Math.max(0.2, (Number(labelFs) || 18) / 72 * 1.1);
+      const singleY = y + Math.max(0.06, (cardH - lineH) / 2);
+      slide.addText(label, { x: txtX, y: singleY, w: txtW, h: lineH, fontSize: labelFs, bold: true, color: autoTxt, align: 'center', fontFace: 'Noto Sans JP', valign: 'middle' });
     } else {
-      // Label+Value: 最低ギャップを確保して重なりを防止
-      const minGapY = 0.06;
-      const computedValueTop = Math.max(valueTopOffset as number, safeLabelTop + labelHeight + minGapY);
-      const adjLabelH = Math.min(labelHeight, Math.max(0.2, computedValueTop - safeLabelTop - 0.02));
-      slide.addText(label, { x: txtX, y: y + safeLabelTop, w: txtW, h: adjLabelH, fontSize: labelFs, bold: true, color: autoTxt, align: 'center', fontFace: 'Noto Sans JP', valign: 'top' });
-      slide.addText(value, { x: txtX, y: y + computedValueTop, w: txtW, h: Math.max(0.2, cardH - (computedValueTop + valueBottomPad)), fontSize: valueFs, color: autoTxt, align: 'center', fontFace: 'Noto Sans JP', valign: 'top' });
+      // label+value: 行間を最小化。各行のボックス高をフォントサイズから見積り、2行を塊として上下中央に配置
+      const minGapY = Number((st as any)?.layout?.minGap);
+      const gapY = Number.isFinite(minGapY) ? Math.max(0.02, Number(minGapY)) : 0.03;
+      const labelLineH = Math.max(0.2, (Number(labelFs) || 16) / 72 * 1.1);
+      const valueLineH = Math.max(0.2, (Number(valueFs) || 16) / 72 * 1.1);
+      const groupH = labelLineH + gapY + valueLineH;
+      const groupTop = y + Math.max(0, (cardH - groupH) / 2);
+      const labelY = groupTop;
+      const valueY = groupTop + labelLineH + gapY;
+      slide.addText(label, { x: txtX, y: labelY, w: txtW, h: labelLineH, fontSize: labelFs, bold: true, color: autoTxt, align: 'center', fontFace: 'Noto Sans JP', valign: 'middle' });
+      slide.addText(value, { x: txtX, y: valueY, w: txtW, h: valueLineH, fontSize: valueFs, color: autoTxt, align: 'center', fontFace: 'Noto Sans JP', valign: 'middle' });
     }
   }
   return true;
@@ -1644,9 +1689,14 @@ register('process', ({ slide, payload, region, templateConfig, helpers }) => {
     return ry + (rh - boxH) / 2;
   })();
   for (let i = 0; i < count; i++) {
-    const x = rx + i * (stepW + gap); const col = helpers.getPaletteColor(i).replace('#','');
-    slide.addShape('rect', { x, y: startY, w: stepW, h: stepH, fill: { color: col }, line: { color: '#FFFFFF', width: 0.5 } });
-    // Force high-contrast label color (black) for readability regardless of background.
+    const x = rx + i * (stepW + gap); const baseHex = helpers.getPaletteColor(i).replace('#','');
+    // Pass 1: opaque white underlay (avoid background mixing)
+    slide.addShape('rect', { x, y: startY, w: stepW, h: stepH, fill: { color: '#FFFFFF', transparency: 0 }, line: { color: '#FFFFFF', width: 0 } });
+    // Pass 2: semi-transparent brand color + outline
+    const alpha = (() => { const a = Number((st as any)?.alpha?.barFill); return Number.isFinite(a) ? Math.max(0, Math.min(1, a)) : 0.2; })();
+    const borderW = Number.isFinite(Number((st as any)?.borderWidth)) ? Number((st as any)?.borderWidth) : 1.2;
+    slide.addShape('rect', { x, y: startY, w: stepW, h: stepH, fill: { color: `#${baseHex}`, transparency: Math.round((1 - alpha) * 100) }, line: { color: `#${baseHex}`, width: borderW } });
+    // Label (keep high-contrast text)
     const procLabelColor = '#000000';
     slide.addText(String(steps[i]?.label ?? ''), { x: x + 0.08, y: startY + 0.14, w: stepW - 0.16, h: stepH - 0.28, fontSize: labelFs, color: procLabelColor, align: 'center', valign: 'middle', fontFace: 'Noto Sans JP' });
     if (i < count - 1) slide.addShape('chevron', { x: x + stepW + (gap - 0.4)/2, y: startY + (stepH - 0.4)/2, w: 0.4, h: 0.4, fill: { color: `#${arrowColor}` }, line: { color: `#${arrowColor}`, width: 0 } } as any);
@@ -1753,12 +1803,12 @@ register('roadmap', ({ slide, payload, region, templateConfig, helpers }) => {
       items.push({ x, w: segW, baseHex, txtColor, head, tail });
     }
     for (const it of items) {
-      // First pass: fill only (semi-transparent) so overlap blends nicely
-      slide.addShape('chevron', { x: it.x, y, w: it.w, h: rowH, fill: { color: `#${it.baseHex}`, transparency: toTransp(chevronAlpha) }, line: { color: `#${it.baseHex}`, width: 0 } });
+      // First pass: fill only — use opaque white to avoid background bleed into blended color
+      slide.addShape('chevron', { x: it.x, y, w: it.w, h: rowH, fill: { color: `#FFFFFF`, transparency: 0 }, line: { color: `#${it.baseHex}`, width: 0 } });
     }
-    // Second pass: outline only on top so borders stay visible even with overlaps
+    // Second pass: semi-transparent brand color with outline on top
     for (const it of items) {
-      slide.addShape('chevron', { x: it.x, y, w: it.w, h: rowH, fill: { color: 'FFFFFF', transparency: 100 }, line: { color: `#${it.baseHex}`, width: borderWidth } });
+      slide.addShape('chevron', { x: it.x, y, w: it.w, h: rowH, fill: { color: `#${it.baseHex}`, transparency: toTransp(chevronAlpha) }, line: { color: `#${it.baseHex}`, width: borderWidth } });
     }
     // draw texts with dynamic fitting
     const approxCharIn = 0.07; // in/char at 10pt (heuristic)
@@ -2085,8 +2135,27 @@ register('image', async ({ slide, payload, region, templateConfig }) => {
     return true;
   }
 
-  const prompt = (payload?.prompt ? String(payload.prompt) : '').trim();
-  if (!prompt) { try { console.warn('image: neither path nor prompt provided'); } catch {} return false; }
+  // Resolve prompt with simple token expansion (e.g., $title, ${title}, $context)
+  const rawPrompt = (payload?.prompt ? String(payload.prompt) : '').trim();
+  if (!rawPrompt) { try { console.warn('image: neither path nor prompt provided'); } catch {} return false; }
+  const slideData: any = (slide && (slide as any).__data) ? (slide as any).__data : {};
+  const titleToken = (typeof payload?.title === 'string' && payload.title.trim()) ? String(payload.title).trim()
+                    : (typeof slideData?.title === 'string' && slideData.title.trim()) ? String(slideData.title).trim()
+                    : undefined;
+  const contextToken = (typeof payload?.context_for_visual === 'string' && payload.context_for_visual.trim()) ? String(payload.context_for_visual).trim()
+                      : (typeof slideData?.context_for_visual === 'string' && slideData.context_for_visual.trim()) ? String(slideData.context_for_visual).trim()
+                      : undefined;
+  const expandTokens = (s: string): string => {
+    let out = s;
+    if (titleToken) out = out.replace(/\$\{?title\}?\b/g, titleToken);
+    if (contextToken) {
+      out = out.replace(/\$\{?(context|context_for_visual)\}?\b/g, contextToken);
+    }
+    // If tokens remain and no value, strip them
+    out = out.replace(/\$\{?title\}?\b/g, '').replace(/\$\{?(context|context_for_visual)\}?\b/g, '');
+    return out;
+  };
+  const prompt = expandTokens(rawPrompt);
 
   // Derive aspect ratio from region box
   const r = region.w / Math.max(0.0001, region.h);
@@ -2098,7 +2167,11 @@ register('image', async ({ slide, payload, region, templateConfig }) => {
 
   try {
     const { generateImage } = await import('./generateImage');
-    const out = await generateImage({ prompt, aspectRatio: aspect as any, negativePrompt: (st as any)?.negativePrompt });
+    // payload.negativePrompt > style negativePrompt
+    const negativePrompt = (payload && typeof (payload as any).negativePrompt === 'string' && (payload as any).negativePrompt.trim())
+      ? String((payload as any).negativePrompt).trim()
+      : (st as any)?.negativePrompt;
+    const out = await generateImage({ prompt, aspectRatio: aspect as any, negativePrompt });
     if (out && out.success && out.path) {
       const shadowSpec = st.shadow;
       slide.addImage({ path: out.path, x: region.x, y: region.y, w: region.w, h: region.h, sizing: { type: sizingType, w: region.w, h: region.h } as any, shadow: (shadowSpec ? { type: 'outer', color: '000000', opacity: 0.45, blur: 12, offset: 4, angle: 45 } as any : undefined) });
