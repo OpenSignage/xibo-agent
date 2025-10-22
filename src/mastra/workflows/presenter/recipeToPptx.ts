@@ -124,6 +124,7 @@ logger.debug({ recipePath }, 'Reading slides recipe JSON');
       themeColor1,
       themeColor2,
     }});
+    
     if (!res.success) {
       return { success: false, message: `PPTX create failed: ${res.message}` } as const;
     }

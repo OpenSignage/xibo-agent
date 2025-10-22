@@ -42,6 +42,8 @@ const inputSchema = z.object({
   themeColor1: z.string().optional(),
   themeColor2: z.string().optional(),
   chartsStyle: z.any().optional(),
+  xAxisTitle: z.string().optional(),
+  yAxisTitle: z.string().optional(),
 });
 
 const outputFileSchema = z.object({ imagePath: z.string() });
@@ -86,7 +88,7 @@ export const generateChartTool = createTool({
   inputSchema,
   outputSchema: z.union([successResponseSchema, errorResponseSchema]),
   execute: async ({ context }) => {
-    const { chartType, title, labels, data, fileName, returnBuffer, themeColor1, themeColor2, chartsStyle: chartsStyleFromCtx } = context as any;
+    const { chartType, title, labels, data, fileName, returnBuffer, themeColor1, themeColor2, chartsStyle: chartsStyleFromCtx, xAxisTitle, yAxisTitle } = context as any;
     try { logger.info({ chartType }, 'GenerateChart: start'); } catch {}
     try {
       let chartsStyle: any = chartsStyleFromCtx || {};
@@ -556,8 +558,8 @@ export const generateChartTool = createTool({
           return '#333333';
         })();
         const scales: any = {
-          x: { ...(gridColor ? { grid: { display: false } } : {}), ticks: { color: autoTickColor, font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSizeX) ? { size: axisFontSizeX } : {}) } } },
-          y: { ...(gridColor ? { grid: { color: gridColor } } : {}), ticks: { color: autoTickColor, font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSizeY) ? { size: axisFontSizeY } : {}) } } },
+          x: { ...(gridColor ? { grid: { display: false } } : {}), ticks: { color: autoTickColor, font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSizeX) ? { size: axisFontSizeX } : {}) } }, ...(typeof xAxisTitle === 'string' && xAxisTitle.trim() ? { title: { display: true, text: String(xAxisTitle), font: { family: 'Noto Sans JP', size: (Number.isFinite(axisFontSizeX) ? Number(axisFontSizeX) : 18) }, color: autoTickColor } } : {}) },
+          y: { ...(gridColor ? { grid: { color: gridColor } } : {}), ticks: { color: autoTickColor, font: { family: 'Noto Sans JP', ...(Number.isFinite(axisFontSizeY) ? { size: axisFontSizeY } : {}) } }, ...(typeof yAxisTitle === 'string' && yAxisTitle.trim() ? { title: { display: true, text: String(yAxisTitle), font: { family: 'Noto Sans JP', size: (Number.isFinite(axisFontSizeY) ? Number(axisFontSizeY) : 18) }, color: autoTickColor } } : {}) },
         };
         if (chartType === 'scatter') {
           const needsLog = (() => {

@@ -204,12 +204,12 @@ const freeformElementSchema = z.object({
 
 const slideDesignSchema = z.object({
   title: z.string().describe("The main title of the slide."),
-  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'visual_hero_split', 'comparison_cards', 'checklist_top_bullets_bottom'])
+  layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'visual_hero_split', 'comparison_cards', 'checklist_top_bullets_bottom', 'content_with_image', 'visual_only'])
     .describe("The layout type for the slide."),
   bullets: z.array(z.string()).describe("A list of key bullet points for the slide."),
   visual_suggestion: z.enum(['bar_chart', 'pie_chart', 'line_chart', 'none']).describe("The suggested type of visual for the slide."),
-  context_for_visual: z.string().describe("The specific topic or data context from the report needed to create the visual."),
-  special_content: z.string().optional().nullable().describe("Special content for layouts like 'quote'."),
+  context_for_visual: z.string().optional().nullable().describe("The specific topic or data context from the report needed to create the visual."),
+  special_content: z.union([z.string(), z.object({}).passthrough()]).optional().nullable().describe("Special content for layouts like 'quote'. May be object for layout-specific payloads."),
   visual_recipe: visualRecipeSchema.optional().nullable().describe("Optional infographic recipe for shapes/icons/timelines/etc."),
   accent_color: hexColorSchema.optional().describe("Optional per-slide accent color (e.g. for title bar), 6-digit hex."),
   slide_style: z.object({
@@ -349,7 +349,26 @@ logger.debug("🤖 [Designer AI] Analyzing report and designing presentation str
         let designResult;
         try {
             // Prompt for the Designer AI to create the presentation structure and theme.
-            const creativeNote = `デザインモード: template\n- 既存テンプレートと調和する保守的な配色・余白・構図を優先。\n- 使えるレイアウトは 'title_slide' | 'section_header' | 'content_with_visual' | 'content_with_bottom_visual' | 'content_only' | 'quote' のみ。\n- 'elements' のようなレイアウト直描画の構造は使用しない。\n- 見出し・箇条書きは可読性最優先（タイトル<=26文字、箇条書き<=8項目/各<=60文字程度）。\n- visual_recipe は必要に応じて使用可（KPI/比較/タイムライン/プロセス/ロードマップ等）。\n- レイアウト選択規則（厳守）:\n  1) 視覚要素が帯状（process/roadmap/gantt/timeline）で、本文の箇条書きを広く使う場合 → 'content_with_bottom_visual' を使用。\n  2) 右パネルに画像/図を置き、左に箇条書きを置く場合 → 'content_with_visual' を使用。\n  3) 視覚要素が不要または本文のみで十分な場合 → 'content_only' を使用。\n  4) 'content_only' を選ぶ場合で visual_recipe を同時に用いるときは、帯状の可読性を優先し 'content_with_bottom_visual' を選び直すこと。\n- 上記に従って、各スライドの 'layout' と 'visual_recipe' を一貫性のある組で出力すること。`;
+            const creativeNote = `デザインモード: template
+- 既存テンプレートと調和する保守的な配色・余白・構図を優先。
+- 使用可能レイアウト（厳守）: 'title_slide' | 'section_header' | 'content_with_visual' | 'content_with_bottom_visual' | 'content_with_image' | 'visual_only' | 'content_only' | 'quote' | 'visual_hero_split' | 'comparison_cards' | 'checklist_top_bullets_bottom'
+- 'elements' のようなレイアウト直描画の構造は使用しない（禁止）。
+- 見出し・箇条書きは可読性最優先（タイトル<=26文字、箇条書き<=8項目/各<=60文字程度）。
+- visual_recipe は必要に応じて使用可（KPI/比較/タイムライン/プロセス/ロードマップ等）。
+- レイアウト選択規則（厳守）:
+  1) 視覚要素が帯状（process/roadmap/gantt/timeline）で本文を広く使う → 'content_with_bottom_visual'
+  2) 右パネルに図/画像＋左に本文 → 'content_with_visual'
+  3) 画像中心（文章は補助） → 'content_with_image'（または全面見せたい場合は 'visual_only'）
+  4) 視覚要素が不要または本文のみで十分 → 'content_only'
+  5) 'content_only' を選ぶ場合は visual_recipe を必ず null/未指定にする（同時指定は不可）
+  6) checklist は 'checklist_top_bullets_bottom' を優先（bullets と重複する場合は bullets を圧縮）
+- 自己検証チェックリスト（出力前に必ず満たすこと。満たせない場合は生成をやり直す）:
+  - [ ] layout が上記の列挙に含まれる
+  - [ ] layout=='content_only' のとき visual_recipe は null/未出力
+  - [ ] visual_recipe を出力した場合、layout は 'content_with_visual' | 'content_with_bottom_visual' | 'content_with_image' | 'visual_only' | 'visual_hero_split' | 'comparison_cards' | 'checklist_top_bullets_bottom' のいずれか
+  - [ ] process/roadmap/gantt/timeline のとき layout は 'content_with_bottom_visual'
+  - [ ] checklist のとき layout は 'checklist_top_bullets_bottom'
+  - [ ] 'elements' キーは一切出力していない`;
             const prompt = `あなたは一流のプレゼンテーション設計者です。以下のレポートを分析し、最適なプレゼン構成案とテーマカラーをJSONで出力してください。
             返却するJSONは、必ず以下のキーを持つオブジェクトです:
             - "theme_colors": { "color1": "#HEXCODE", "color2": "#HEXCODE" } (レポートの雰囲気に合うグラデーション用のテーマカラー2色。必ず6桁の16進数カラーコードで指定してください)
@@ -751,7 +770,7 @@ Shortening and style constraints (Japanese):
             bullets: z.array(z.string()),
             imagePath: z.string().optional(),
             notes: z.string(),
-            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform']),
+            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform', 'content_with_image', 'visual_hero_split', 'comparison_cards', 'checklist_top_bullets_bottom', 'visual_only']),
             special_content: z.string().optional().nullable(),
             visual_recipe: z.any().optional(),
             context_for_visual: z.string().optional(),
@@ -785,6 +804,9 @@ Shortening and style constraints (Japanese):
             // Pass-through: preserve all design fields (e.g., bulletsA/B/C, cards[]) and attach notes/imagePath
             const passthrough = (enrichedSlides || []).map((slide: any) => ({
                 ...slide.design,
+                // normalize null -> undefined for createPowerpoint schema
+                context_for_visual: typeof slide?.design?.context_for_visual === 'string' ? slide.design.context_for_visual : undefined,
+                special_content: typeof slide?.design?.special_content === 'string' ? slide.design.special_content : undefined,
                 imagePath: undefined,
                 notes: slide.speech,
             }));
@@ -801,6 +823,9 @@ Shortening and style constraints (Japanese):
         if (!urlStr) { try { logger.debug('No about URL found. Skipping.'); } catch {}
             const passthrough = (enrichedSlides || []).map((slide: any) => ({
                 ...slide.design,
+                // normalize null -> undefined for createPowerpoint schema
+                context_for_visual: typeof slide?.design?.context_for_visual === 'string' ? slide.design.context_for_visual : undefined,
+                special_content: typeof slide?.design?.special_content === 'string' ? slide.design.special_content : undefined,
                 imagePath: undefined,
                 notes: slide.speech,
             }));
@@ -815,6 +840,9 @@ Shortening and style constraints (Japanese):
         if (!scraped) {
             const passthrough = (enrichedSlides || []).map((slide: any) => ({
                 ...slide.design,
+                // normalize null -> undefined for createPowerpoint schema
+                context_for_visual: typeof slide?.design?.context_for_visual === 'string' ? slide.design.context_for_visual : undefined,
+                special_content: typeof slide?.design?.special_content === 'string' ? slide.design.special_content : undefined,
                 imagePath: undefined,
                 notes: slide.speech,
             }));
@@ -835,7 +863,7 @@ Shortening and style constraints (Japanese):
             companyLogoPath = logoPath;
             try { logger.debug({ logoPath }, 'Detected company logo for PPTX.'); } catch {}
         } catch {}
-        const passthrough = (enrichedSlides || []).map((s: any) => ({ title: s.design.title, bullets: s.design.bullets, imagePath: undefined, notes: s.speech, layout: s.design.layout, special_content: s.design.special_content, visual_recipe: s.design.visual_recipe, context_for_visual: s.design.context_for_visual, elements: s.design.elements }));
+        const passthrough = (enrichedSlides || []).map((s: any) => ({ title: s.design.title, bullets: s.design.bullets, imagePath: undefined, notes: s.speech, layout: s.design.layout, special_content: (typeof s?.design?.special_content === 'string' ? s.design.special_content : undefined), visual_recipe: s.design.visual_recipe, context_for_visual: (typeof s?.design?.context_for_visual === 'string' ? s.design.context_for_visual : undefined), elements: s.design.elements }));
         const companyOverview = {
             company_name: name,
             address: typeof parsed?.address === 'string' ? parsed.address : undefined,
@@ -862,7 +890,7 @@ Shortening and style constraints (Japanese):
             bullets: z.array(z.string()),
             imagePath: z.string().optional(),
             notes: z.string(),
-            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform']),
+            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform', 'content_with_image', 'visual_hero_split', 'comparison_cards', 'checklist_top_bullets_bottom', 'visual_only']),
             special_content: z.string().optional().nullable(),
             visual_recipe: z.any().optional(),
             context_for_visual: z.string().optional(),
@@ -893,8 +921,8 @@ Shortening and style constraints (Japanese):
             bullets: z.array(z.string()),
             imagePath: z.string().optional(),
             notes: z.string(),
-            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform']),
-            special_content: z.string().optional().nullable(),
+            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform', 'content_with_image', 'visual_hero_split', 'comparison_cards', 'checklist_top_bullets_bottom', 'visual_only']),
+            special_content: z.union([z.string(), z.object({}).passthrough()]).optional().nullable(),
             visual_recipe: z.any().optional(),
             context_for_visual: z.string().optional(),
         })),
@@ -961,9 +989,10 @@ Shortening and style constraints (Japanese):
                 imagePath: imagePath,
                 notes: slide.notes,
                 layout: finalLayout,
-                special_content: slide.special_content,
+                special_content: typeof (slide as any)?.special_content === 'string' ? (slide as any).special_content : undefined,
                 visual_recipe: slide.visual_recipe,
-                context_for_visual: slide.context_for_visual,
+                // normalize null -> undefined for createPowerpoint schema
+                context_for_visual: typeof (slide as any)?.context_for_visual === 'string' ? (slide as any).context_for_visual : undefined,
                 elements: (slide as any).elements,
             };
         });
@@ -985,8 +1014,8 @@ Shortening and style constraints (Japanese):
             bullets: z.array(z.string()),
             imagePath: z.string().optional(),
             notes: z.string(),
-            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform']),
-            special_content: z.string().optional().nullable(),
+            layout: z.enum(['title_slide', 'section_header', 'content_with_visual', 'content_with_bottom_visual', 'content_only', 'quote', 'freeform', 'content_with_image', 'visual_hero_split', 'comparison_cards', 'checklist_top_bullets_bottom', 'visual_only']),
+            special_content: z.union([z.string(), z.object({}).passthrough()]).optional().nullable(),
             visual_recipe: z.any().optional(),
             context_for_visual: z.string().optional(),
         })),
