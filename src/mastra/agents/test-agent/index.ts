@@ -21,11 +21,10 @@
  */
 import { Agent } from '@mastra/core/agent';
 import { google } from '@ai-sdk/google';
-import { getTools } from '../../tools/xibo-manual/manual';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
 import { fastembed } from '@mastra/fastembed';
-import { getSessionInfo } from './getSessionInfo';
+import { longRunningTool } from './writerTest';
 
 // Defines and exports the specialized agent for handling Xibo manual queries.
 export const testAgent = new Agent({
@@ -33,7 +32,7 @@ export const testAgent = new Agent({
   instructions: 'あなたはテストエージェントです。',
   model: google('gemini-2.5-flash'),
   tools: {
-    getSessionInfo,
+    longRunningTool
   },
   memory: new Memory({
     options: {
