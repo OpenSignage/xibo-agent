@@ -93,8 +93,6 @@ export const mastra = new Mastra({
   // Register available workflows
   workflows: {
     marketResearch: marketResearchWorkflow,
-    'market-research-workflow': marketResearchWorkflow,
-    'market-research': marketResearchWorkflow,
     productAnalysis: productAnalysisWorkflow,
     intelligentPresenter: intelligentPresenterWorkflow,
     strategyPlanner: strategyPlannerWorkflow,
@@ -105,6 +103,9 @@ export const mastra = new Mastra({
   },
   // Set shared logger
   logger: logger,
+  observability: {
+    default: { enabled: true }, // Enables DefaultExporter and CloudExporter
+  },
   // Configure storage for data persistence
   storage: new LibSQLStore({
     url: 'file:../mastra.db',  // Path to SQLite database file
